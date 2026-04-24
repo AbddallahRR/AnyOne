@@ -1,0 +1,212 @@
+<!--templates/serie.html-->
+{% extends "base.html" %}
+{% block title %}Detalle — Comic Web{% endblock %}
+
+{% block extra_head %}
+<style>
+  /* Cover hover parallax */
+  #cover-wrapper {
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    aspect-ratio: 2/3;
+    background: var(--surface);
+    position: relative;
+  }
+  #cover-wrapper::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(196,107,255,0.08) 0%, transparent 60%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+  }
+  #cover-wrapper:hover::after { opacity: 1; }
+  #cover-wrapper:hover #serie-cover { transform: scale(1.03); }
+
+  /* Hero card entrance */
+  .hero-card {
+    animation: heroCardIn 0.45s cubic-bezier(0.4,0,0.2,1) both;
+  }
+  @keyframes heroCardIn {
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Chapters section entrance */
+  .chapters-section {
+    animation: heroCardIn 0.45s 0.1s cubic-bezier(0.4,0,0.2,1) both;
+  }
+
+  /* Synopsis expand */
+  #serie-synopsis {
+    display: -webkit-box;
+    line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+  }
+  #serie-synopsis.expanded {
+    display: block;
+    line-clamp: unset;
+  }
+
+  /* Sort button spin */
+  #sort-btn.sorted i {
+    transition: transform 0.3s ease;
+    transform: rotate(180deg);
+  }
+
+  /* Delete btn hover */
+  #delete-watched-btn {
+    transition: background 0.15s ease, color 0.15s ease,
+                border-color 0.15s ease, transform 0.12s ease;
+  }
+  #delete-watched-btn:hover {
+    background: rgba(248,113,113,0.1);
+    border-color: rgba(248,113,113,0.4);
+    transform: scale(1.02);
+  }
+
+  @media (max-width: 480px) {
+    #chapters-list { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="position:relative; z-index:1; min-height:100vh;">
+
+  <!-- Back nav -->
+  <nav class="nav-enter" style="padding:14px 24px; border-bottom:1px solid var(--border); position:sticky; top:0; background:rgba(10,10,15,0.85); backdrop-filter:blur(14px); z-index:10; display:flex; align-items:center; gap:16px;">
+    <a href="/" style="display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:13px; text-decoration:none; transition:color 0.15s ease, transform 0.15s ease;" onmouseover="this.style.color='var(--text)';this.style.transform='translateX(-2px)'" onmouseout="this.style.color='var(--muted)';this.style.transform='translateX(0)'">
+      <i class="fas fa-arrow-left" style="font-size:11px;"></i> Inicio
+    </a>
+    <span style="color:var(--border-hi);">|</span>
+    <span id="breadcrumb-title" style="color:var(--muted); font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:300px;">Cargando…</span>
+  </nav>
+
+  <div style="max-width:1100px; margin:0 auto; padding:36px 24px;">
+
+    <!-- Hero info card -->
+    <div class="card hero-card" style="padding:28px; margin-bottom:28px; display:flex; gap:28px; flex-wrap:wrap;">
+
+      <!-- Cover -->
+      <div style="flex-shrink:0; width:180px;">
+        <div id="cover-wrapper">
+          <img id="serie-cover" src="" alt="Portada"
+            style="width:100%; height:100%; object-fit:cover; display:block; transition:transform 0.35s ease, opacity 0.4s ease; opacity:0; transform:scale(1.03);"
+            onerror="this.src='https://via.placeholder.com/180x270/18181f/7a7a8a?text=Sin+portada'; this.classList.add('loaded')">
+        </div>
+      </div>
+
+      <!-- Info -->
+      <div style="flex:1; min-width:220px; display:flex; flex-direction:column; gap:12px;">
+
+        <div>
+          <span id="serie-type-badge" class="card-badge badge-anime" style="font-size:11px; padding:3px 9px; border-radius:5px; margin-bottom:8px; display:inline-block;">Anime</span>
+          <h1 id="serie-title" style="font-family:var(--ff-head); font-size:clamp(20px,3vw,30px); font-weight:800; letter-spacing:-0.5px; line-height:1.2; color:var(--text);">Cargando…</h1>
+        </div>
+
+        <!-- Synopsis (click to expand) -->
+        <p id="serie-synopsis" title="Clic para expandir" style="color:var(--muted); font-size:14px; line-height:1.65;">
+          Obteniendo información…
+        </p>
+
+        <!-- Progress -->
+        <div id="progress-section">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <span style="font-size:12px; color:var(--muted);">Progreso</span>
+            <span style="font-size:12px; color:var(--muted);">
+              Cap. <span id="current-chapter">—</span>
+              &nbsp;·&nbsp;
+              <span id="progress-percent">0</span>
+            </span>
+          </div>
+          <div class="progress-bar">
+            <div id="progress-bar-fill" class="progress-bar-fill" style="width:0%"></div>
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:4px;">
+          <button id="download-all-btn" class="btn-primary">
+            <i class="fas fa-download"></i> Descargar serie
+          </button>
+          <button id="continue-btn" class="btn-ghost" style="display:none;">
+            <i class="fas fa-play"></i> Continuar
+          </button>
+          <button id="delete-watched-btn" class="btn-ghost" style="display:none; color:#f87171; border-color:rgba(248,113,113,0.25);">
+            <i class="fas fa-trash-alt"></i> Borrar vistos
+          </button>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Chapters section -->
+    <div class="chapters-section">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
+        <h2 style="font-family:var(--ff-head); font-size:18px; font-weight:700; color:var(--text);">Capítulos</h2>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <span id="chapters-count" style="font-size:12px; color:var(--muted);"></span>
+          <button id="sort-btn" class="btn-ghost" style="padding:6px 12px; font-size:12px;" title="Cambiar orden">
+            <i class="fas fa-sort"></i> Orden
+          </button>
+        </div>
+      </div>
+
+      <div id="chapters-list" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(220px,1fr)); gap:8px;">
+        <!-- Skeleton placeholders mientras carga -->
+        <div style="grid-column:1/-1; display:flex; align-items:center; justify-content:center; gap:12px; padding:48px 20px; color:var(--muted);">
+          <div class="loading-spinner"></div>
+          <span style="font-size:14px;">Cargando capítulos…</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  window.serieData = { type: "{{ type }}", source: "{{ source }}", id: "{{ id }}" };
+</script>
+<script src="{{ url_for('static', filename='js/serie.js') }}" defer></script>
+<script>
+  // ── Breadcrumb sync ──────────────────────────────────────────────────
+  const titleEl = document.getElementById('serie-title');
+  const breadEl = document.getElementById('breadcrumb-title');
+  const observer = new MutationObserver(() => {
+    const t = titleEl.textContent;
+    if (t && t !== 'Cargando…') breadEl.textContent = t;
+  });
+  observer.observe(titleEl, { childList: true, subtree: true, characterData: true });
+
+  // ── Cover reveal on load ─────────────────────────────────────────────
+  document.getElementById('serie-cover').addEventListener('load', function() {
+    this.style.opacity  = '1';
+    this.style.transform = 'scale(1)';
+  });
+
+  // ── Synopsis expand on click ─────────────────────────────────────────
+  document.getElementById('serie-synopsis').addEventListener('click', function() {
+    this.classList.toggle('expanded');
+  });
+
+  // ── Stagger chapters when they're rendered ───────────────────────────
+  // serie.js calls renderChapters() which populates #chapters-list;
+  // we observe DOM changes and animate each new pill
+  const chaptersObserver = new MutationObserver(() => {
+    window.animateCards('#chapters-list', '.chapter-pill');
+  });
+  chaptersObserver.observe(
+    document.getElementById('chapters-list'),
+    { childList: true }
+  );
+</script>
+{% endblock %}

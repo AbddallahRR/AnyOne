@@ -1,0 +1,763 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import concurrent.futures
+import json
+import logging
+import os
+import re
+import shutil
+import subprocess
+from pathlib import Path
+
+from flask import Blueprint, abort, jsonify, request, send_file
+
+from config import ANIME_DOWNLOAD_DIR, MANGA_DOWNLOAD_DIR
+from core.database import (
+    DB_PATH,
+    delete_watched_chapter,
+    get_content_ref,
+    get_progress,
+    get_watched_chapters,
+    get_conn,
+    is_chapter_watched,
+    mark_chapter_as_watched,
+    save_content_to_db,
+    save_progress,
+    update_queue_status,
+)
+from core.disk_cache import search_cache
+from core.download_worker import download_queue, get_active_jobs
+from core.sources import SOURCES, get_source
+from core.utils import _normalize_path_name, normalize_title, scan_downloaded_series
+
+logger = logging.getLogger(__name__)
+
+api_bp = Blueprint('api', __name__, url_prefix='/api')
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _safe_path(base: str, untrusted: str) -> Path | None:
+    """
+    Resuelve `untrusted` dentro de `base` y verifica que no salga del directorio.
+    Devuelve el Path resuelto o None si es un path traversal.
+    """
+    try:
+        resolved = Path(base, untrusted).resolve()
+        if resolved.is_relative_to(Path(base).resolve()):
+            return resolved
+    except Exception:
+        pass
+    return None
+
+
+def _base_folder(content_type: str) -> str:
+    return ANIME_DOWNLOAD_DIR if content_type == 'anime' else MANGA_DOWNLOAD_DIR
+
+
+def _get_json() -> dict:
+    """Devuelve el JSON del request o un dict vacío. Nunca lanza AttributeError."""
+    return request.get_json(silent=True) or {}
+
+
+def _require_local(content_ref: str):
+    """Aborta con 400 si content_ref no es local."""
+    if not content_ref.startswith('local:'):
+        abort(jsonify({'error': 'Solo funciona con contenido local'}), 400)
+
+
+# ---------------------------------------------------------------------------
+# Queries de cola (reemplaza sqlite3.connect directo en el blueprint)
+# ---------------------------------------------------------------------------
+
+def _queue_find_active(content_ref: str, chapter_id: str | None = None) -> tuple | None:
+    """Busca un job activo (pending/downloading) para un content_ref dado."""
+    conn = get_conn()
+    if chapter_id is not None:
+        return conn.execute(
+            'SELECT id, status FROM download_queue '
+            'WHERE content_ref = ? AND chapter_id = ? AND status IN ("pending","downloading")',
+            (content_ref, chapter_id)
+        ).fetchone()
+    return conn.execute(
+        'SELECT id, status FROM download_queue '
+        'WHERE content_ref = ? AND status IN ("pending","downloading")',
+        (content_ref,)
+    ).fetchone()
+
+
+def _queue_insert(content_ref: str, content_type: str, title: str,
+                  chapter_id: str | None = None) -> int:
+    """Inserta un job en la cola y devuelve el id generado."""
+    conn = get_conn()
+    with conn:
+        cur = conn.execute(
+            'INSERT INTO download_queue (content_ref, type, title, chapter_id, status) '
+            "VALUES (?, ?, ?, ?, 'pending')",
+            (content_ref, content_type, title, chapter_id)
+        )
+    return cur.lastrowid
+
+
+def _queue_get_status() -> tuple[list, list]:
+    """Devuelve (active_jobs, pending_jobs) como listas de dicts."""
+    conn = get_conn()
+
+    active = [dict(r) for r in conn.execute(
+        'SELECT id, content_ref, type, title, status, total_chapters, '
+        'current_chapter, current_progress AS progress, error '
+        'FROM download_queue WHERE status = "downloading" ORDER BY created_at ASC'
+    ).fetchall()]
+
+    pending = [dict(r) for r in conn.execute(
+        'SELECT id, content_ref, type, title, status, total_chapters, '
+        'current_chapter, current_progress AS progress '
+        'FROM download_queue WHERE status = "pending" ORDER BY created_at ASC'
+    ).fetchall()]
+
+    return active, pending
+
+
+def _content_title_by_ref(ref: str) -> str | None:
+    conn = get_conn()
+    row = conn.execute('SELECT title FROM content WHERE id = ?', (ref,)).fetchone()
+    return row[0] if row else None
+
+
+# ---------------------------------------------------------------------------
+# Helpers de sistema de archivos (reutilizados en varias rutas)
+# ---------------------------------------------------------------------------
+
+def _find_local_serie_dir(base_dir: Path, content_id: str) -> Path | None:
+    """
+    Busca la carpeta de una serie por content_id en series_info.json,
+    con fallback a normalización de nombre.
+    Evita abrir JSONs innecesariamente si el directorio no existe.
+    """
+    # Método 1: buscar por content_id en series_info.json
+    for cand_dir in base_dir.iterdir():
+        if not cand_dir.is_dir():
+            continue
+        info_path = cand_dir / 'series_info.json'
+        if info_path.exists():
+            try:
+                with open(info_path, 'r', encoding='utf-8') as f:
+                    info = json.load(f)
+                if info.get('content_id') == content_id:
+                    return cand_dir
+            except Exception:
+                pass
+
+    # Método 2: fallback por normalización de nombre
+    norm_id = _normalize_path_name(content_id)
+    for cand_dir in base_dir.iterdir():
+        if cand_dir.is_dir() and _normalize_path_name(cand_dir.name) == norm_id:
+            return cand_dir
+
+    return None
+
+
+def _local_chapters_anime(serie_dir: Path) -> list[dict]:
+    chapters = []
+    for f in sorted(serie_dir.glob("*.mp4")):
+        m = re.search(r'_(\d+)\.mp4$', f.name)
+        if m:
+            num = int(m.group(1))
+            chapters.append({'number': num, 'id': str(num)})
+    return chapters
+
+
+def _local_chapters_manga(serie_dir: Path) -> list[dict]:
+    chapters = []
+    for d in sorted(d for d in serie_dir.iterdir() if d.is_dir() and d.name.startswith('cap_')):
+        m = re.search(r'cap_(\d+)', d.name)
+        if m:
+            num = int(m.group(1))
+            chapters.append({'number': num, 'id': str(num)})
+    return chapters
+
+
+def _delete_chapter_files(serie_path: Path, content_type: str, chapter: int) -> None:
+    """Elimina el archivo/carpeta de un capítulo del disco."""
+    if content_type == 'anime':
+        for f in serie_path.glob(f"*_{chapter:03d}.mp4"):
+            f.unlink()
+    else:
+        cap_dir = serie_path / f"cap_{chapter:04d}"
+        if cap_dir.exists() and cap_dir.is_dir():
+            shutil.rmtree(cap_dir)
+
+
+# ---------------------------------------------------------------------------
+# Biblioteca
+# ---------------------------------------------------------------------------
+
+@api_bp.route('/library')
+def api_library():
+    return jsonify(scan_downloaded_series())
+
+
+# ---------------------------------------------------------------------------
+# Búsqueda
+# ---------------------------------------------------------------------------
+
+@api_bp.route('/search')
+def api_search():
+    content_type = request.args.get('type')
+    source_name  = request.args.get('source')
+    query        = request.args.get('q', '')
+    refresh      = request.args.get('refresh', '0') == '1'
+
+    if not content_type or not source_name:
+        return jsonify({'error': 'Faltan parámetros type y source'}), 400
+
+    cache_key = f"search:{content_type}:{source_name}:{query}"
+
+    if not refresh:
+        cached = search_cache.get(cache_key)
+        if cached is not None:
+            return jsonify(cached)
+
+    source = get_source(content_type, source_name)
+    if not source:
+        return jsonify({'error': 'Fuente no encontrada'}), 404
+
+    try:
+        results = source.search(query)
+        for r in results:
+            ref = get_content_ref(content_type, source_name, r['id'])
+            chapter, progress = get_progress(ref)
+            r['last_chapter'] = chapter
+            r['progress']     = progress
+        search_cache.set(cache_key, results)
+        return jsonify(results)
+    except Exception as exc:
+        logger.exception("Error en api_search:")
+        return jsonify({'error': str(exc)}), 500
+
+
+@api_bp.route('/search-all')
+def api_search_all():
+    content_type = request.args.get('type')
+    query        = request.args.get('q', '')
+    refresh      = request.args.get('refresh', '0') == '1'
+
+    if not content_type or not query:
+        return jsonify({'error': 'Faltan parámetros type y q'}), 400
+
+    cache_key = f"search_all:{content_type}:{query}"
+
+    if not refresh:
+        cached = search_cache.get(cache_key)
+        if cached is not None:
+            return jsonify(cached)
+
+    sources_dict = SOURCES.get(content_type, {})
+    if not sources_dict:
+        return jsonify({'error': 'Tipo no soportado'}), 400
+
+    def search_in_source(source_name: str, src) -> list:
+        try:
+            items = src.search(query)
+            for item in items:
+                item['source'] = source_name
+            return items
+        except Exception as exc:
+            logger.error(f"Error buscando en {source_name}: {exc}")
+            return []
+
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            executor.submit(search_in_source, name, src): name
+            for name, src in sources_dict.items()
+        }
+        for future in concurrent.futures.as_completed(futures):
+            results.extend(future.result())
+
+    # Deduplicar y ordenar
+    unique = {f"{r['source']}:{r['id']}": r for r in results}
+    results = sorted(unique.values(), key=lambda x: x.get('title', ''))
+
+    search_cache.set(cache_key, results)
+    return jsonify(results)
+
+
+# ---------------------------------------------------------------------------
+# Detalles y capítulos (fuentes remotas)
+# ---------------------------------------------------------------------------
+
+@api_bp.route('/content/<content_type>/<source>/<content_id>')
+def api_content_details(content_type, source, content_id):
+    src = get_source(content_type, source)
+    if not src:
+        return jsonify({'error': 'Fuente no encontrada'}), 404
+    try:
+        details = src.get_details(content_id)
+        save_content_to_db(content_type, source, content_id,
+                           details['title'], details.get('cover', ''))
+        return jsonify(details)
+    except Exception as exc:
+        logger.exception("Error en api_content_details:")
+        return jsonify({'error': str(exc)}), 500
+
+
+@api_bp.route('/chapters/<content_type>/<source>/<content_id>')
+def api_chapters(content_type, source, content_id):
+    src = get_source(content_type, source)
+    if not src:
+        return jsonify({'error': 'Fuente no encontrada'}), 404
+    try:
+        return jsonify(src.get_chapters(content_id))
+    except Exception as exc:
+        logger.exception("Error en api_chapters:")
+        return jsonify({'error': str(exc)}), 500
+
+
+@api_bp.route('/chapters/with-local/<type>/<source>/<id>')
+def api_chapters_with_local(type, source, id):
+    """Capítulos remotos marcando cuáles están descargados localmente."""
+    src = get_source(type, source)
+    if not src:
+        return jsonify({'error': 'Fuente no encontrada'}), 404
+    try:
+        remote_chapters = src.get_chapters(id)
+
+        # Capítulos locales
+        local_chapters: set[int] = set()
+        if type == 'anime':
+            serie_dir = Path(ANIME_DOWNLOAD_DIR) / id
+            if serie_dir.exists():
+                for f in serie_dir.glob("*.mp4"):
+                    m = re.search(r'_(\d+)\.mp4$', f.name)
+                    if m:
+                        local_chapters.add(int(m.group(1)))
+        else:
+            serie_dir = Path(MANGA_DOWNLOAD_DIR) / id
+            if serie_dir.exists():
+                for d in serie_dir.iterdir():
+                    if d.is_dir() and d.name.startswith('cap_'):
+                        m = re.search(r'cap_(\d+)', d.name)
+                        if m:
+                            local_chapters.add(int(m.group(1)))
+
+        result = []
+        for ch in remote_chapters:
+            try:
+                num = int(float(ch['number']))
+            except (TypeError, ValueError):
+                num = None
+            result.append({
+                'number':        ch['number'],
+                'id':            ch['id'],
+                'is_downloaded': (num in local_chapters) if num is not None else False,
+            })
+        return jsonify(result)
+    except Exception as exc:
+        logger.exception("Error en api_chapters_with_local:")
+        return jsonify({'error': str(exc)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Contenido local
+# ---------------------------------------------------------------------------
+
+@api_bp.route('/content/local/<type>/<id>')
+def api_local_content_details(type, id):
+    normalized_id = normalize_title(id)
+    serie_path = Path(_base_folder(type)) / normalized_id
+
+    cover_url = ''
+    for ext in ['jpg', 'jpeg', 'png', 'webp']:
+        if (serie_path / f'cover.{ext}').exists():
+            cover_url = f'/api/local-cover/{type}/{normalized_id}/cover.{ext}'
+            break
+
+    title    = id
+    synopsis = 'Contenido descargado localmente.'
+    info_path = serie_path / 'series_info.json'
+    if info_path.exists():
+        try:
+            with open(info_path, 'r', encoding='utf-8') as f:
+                info = json.load(f)
+            title    = info.get('title', id)
+            synopsis = info.get('synopsis', synopsis)
+        except Exception:
+            pass
+
+    return jsonify({'title': title, 'cover': cover_url, 'synopsis': synopsis})
+
+
+@api_bp.route('/chapters/local/<type>/<id>')
+def api_local_chapters(type, id):
+    base_dir  = Path(_base_folder(type))
+    serie_dir = _find_local_serie_dir(base_dir, id)
+    if not serie_dir:
+        logger.debug(f"api_local_chapters: carpeta no encontrada para '{id}'")
+        return jsonify([])
+
+    if type == 'anime':
+        return jsonify(_local_chapters_anime(serie_dir))
+    return jsonify(_local_chapters_manga(serie_dir))
+
+
+@api_bp.route('/local-cover/<type>/<path:filename>')
+def local_cover(type, filename):
+    """Sirve portadas locales con protección contra path traversal."""
+    base = _base_folder(type)
+    safe = _safe_path(base, filename)
+    if not safe:
+        abort(403)
+    if not safe.exists():
+        abort(404)
+    return send_file(safe)
+
+
+# ---------------------------------------------------------------------------
+# Reproducción / imágenes
+# ---------------------------------------------------------------------------
+
+@api_bp.route('/play/<content_type>/<source>/<content_id>/<chapter>')
+def api_play(content_type, source, content_id, chapter):
+    """Sirve el archivo de video (anime)."""
+    if content_type != 'anime':
+        return jsonify({'message': 'Usa el visor de manga en el frontend'})
+
+    ref = get_content_ref(content_type, source, content_id)
+    title = _content_title_by_ref(ref)
+    if not title:
+        return jsonify({'error': 'Contenido no encontrado'}), 404
+
+    safe_title = normalize_title(title)
+    try:
+        chap_num = int(float(chapter)) if chapter.replace('.', '', 1).isdigit() else 0
+    except ValueError:
+        return jsonify({'error': 'Capítulo inválido'}), 400
+
+    filepath = Path(ANIME_DOWNLOAD_DIR) / safe_title / f"{safe_title}_{chap_num:03d}.mp4"
+    if not filepath.exists():
+        return jsonify({'error': 'Archivo no encontrado'}), 404
+    return send_file(filepath, conditional=True)
+
+
+@api_bp.route('/play/local/<type>/<id>/<chapter>')
+def api_play_local(type, id, chapter):
+    if type == 'anime':
+        serie_dir = Path(ANIME_DOWNLOAD_DIR) / id
+        if not serie_dir.exists():
+            abort(404)
+        try:
+            chap_num = int(chapter)
+        except ValueError:
+            abort(400)
+        files = list(serie_dir.glob(f"*_{chap_num:03d}.mp4"))
+        if not files:
+            abort(404)
+        return send_file(files[0], conditional=True)
+    else:
+        serie_dir = Path(MANGA_DOWNLOAD_DIR) / id
+        cap_dir   = serie_dir / f"cap_{int(chapter):04d}"
+        if not cap_dir.exists():
+            abort(404)
+        images = (
+            sorted(cap_dir.glob("*.jpg"))
+            + sorted(cap_dir.glob("*.png"))
+            + sorted(cap_dir.glob("*.webp"))
+        )
+        return jsonify([str(img.relative_to(MANGA_DOWNLOAD_DIR)) for img in images])
+
+
+@api_bp.route('/manga/images/<path:subpath>')
+def api_manga_images(subpath):
+    """Sirve imágenes de manga con protección contra path traversal."""
+    safe = _safe_path(MANGA_DOWNLOAD_DIR, subpath)
+    if not safe:
+        abort(403)
+    if not safe.exists():
+        abort(404)
+    return send_file(safe)
+
+
+@api_bp.route('/video-duration/anime/<content_id>/<chapter>')
+def video_duration(content_id, chapter):
+    """Duración de un video usando ffprobe. video_path viene de glob → no es input directo."""
+    serie_dir = Path(ANIME_DOWNLOAD_DIR) / normalize_title(content_id)
+    if not serie_dir.exists():
+        abort(404)
+    try:
+        chap_num = int(chapter)
+    except ValueError:
+        abort(400)
+
+    files = list(serie_dir.glob(f"*_{chap_num:03d}.mp4"))
+    if not files:
+        abort(404)
+
+    try:
+        result = subprocess.run(
+            ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+             '-of', 'default=noprint_wrappers=1:nokey=1', str(files[0])],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0:
+            return jsonify({'duration': float(result.stdout.strip())})
+    except Exception as exc:
+        logger.error(f"Error obteniendo duración: {exc}")
+
+    abort(500)
+
+
+# ---------------------------------------------------------------------------
+# Progreso
+# ---------------------------------------------------------------------------
+
+@api_bp.route('/progress/<content_type>/<source>/<content_id>', methods=['GET', 'POST'])
+def api_progress(content_type, source, content_id):
+    ref = get_content_ref(content_type, source, content_id)
+    if request.method == 'GET':
+        chapter, progress = get_progress(ref)
+        return jsonify({'chapter': chapter, 'progress': progress})
+
+    data     = _get_json()
+    chapter  = data.get('chapter', '1')
+    progress = data.get('progress', '0')
+    save_progress(ref, chapter, progress)
+    return jsonify({'status': 'ok'})
+
+
+@api_bp.route('/progress/local/<type>/<id>', methods=['GET', 'POST'])
+def api_local_progress(type, id):
+    ref = f"local:{id}"
+    if request.method == 'GET':
+        chapter, progress = get_progress(ref)
+        return jsonify({'chapter': chapter, 'progress': progress})
+
+    data     = _get_json()
+    chapter  = data.get('chapter', '1')
+    progress = data.get('progress', '0')
+    save_progress(ref, chapter, progress)
+    return jsonify({'status': 'ok'})
+
+
+# ---------------------------------------------------------------------------
+# Cola de descarga
+# ---------------------------------------------------------------------------
+
+@api_bp.route('/queue/status')
+def api_queue_status():
+    active, pending = _queue_get_status()
+    return jsonify({'active': active, 'queue': pending})
+
+
+@api_bp.route('/download', methods=['POST'])
+def api_download():
+    """Encola la descarga de una serie completa."""
+    data         = _get_json()
+    content_type = data.get('type')
+    source_name  = data.get('source')
+    content_id   = data.get('content_id')
+    title        = data.get('title')
+    exclude_watched = data.get('exclude_watched', False)
+
+    if not all([content_type, source_name, content_id, title]):
+        return jsonify({'error': 'Faltan campos: type, source, content_id, title'}), 400
+
+    src = get_source(content_type, source_name)
+    if not src:
+        return jsonify({'error': 'Fuente no encontrada'}), 404
+
+    # Guardar en BD (best-effort, no bloquea si falla)
+    try:
+        details = src.get_details(content_id)
+        save_content_to_db(content_type, source_name, content_id,
+                           details.get('title', title), details.get('cover', ''))
+    except Exception as exc:
+        logger.warning(f"No se pudieron obtener detalles para {content_id}: {exc}")
+
+    ref = get_content_ref(content_type, source_name, content_id)
+
+    # Capítulos excluidos (ya vistos localmente)
+    excluded_chapters: list[int] = []
+    if exclude_watched:
+        safe_title = normalize_title(title)
+        watched    = get_watched_chapters(f"local:{safe_title}")
+        excluded_chapters = list(watched)
+        if excluded_chapters:
+            logger.debug(f"Excluyendo {len(excluded_chapters)} capítulos vistos para '{title}'")
+
+    # Verificar si ya está en cola
+    existing = _queue_find_active(ref)
+    if existing:
+        return jsonify({'error': f"Ya está en cola (estado: {existing['status']})"}), 409
+
+    job_id = _queue_insert(ref, content_type, title)
+    download_queue.put({
+        'id':                job_id,
+        'content_ref':       ref,
+        'type':              content_type,
+        'title':             title,
+        'excluded_chapters': excluded_chapters,
+    })
+    return jsonify({'job_id': job_id, 'message': 'Descarga encolada'})
+
+
+@api_bp.route('/download/chapter', methods=['POST'])
+def api_download_chapter():
+    """Encola la descarga de un capítulo individual."""
+    data           = _get_json()
+    content_type   = data.get('type')
+    source_name    = data.get('source')
+    content_id     = data.get('content_id')
+    chapter_id     = data.get('chapter_id')
+    title          = data.get('title')
+
+    if not all([content_type, source_name, content_id, title]):
+        return jsonify({'error': 'Faltan campos: type, source, content_id, title'}), 400
+
+    src = get_source(content_type, source_name)
+    if not src:
+        return jsonify({'error': 'Fuente no encontrada'}), 404
+
+    try:
+        details = src.get_details(content_id)
+        save_content_to_db(content_type, source_name, content_id,
+                           details.get('title', title), details.get('cover', ''))
+    except Exception as exc:
+        logger.warning(f"No se pudieron obtener detalles para {content_id}: {exc}")
+
+    ref = get_content_ref(content_type, source_name, content_id)
+
+    existing = _queue_find_active(ref, chapter_id)
+    if existing:
+        return jsonify({'error': f"Ya está en cola (estado: {existing['status']})"}), 409
+
+    job_id = _queue_insert(ref, content_type, title, chapter_id)
+    download_queue.put({
+        'id':          job_id,
+        'content_ref': ref,
+        'type':        content_type,
+        'title':       title,
+        'chapter_id':  chapter_id,
+    })
+    return jsonify({'job_id': job_id, 'message': 'Capítulo encolado para descarga'})
+
+
+# ---------------------------------------------------------------------------
+# Capítulos vistos
+# ---------------------------------------------------------------------------
+
+@api_bp.route('/watched', methods=['POST'])
+def api_mark_watched():
+    data        = _get_json()
+    content_ref = data.get('content_ref')
+    chapter     = data.get('chapter')
+    if not content_ref or chapter is None:
+        return jsonify({'error': 'Faltan parámetros'}), 400
+    mark_chapter_as_watched(content_ref, chapter)
+    return jsonify({'status': 'ok'})
+
+
+@api_bp.route('/watched/<path:content_ref>')
+def api_get_watched(content_ref):
+    return jsonify({'watched': get_watched_chapters(content_ref)})
+
+
+@api_bp.route('/watched/toggle', methods=['POST'])
+def api_toggle_watched():
+    data        = _get_json()
+    content_ref = data.get('content_ref')
+    chapter     = data.get('chapter')
+    if not content_ref or chapter is None:
+        return jsonify({'error': 'Faltan parámetros'}), 400
+
+    if is_chapter_watched(content_ref, chapter):
+        delete_watched_chapter(content_ref, chapter)
+        return jsonify({'status': 'unwatched'})
+    mark_chapter_as_watched(content_ref, chapter)
+    return jsonify({'status': 'watched'})
+
+
+@api_bp.route('/delete-watched', methods=['POST'])
+def api_delete_watched():
+    """Elimina del disco todos los capítulos vistos de una serie local (excepto el último)."""
+    data         = _get_json()
+    content_ref  = data.get('content_ref')
+    content_type = data.get('type')
+    if not content_ref or not content_type:
+        return jsonify({'error': 'Faltan parámetros'}), 400
+    if not content_ref.startswith('local:'):
+        return jsonify({'error': 'Solo funciona con contenido local'}), 400
+
+    last_chapter_str, _ = get_progress(content_ref)
+    last_chapter = int(last_chapter_str) if last_chapter_str else 0
+
+    watched = get_watched_chapters(content_ref)
+    if not watched:
+        return jsonify({'message': 'No hay capítulos vistos para borrar'})
+
+    folder_name = content_ref[6:]   # quita "local:"
+    serie_path  = Path(_base_folder(content_type)) / folder_name
+    if not serie_path.exists():
+        return jsonify({'error': 'Carpeta no encontrada'}), 404
+
+    deleted = []
+    for chap in watched:
+        if chap == last_chapter:
+            continue
+        try:
+            _delete_chapter_files(serie_path, content_type, chap)
+            delete_watched_chapter(content_ref, chap)
+            deleted.append(chap)
+        except Exception as exc:
+            logger.error(f"Error borrando capítulo {chap} de '{content_ref}': {exc}")
+
+    return jsonify({'deleted': deleted, 'message': f'Se eliminaron {len(deleted)} capítulos vistos'})
+
+
+@api_bp.route('/delete-chapter', methods=['POST'])
+def api_delete_chapter():
+    """Elimina un capítulo individual del disco."""
+    data         = _get_json()
+    content_ref  = data.get('content_ref')
+    content_type = data.get('type')
+    chapter_str  = data.get('chapter')
+
+    if not content_ref or not content_type or chapter_str is None:
+        return jsonify({'error': 'Faltan parámetros'}), 400
+    try:
+        chapter = int(chapter_str)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Capítulo inválido'}), 400
+    if not content_ref.startswith('local:'):
+        return jsonify({'error': 'Solo funciona con contenido local'}), 400
+
+    folder_name = content_ref[6:]
+    serie_path  = Path(_base_folder(content_type)) / folder_name
+    if not serie_path.exists():
+        return jsonify({'error': 'Carpeta no encontrada'}), 404
+
+    try:
+        _delete_chapter_files(serie_path, content_type, chapter)
+    except Exception as exc:
+        return jsonify({'error': f'Error al eliminar archivo: {exc}'}), 500
+
+    # Si el capítulo eliminado era el último visto, retroceder el progreso
+    last_chapter_str, _ = get_progress(content_ref)
+    try:
+        if int(last_chapter_str) == chapter:
+            if content_type == 'anime':
+                remaining = sorted(int(f.stem.split('_')[-1]) for f in serie_path.glob("*.mp4"))
+            else:
+                remaining = sorted(
+                    int(d.name[4:]) for d in serie_path.iterdir()
+                    if d.is_dir() and d.name.startswith('cap_')
+                )
+            new_last = str(max(remaining)) if remaining else '1'
+            save_progress(content_ref, new_last, '0')
+    except Exception as exc:
+        logger.warning(f"No se pudo actualizar progreso tras eliminar capítulo {chapter}: {exc}")
+
+    return jsonify({'status': 'deleted', 'chapter': chapter})

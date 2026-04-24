@@ -1,0 +1,16 @@
+services:
+  comic-web:
+    build: .
+    container_name: comic-web
+    ports:
+      - "5000:5000"
+    volumes:
+      # Descargas persisten en tu máquina
+      - ~/DescargasComics:/data/descargas
+      # Base de datos SQLite persiste en tu máquina
+      - ~/.config/comic_web:/data/config
+    environment:
+      - BASE_DOWNLOAD_DIR=/data/descargas
+      - DB_DIR=/data/config
+      - DEBUG=false
+    restart: unless-stopped

@@ -1,0 +1,374 @@
+{% extends "base.html" %}
+
+{% block title %}Leyendo — {{ content_id }}{% endblock %}
+
+{% block extra_head %}
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+<style>
+  body {
+    overflow: hidden;
+    background: #000;
+  }
+  body::before, body::after { display: none; } /* sin grid ni glow en el reader */
+
+  /* ── Reader root ── */
+  .reader-root {
+    position: fixed;
+    inset: 0;
+    background: #000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+
+  /* ── Media area ── */
+  #media-content {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+
+  /* Chapter transition wrapper */
+  #chapter-wrapper {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+  }
+  #chapter-wrapper.leaving {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  #chapter-wrapper.entering {
+    opacity: 0;
+    transform: scale(1.01);
+  }
+  #chapter-wrapper.visible {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  video, .manga-viewer {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  }
+
+  /* ── Floating UI (auto-hide) ── */
+  .reader-ui {
+    position: fixed;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.22s ease, transform 0.22s ease;
+    z-index: 200;
+  }
+  .reader-ui.show {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Back button */
+  #back-to-serie {
+    top: 18px;
+    left: 18px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    background: rgba(10,10,15,0.75);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.85);
+    font-family: var(--ff-body);
+    font-size: 13px;
+    padding: 7px 13px;
+    border-radius: 8px;
+    cursor: pointer;
+    backdrop-filter: blur(10px);
+    transition: background 0.15s ease, transform 0.15s ease;
+  }
+  #back-to-serie:hover {
+    background: rgba(30,30,40,0.92);
+    transform: translateX(-2px);
+  }
+
+  /* Fullscreen button */
+  #fullscreen-btn {
+    top: 18px;
+    right: 18px;
+    width: 36px;
+    height: 36px;
+    background: rgba(10,10,15,0.75);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.75);
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(10px);
+    font-size: 14px;
+    transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  }
+  #fullscreen-btn:hover {
+    background: rgba(30,30,40,0.92);
+    color: #fff;
+    transform: scale(1.08);
+  }
+
+  /* Controls bar */
+  .controls-bar {
+    bottom: 22px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: rgba(10,10,15,0.82);
+    border: 1px solid rgba(255,255,255,0.1);
+    padding: 10px 20px;
+    border-radius: 50px;
+    backdrop-filter: blur(14px);
+    white-space: nowrap;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    /* controls bar itself slides up when showing */
+    transition: opacity 0.22s ease, transform 0.22s ease, bottom 0.22s ease;
+  }
+  .reader-ui.show.controls-bar { transform: translateX(-50%) translateY(0); }
+  .reader-ui:not(.show).controls-bar { transform: translateX(-50%) translateY(10px); }
+
+  /* Manga top variant */
+  .controls-bar.manga-top {
+    bottom: auto;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 6px 14px;
+    gap: 10px;
+  }
+  .reader-ui.show.controls-bar.manga-top  { transform: translateX(-50%) translateY(0); }
+  .reader-ui:not(.show).controls-bar.manga-top { transform: translateX(-50%) translateY(-8px); }
+
+  .controls-bar.manga-top .nav-btn { width: 32px; height: 32px; font-size: 13px; }
+  .controls-bar.manga-top #chapter-label { font-size: 12px; min-width: 60px; }
+
+  /* Nav buttons */
+  .nav-btn {
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.85);
+    font-size: 16px;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease, transform 0.12s ease, border-color 0.15s ease;
+    flex-shrink: 0;
+  }
+  .nav-btn:hover {
+    background: rgba(196,107,255,0.2);
+    border-color: rgba(196,107,255,0.3);
+    transform: scale(1.08);
+  }
+  .nav-btn:active { transform: scale(0.93); }
+
+  #chapter-label {
+    font-family: var(--ff-body);
+    font-size: 13px;
+    color: rgba(255,255,255,0.55);
+    min-width: 80px;
+    text-align: center;
+    letter-spacing: 0.01em;
+    transition: color 0.2s ease;
+  }
+  #chapter-label strong {
+    color: rgba(255,255,255,0.9);
+    font-weight: 500;
+  }
+
+  /* Chapter number change animation */
+  @keyframes labelPop {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.15); color: var(--accent); }
+    100% { transform: scale(1); }
+  }
+  #chapter-label.changed {
+    animation: labelPop 0.35s cubic-bezier(0.34,1.56,0.64,1) both;
+  }
+
+  /* Loading */
+  .loading-spinner {
+    width: 32px;
+    height: 32px;
+    border: 2px solid rgba(255,255,255,0.08);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Hide download indicator in reader */
+  .download-indicator { display: none !important; }
+
+  @media (max-width: 640px) {
+    .controls-bar { padding: 8px 14px; gap: 10px; }
+    .nav-btn { width: 34px; height: 34px; font-size: 14px; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="reader-root" id="reader-root">
+
+  <div id="media-content">
+    <!-- chapter-wrapper is injected by reader.js; we set it up here as placeholder -->
+    <div id="chapter-wrapper" class="visible">
+      <div class="loading-spinner"></div>
+    </div>
+  </div>
+
+  <!-- Back button -->
+  <button id="back-to-serie" class="reader-ui">
+    <i class="fas fa-arrow-left" style="font-size:11px;"></i> Volver
+  </button>
+
+  <!-- Fullscreen toggle -->
+  <button id="fullscreen-btn" class="reader-ui" title="Pantalla completa (F)">
+    <i class="fas fa-expand"></i>
+  </button>
+
+  <!-- Nav controls -->
+  <div class="controls-bar reader-ui" id="controls">
+    <button class="nav-btn" id="prev-btn" title="Capítulo anterior">
+      <i class="fas fa-chevron-left"></i>
+    </button>
+    <span id="chapter-label">Cap. <strong id="current-chapter-num">—</strong></span>
+    <button class="nav-btn" id="next-btn" title="Capítulo siguiente">
+      <i class="fas fa-chevron-right"></i>
+    </button>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  window.readerData = {
+    type:            "{{ type }}",
+    source:          "{{ source }}",
+    content_id:      "{{ content_id }}",
+    current_chapter: "{{ chapter }}"
+  };
+
+  const isManga  = window.readerData.type === 'manga';
+  const uiEls    = document.querySelectorAll('.reader-ui');
+  const controls = document.getElementById('controls');
+
+  // ── Chapter label pop animation ───────────────────────────────────────
+  window.animateChapterLabel = function() {
+    const lbl = document.getElementById('chapter-label');
+    lbl.classList.remove('changed');
+    void lbl.offsetWidth;
+    lbl.classList.add('changed');
+    setTimeout(() => lbl.classList.remove('changed'), 400);
+  };
+
+  // ── Chapter transition helpers (exposed for reader.js) ───────────────
+  window.chapterTransition = function(loadFn) {
+    const wrapper = document.getElementById('chapter-wrapper');
+    if (!wrapper) return loadFn();
+
+    // 1. Fade out
+    wrapper.classList.remove('visible');
+    wrapper.classList.add('leaving');
+
+    setTimeout(() => {
+      // 2. Load new content
+      wrapper.classList.remove('leaving');
+      wrapper.classList.add('entering');
+      loadFn();
+
+      // 3. Fade in
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        wrapper.classList.remove('entering');
+        wrapper.classList.add('visible');
+        window.animateChapterLabel();
+      }));
+    }, 200);
+  };
+
+  // ── UI visibility ─────────────────────────────────────────────────────
+  if (isManga) {
+    
+    let uiVisible = false;
+
+    function toggleUI() {
+      uiVisible = !uiVisible;
+      uiEls.forEach(el => el.classList.toggle('show', uiVisible));
+    }
+
+    document.getElementById('media-content').addEventListener('click', e => {
+      if (e.target.closest('#prev-btn, #next-btn, #back-to-serie, #fullscreen-btn')) return;
+      toggleUI();
+    });
+    ['prev-btn','next-btn','back-to-serie','fullscreen-btn'].forEach(id => {
+      document.getElementById(id)?.addEventListener('click', e => e.stopPropagation());
+    });
+
+  } else {
+    // Anime: auto-hide on mouse idle
+    let hideTimer;
+    controls.classList.add('manga-top');
+
+    function showUI() {
+      uiEls.forEach(el => el.classList.add('show'));
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => {
+        uiEls.forEach(el => el.classList.remove('show'));
+      }, 2500);
+    }
+
+    document.addEventListener('mousemove', showUI);
+    document.addEventListener('touchstart', showUI, { passive: true });
+    showUI(); // show immediately on load
+  }
+
+  // ── Fullscreen ────────────────────────────────────────────────────────
+  const fullscreenBtn = document.getElementById('fullscreen-btn');
+  const rootElement   = document.getElementById('reader-root');
+
+  function updateFullscreenIcon() {
+    const icon = fullscreenBtn.querySelector('i');
+    if (document.fullscreenElement) {
+      icon.className = 'fas fa-compress';
+    } else {
+      icon.className = 'fas fa-expand';
+    }
+  }
+
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      rootElement.requestFullscreen().catch(err =>
+        console.warn(`Pantalla completa: ${err.message}`)
+      );
+    } else {
+      document.exitFullscreen();
+    }
+  }
+
+  fullscreenBtn?.addEventListener('click', toggleFullscreen);
+  document.addEventListener('fullscreenchange', updateFullscreenIcon);
+  document.addEventListener('keydown', e => {
+    if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleFullscreen(); }
+  });
+</script>
+<script src="{{ url_for('static', filename='js/reader.js') }}"></script>
+{% endblock %}

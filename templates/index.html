@@ -1,0 +1,158 @@
+<!-- index.html -->
+{% extends "base.html" %}
+
+{% block title %}Comic Web — Anime & Manga{% endblock %}
+
+{% block content %}
+<div style="position:relative; z-index:1; min-height:100vh;">
+
+  <!-- Nav bar -->
+  <nav class="nav-enter" style="padding:16px 24px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--border); position:sticky; top:0; background:rgba(10,10,15,0.85); backdrop-filter:blur(14px); z-index:10;">
+    <span style="font-family:var(--ff-head); font-size:20px; font-weight:800; letter-spacing:-0.5px;" class="accent-gradient">
+      Comic Web
+    </span>
+    <div style="display:flex; align-items:center; gap:8px;">
+      <span id="queue-hint" style="font-size:12px; color:var(--muted);"></span>
+    </div>
+  </nav>
+
+  <div style="max-width:1200px; margin:0 auto; padding:32px 24px;">
+
+    <!-- Tabs -->
+    <div class="hero-enter-delay" style="margin-bottom:24px;">
+      <div class="tab-nav">
+        <button id="tab-anime" class="tab-btn active">
+          <i class="fas fa-film" style="margin-right:6px; font-size:12px;"></i>Anime
+        </button>
+        <button id="tab-manga" class="tab-btn">
+          <i class="fas fa-book" style="margin-right:6px; font-size:12px;"></i>Manga
+        </button>
+        <button id="tab-library" class="tab-btn">
+          <i class="fas fa-layer-group" style="margin-right:6px; font-size:12px;"></i>Biblioteca
+        </button>
+      </div>
+    </div>
+
+    <!-- Anime panel -->
+    <div id="anime-panel" class="content-panel">
+      <div class="card" style="padding:16px; margin-bottom:24px;">
+        <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
+          <select id="anime-source" class="input-field" style="width:auto; min-width:160px;">
+            <option value="jkanime">jkanime.net</option>
+          </select>
+          <div style="flex:1; min-width:200px; display:flex; gap:8px;">
+            <input type="text" id="anime-search-input" placeholder="Buscar anime… (ej: one piece)" class="input-field" style="flex:1;">
+            <button id="anime-search-btn" class="btn-primary">
+              <i class="fas fa-search"></i> Buscar
+            </button>
+            <button id="anime-refresh-btn" class="btn-ghost" title="Forzar actualización">
+              <i class="fas fa-rotate-right"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div id="anime-results" class="media-grid">
+        <div class="empty-state">
+          <i class="fas fa-search"></i>
+          <p>Busca un anime para comenzar</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Manga panel -->
+    <div id="manga-panel" class="content-panel hidden">
+      <div class="card" style="padding:16px; margin-bottom:24px;">
+        <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
+          <select id="manga-source" class="input-field" style="width:auto; min-width:160px;">
+            <option value="all">Todas las fuentes</option>
+            <option value="olympus">Olympus Biblioteca</option>
+            <option value="nartag">Nartag</option>
+            <option value="manhwaweb">ManhwaWeb</option>
+            <option value="ikigai">Ikigai</option>
+          </select>
+          <div style="flex:1; min-width:200px; display:flex; gap:8px;">
+            <input type="text" id="manga-search-input" placeholder="Buscar manga… (ej: solo leveling)" class="input-field" style="flex:1;">
+            <button id="manga-search-btn" class="btn-primary">
+              <i class="fas fa-search"></i> Buscar
+            </button>
+            <button id="manga-refresh-btn" class="btn-ghost" title="Forzar actualización">
+              <i class="fas fa-rotate-right"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div id="manga-results" class="media-grid">
+        <div class="empty-state">
+          <i class="fas fa-book-open"></i>
+          <p>Busca un manga para comenzar</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Library panel -->
+    <div id="library-panel" class="content-panel hidden">
+      <div style="margin-bottom:20px;">
+        <h2 style="font-family:var(--ff-head); font-size:20px; font-weight:700; color:var(--text);">Biblioteca local</h2>
+        <p style="color:var(--muted); font-size:13px; margin-top:4px;">Series descargadas en tu disco</p>
+      </div>
+      <div id="library-results" class="media-grid">
+        <div class="empty-state">
+          <i class="fas fa-folder-open"></i>
+          <p>Tu biblioteca está vacía</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Modal -->
+<div id="modal" class="modal-backdrop hidden">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3 id="modal-title">Título</h3>
+      <button id="modal-close" class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <div id="modal-body" style="flex:1; overflow:auto; padding:20px;"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script>
+  // ── Tab switching with panel fade ────────────────────────────────────
+  const tabs = [
+    { btn: 'tab-anime',   panel: 'anime-panel'   },
+    { btn: 'tab-manga',   panel: 'manga-panel'   },
+    { btn: 'tab-library', panel: 'library-panel' },
+  ];
+
+  tabs.forEach(({ btn, panel }) => {
+    document.getElementById(btn).addEventListener('click', () => {
+      tabs.forEach(t => {
+        document.getElementById(t.btn).classList.remove('active');
+        document.getElementById(t.panel).classList.add('hidden');
+      });
+      document.getElementById(btn).classList.add('active');
+      const panelEl = document.getElementById(panel);
+      panelEl.classList.remove('hidden');
+      // Re-trigger fade-in animation
+      panelEl.style.animation = 'none';
+      requestAnimationFrame(() => {
+        panelEl.style.animation = '';
+      });
+    });
+  });
+
+  // ── Close modal on backdrop click ────────────────────────────────────
+  document.getElementById('modal').addEventListener('click', e => {
+    if (e.target === e.currentTarget) closeModal();
+  });
+
+  // ── Close modal on Escape ─────────────────────────────────────────────
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeModal();
+  });
+</script>
+{% endblock %}

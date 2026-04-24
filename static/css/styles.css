@@ -1,0 +1,320 @@
+/* ============================================================
+   Comic Web — Design System
+   ============================================================ */
+
+/* ── Spinner ── */
+.loading-spinner {
+  border: 3px solid rgba(255,255,255,0.08);
+  border-top: 3px solid var(--accent);
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 0.8s cubic-bezier(0.6,0,0.4,1) infinite;
+}
+@keyframes spin {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* ── Queue progress bar ── */
+.queue-progress-bar {
+  transition: width 0.4s cubic-bezier(0.4,0,0.2,1);
+}
+
+/* ── Tab active accent ── */
+.tab-btn.active {
+  color: var(--accent);
+}
+
+/* ── Chapter card states ── */
+.chapter-card {
+  transition: all 0.18s cubic-bezier(0.4,0,0.2,1);
+}
+.chapter-card:hover {
+  transform: translateY(-2px);
+  background-color: rgba(196,107,255,0.06);
+  border-color: rgba(196,107,255,0.3);
+}
+.chapter-card.downloaded {
+  border-left: 3px solid #10b981;
+  background-color: rgba(16,185,129,0.06);
+}
+.chapter-card.not-downloaded {
+  border-left: 3px solid rgba(255,255,255,0.08);
+}
+
+/* ── Chapter action buttons ── */
+.download-chapter-btn {
+  background: rgba(255,255,255,0.07);
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+.download-chapter-btn:hover {
+  background: rgba(255,255,255,0.14);
+  transform: scale(1.05);
+}
+.play-chapter-btn {
+  background: rgba(139,92,246,0.25);
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+.play-chapter-btn:hover {
+  background: rgba(139,92,246,0.4);
+  transform: scale(1.05);
+}
+
+/* ── Download indicator ── */
+.download-indicator {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  background: rgba(10,10,15,0.88);
+  color: var(--text);
+  border: 1px solid var(--border-hi);
+  border-radius: 10px;
+  padding: 6px 12px;
+  font-size: 12px;
+  z-index: 10000;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  transform: translateY(0);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+}
+.download-indicator.hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-8px);
+  display: flex; /* override display:none so transition fires */
+}
+.download-indicator .indicator-inner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.download-indicator i {
+  font-size: 13px;
+  color: var(--accent);
+}
+
+/* ============================================================
+   Page-level transitions
+   ============================================================ */
+
+/* Fade-up entrance for entire page content */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position:  400px 0; }
+}
+
+/* Apply to top-level page wrapper */
+.page-enter {
+  animation: fadeUp 0.4s cubic-bezier(0.4,0,0.2,1) both;
+}
+
+/* Nav bar slides in */
+.nav-enter {
+  animation: slideDown 0.35s cubic-bezier(0.4,0,0.2,1) both;
+}
+
+/* Hero text stagger */
+.hero-enter {
+  animation: fadeUp 0.5s cubic-bezier(0.4,0,0.2,1) both;
+}
+.hero-enter-delay {
+  animation: fadeUp 0.5s 0.1s cubic-bezier(0.4,0,0.2,1) both;
+}
+
+/* ============================================================
+   Media grid & cards — staggered entrance
+   ============================================================ */
+
+.media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 14px;
+}
+@media (min-width: 640px) {
+  .media-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+}
+@media (min-width: 1024px) {
+  .media-grid { grid-template-columns: repeat(auto-fill, minmax(175px, 1fr)); }
+}
+
+/* Cards animate in when JS adds .visible */
+.media-card-wrapper {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 0.35s cubic-bezier(0.4,0,0.2,1),
+              transform 0.35s cubic-bezier(0.4,0,0.2,1);
+}
+.media-card-wrapper.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ============================================================
+   Skeleton loader
+   ============================================================ */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--raised) 25%,
+    rgba(255,255,255,0.04) 50%,
+    var(--raised) 75%
+  );
+  background-size: 400px 100%;
+  animation: shimmer 1.4s ease infinite;
+  border-radius: 10px;
+}
+.skeleton-card {
+  aspect-ratio: 2/3;
+  border-radius: 10px;
+}
+
+/* ============================================================
+   Tab panel transitions
+   ============================================================ */
+.content-panel {
+  animation: fadeIn 0.25s cubic-bezier(0.4,0,0.2,1) both;
+}
+.content-panel.hidden {
+  display: none;
+}
+
+/* ============================================================
+   Modal — smooth open/close
+   ============================================================ */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.85);
+  backdrop-filter: blur(10px);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+.modal-backdrop.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+.modal-backdrop.hidden {
+  display: none;
+}
+.modal-box {
+  background: var(--raised);
+  border: 1px solid var(--border-hi);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 860px;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transform: scale(0.96) translateY(8px);
+  transition: transform 0.25s cubic-bezier(0.34,1.56,0.64,1),
+              opacity  0.2s ease;
+  opacity: 0;
+}
+.modal-backdrop.open .modal-box {
+  transform: scale(1) translateY(0);
+  opacity: 1;
+}
+
+/* ============================================================
+   Chapters list — staggered entrance
+   ============================================================ */
+.chapter-pill {
+  opacity: 0;
+  transform: translateX(-8px);
+  transition: opacity 0.25s ease,
+              transform 0.25s ease,
+              background 0.15s ease,
+              border-color 0.15s ease,
+              color 0.15s ease;
+}
+.chapter-pill.visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* ============================================================
+   Serie hero — cover reveal
+   ============================================================ */
+#serie-cover {
+  transition: opacity 0.4s ease, transform 0.4s ease;
+  opacity: 0;
+  transform: scale(1.03);
+}
+#serie-cover.loaded {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* ============================================================
+   Progress bar
+   ============================================================ */
+.progress-bar-fill {
+  transition: width 0.6s cubic-bezier(0.4,0,0.2,1);
+}
+
+/* ============================================================
+   Button press feedback
+   ============================================================ */
+.btn-primary:active,
+.btn-ghost:active {
+  transform: scale(0.96);
+}
+
+/* ============================================================
+   Reader — page-turn transition
+   ============================================================ */
+@keyframes readerFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.manga-page-entering {
+  animation: readerFadeIn 0.2s ease both;
+}
+
+/* ============================================================
+   Glow pulse on active downloads
+   ============================================================ */
+@keyframes glowPulse {
+  0%,100% { box-shadow: 0 0 0 0 rgba(196,107,255,0); }
+  50%      { box-shadow: 0 0 0 6px rgba(196,107,255,0.12); }
+}
+.downloading-glow {
+  animation: glowPulse 2s ease infinite;
+}
+
+/* ============================================================
+   Scrollbar (refined)
+   ============================================================ */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(196,107,255,0.25);
+  border-radius: 3px;
+  transition: background 0.2s;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(196,107,255,0.45); }
