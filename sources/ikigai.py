@@ -22,8 +22,8 @@ _MAX_PAGES = 500
 
 
 class IkigaiSource(BaseSource):
-    BASE_URL      = "https://viralikigai.guildoll.info"
-    CATALOGO_BASE = "https://zonaikigai.milkchoco.online/series/"
+    BASE_URL      = "https://visorikigai.yomod.xyz"
+    CATALOGO_BASE = "https://visorikigai.yomod.xyz/series/"
     UA            = "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0"
 
     def __init__(self):

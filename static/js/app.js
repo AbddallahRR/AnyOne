@@ -45,14 +45,57 @@
     btn.addEventListener('click', () => setActiveTab(type));
   });
 
+  // ── CoverObserver — lazy load + VRAM release ──────────────────────────
+  //
+  // El browser mantiene cada <img> decodificada en VRAM aunque esté a miles
+  // de píxeles fuera del viewport. Con grids grandes (búsqueda global,
+  // biblioteca) esto dispara el uso de memoria de video al hacer scroll.
+  //
+  // Solución: las cards usan data-src en lugar de src. Este observer:
+  //   • Asigna src cuando la card ENTRA al viewport + margen de 200px  → carga
+  //   • Borra src cuando la card SALE del viewport + margen de 800px   → libera VRAM
+  //
+  // El margen asimétrico (200 entrada / 800 salida) evita parpadeos: la imagen
+  // se precarga antes de ser visible y se libera solo cuando está muy lejos.
+
+  const PLACEHOLDER = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" '
+    + 'width="2" height="3"%3E%3C/svg%3E'; // 2×3px transparent — preserva aspect-ratio
+
+  const coverObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      const img = entry.target;
+      if (entry.isIntersecting) {
+        // Entró: cargar imagen real
+        const real = img.dataset.src;
+        if (real && img.src !== real) img.src = real;
+      } else {
+        // Salió: liberar VRAM (solo si ya cargó, para no cortar descargas en curso)
+        if (img.complete && img.naturalWidth > 0) {
+          img.src = PLACEHOLDER;
+        }
+      }
+    });
+  }, {
+    rootMargin: '200px 0px 800px 0px', // top/bottom asimétrico
+    threshold:  0,
+  });
+
+  /** Registra todas las .cover-lazy de un contenedor en el observer */
+  function observeCovers(container) {
+    container.querySelectorAll('img.cover-lazy').forEach(img => {
+      coverObserver.observe(img);
+    });
+  }
+
   // ── Media card builder (design system) ────────────────────────────────
   function buildMediaCard({ id, title, cover, source, type, badge, extra }) {
-    const safeTitle  = (title || '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-    const coverUrl   = cover || 'https://via.placeholder.com/200x280/18181f/7a7a8a?text=Sin+portada';
-    const badgeHtml  = badge
+    const safeTitle = (title || '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    const dataSrc   = cover || '';
+    const badgeHtml = badge
       ? `<span class="card-badge ${badge.class}">${badge.label}</span>`
       : '';
 
+    // src empieza como placeholder — CoverObserver asigna el real al entrar al viewport
     return `
       <div class="media-card-wrapper">
         <div class="media-card"
@@ -60,10 +103,11 @@
           data-title="${safeTitle}"
           data-source="${source || ''}"
           data-type="${type || ''}">
-          <img src="${coverUrl}"
+          <img class="cover-lazy"
+               src="${PLACEHOLDER}"
+               data-src="${dataSrc}"
                alt="${safeTitle}"
-               loading="lazy"
-               onerror="this.src='https://via.placeholder.com/200x280/18181f/7a7a8a?text=Sin+portada'">
+               style="background:var(--raised);">
           <div class="card-overlay">
             ${badgeHtml}
             <p class="card-title">${safeTitle}</p>
@@ -145,6 +189,9 @@
                  </button>`,
       });
     }).join('');
+
+    // Lazy load + VRAM release de portadas
+    observeCovers(container);
 
     // Stagger animation
     if (window.animateCards) window.animateCards(`#${type}-results`);
@@ -251,6 +298,9 @@
     }).join('');
 
     if (window.animateCards) window.animateCards('#library-results');
+
+    // Lazy load + VRAM release de portadas
+    observeCovers(container);
 
     // Click en card → detalle
     container.querySelectorAll('.media-card').forEach(card => {

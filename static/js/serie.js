@@ -43,7 +43,7 @@
 
       titleEl.textContent    = data.title    || 'Sin título';
       synopsisEl.textContent = data.synopsis || 'Sin descripción disponible.';
-      if (data.cover) coverImg.src = data.cover;
+      if (data.cover) { coverImg.dataset.src = data.cover; coverImg.src = data.cover; }
 
       if (badgeEl) {
         badgeEl.textContent  = type === 'anime' ? 'Anime' : 'Manga';
