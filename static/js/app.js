@@ -237,6 +237,23 @@
   }
 
   // ── Biblioteca local ───────────────────────────────────────────────────
+
+  // Estado de la biblioteca
+  let _libraryItems    = [];   // todos los items cargados de la API
+  let _libraryStatuses = {};   // content_ref → status
+  let _libraryFilter   = 'all';
+  let _libraryQuery    = '';
+
+  const STATUS_META = {
+    watching:  { label: 'Mirando',   color: 'var(--accent)',  border: 'rgba(196,107,255,0.4)', bg: 'rgba(196,107,255,0.12)', icon: 'fa-eye' },
+    completed: { label: 'Visto',     color: '#4ade80',        border: 'rgba(74,222,128,0.4)',  bg: 'rgba(74,222,128,0.12)',  icon: 'fa-check-circle' },
+    pending:   { label: 'Pendiente', color: '#fbbf24',        border: 'rgba(251,191,36,0.4)',  bg: 'rgba(251,191,36,0.12)', icon: 'fa-clock' },
+    none:      { label: '',          color: '',               border: '',                      bg: '',                      icon: '' },
+  };
+
+  // Orden de prioridad para mostrar
+  const STATUS_ORDER = { watching: 0, completed: 1, pending: 2, none: 3 };
+
   async function loadLibrary() {
     const container = document.getElementById('library-results');
     if (!container) return;
@@ -246,10 +263,15 @@
         <p>Cargando biblioteca…</p>
       </div>`;
     try {
-      const res   = await fetch('/api/library');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const items = await res.json();
-      renderLibrary(items);
+      const [itemsRes, statusRes] = await Promise.all([
+        fetch('/api/library'),
+        fetch('/api/library/status'),
+      ]);
+      if (!itemsRes.ok) throw new Error(`HTTP ${itemsRes.status}`);
+      _libraryItems    = await itemsRes.json();
+      _libraryStatuses = statusRes.ok ? await statusRes.json() : {};
+      _initLibraryControls();
+      applyLibraryView();
     } catch (err) {
       container.innerHTML = `
         <div class="empty-state">
@@ -259,23 +281,112 @@
     }
   }
 
+  function _initLibraryControls() {
+    // Búsqueda local
+    const searchInput = document.getElementById('library-search-input');
+    if (searchInput && !searchInput.dataset.bound) {
+      searchInput.dataset.bound = '1';
+      searchInput.addEventListener('input', () => {
+        _libraryQuery = searchInput.value.toLowerCase();
+        applyLibraryView();
+      });
+    }
+
+    // Filtros de etiqueta
+    document.querySelectorAll('.lib-filter').forEach(btn => {
+      if (btn.dataset.bound) return;
+      btn.dataset.bound = '1';
+      btn.addEventListener('click', () => {
+        _libraryFilter = btn.dataset.filter;
+        document.querySelectorAll('.lib-filter').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        applyLibraryView();
+      });
+    });
+  }
+
+  function applyLibraryView() {
+    const container = document.getElementById('library-results');
+    if (!container) return;
+
+    // 1. Filtrar por etiqueta
+    let filtered = _libraryItems.filter(item => {
+      const ref    = `local:${item.id}`;
+      const status = _libraryStatuses[ref] || 'none';
+      if (_libraryFilter === 'all') return true;
+      return status === _libraryFilter;
+    });
+
+    // 2. Filtrar por búsqueda
+    if (_libraryQuery) {
+      filtered = filtered.filter(item =>
+        (item.title || '').toLowerCase().includes(_libraryQuery) ||
+        (item.id    || '').toLowerCase().includes(_libraryQuery)
+      );
+    }
+
+    // 3. Ordenar: watching → completed → pending → none
+    filtered.sort((a, b) => {
+      const sa = STATUS_ORDER[_libraryStatuses[`local:${a.id}`] || 'none'];
+      const sb = STATUS_ORDER[_libraryStatuses[`local:${b.id}`] || 'none'];
+      if (sa !== sb) return sa - sb;
+      return (a.title || '').localeCompare(b.title || '');
+    });
+
+    // 4. Actualizar contador
+    const countEl = document.getElementById('library-count');
+    if (countEl) countEl.textContent = `${filtered.length} serie${filtered.length !== 1 ? 's' : ''}`;
+
+    if (!filtered.length) {
+      container.innerHTML = _libraryItems.length
+        ? `<div class="empty-state" style="grid-column:1/-1;">
+             <i class="fas fa-filter"></i>
+             <p>Ninguna serie coincide con el filtro.</p>
+           </div>`
+        : `<div class="empty-state" style="grid-column:1/-1;">
+             <i class="fas fa-folder-open"></i>
+             <p>Tu biblioteca está vacía. Usa la búsqueda para descargar series.</p>
+           </div>`;
+      return;
+    }
+
+    renderLibrary(filtered);
+  }
+
   function renderLibrary(items) {
     const container = document.getElementById('library-results');
     if (!container) return;
 
-    if (!items || !items.length) {
-      container.innerHTML = `
-        <div class="empty-state">
-          <i class="fas fa-folder-open"></i>
-          <p>Tu biblioteca está vacía. Usa la búsqueda para descargar series.</p>
-        </div>`;
-      return;
-    }
-
     container.innerHTML = items.map(item => {
+      const ref         = `local:${item.id}`;
+      const status      = _libraryStatuses[ref] || 'none';
+      const meta        = STATUS_META[status];
       const lastChapter = item.last_chapter || '1';
       const typeClass   = item.type === 'anime' ? 'badge-anime' : 'badge-manga';
       const typeLabel   = item.type === 'anime' ? 'Anime' : 'Manga';
+
+      // Badge de etiqueta (encima de la portada si tiene)
+      const statusBadge = meta.label ? `
+        <span class="card-badge" style="
+          background:${meta.bg}; color:${meta.color};
+          border:1px solid ${meta.border}; margin-bottom:4px;">
+          <i class="fas ${meta.icon}" style="margin-right:3px; font-size:9px;"></i>${meta.label}
+        </span>` : '';
+
+      // Botón de etiqueta — abre popup contextual
+      const statusBtn = `
+        <button class="status-tag-btn" data-ref="${ref}"
+          title="Cambiar etiqueta"
+          style="
+            width:28px; height:28px; border-radius:6px; flex-shrink:0;
+            background:${meta.bg || 'rgba(255,255,255,0.05)'};
+            border:1px solid ${meta.border || 'var(--border)'};
+            color:${meta.color || 'var(--muted)'};
+            cursor:pointer; display:flex; align-items:center; justify-content:center;
+            font-size:10px; transition:background .15s, transform .12s;">
+          <i class="fas ${meta.icon || 'fa-tag'}"></i>
+        </button>`;
+
       return buildMediaCard({
         id:     item.id || '',
         title:  item.title,
@@ -284,6 +395,9 @@
         type:   item.type || '',
         badge:  { class: typeClass, label: typeLabel },
         extra:  `<div style="display:flex; gap:5px; margin-top:6px;">
+                   ${statusBadge}
+                 </div>
+                 <div style="display:flex; gap:5px; margin-top:4px;">
                    <button class="resume-btn" data-last-chapter="${lastChapter}" style="
                      flex:1; background:rgba(74,222,128,0.15);
                      border:1px solid rgba(74,222,128,0.25);
@@ -293,25 +407,24 @@
                      transition:background .15s;">
                      <i class="fas fa-play"></i> Cap. ${lastChapter}
                    </button>
+                   ${statusBtn}
                  </div>`,
       });
     }).join('');
 
     if (window.animateCards) window.animateCards('#library-results');
-
-    // Lazy load + VRAM release de portadas
     observeCovers(container);
 
     // Click en card → detalle
     container.querySelectorAll('.media-card').forEach(card => {
       card.addEventListener('click', e => {
-        if (e.target.closest('.resume-btn')) return;
+        if (e.target.closest('.resume-btn, .status-cycle-btn')) return;
         const { type, id } = card.dataset;
         if (type && id) window.location.href = `/serie/${type}/local/${id}`;
       });
     });
 
-    // Click en reanudar → lector
+    // Reanudar
     container.querySelectorAll('.resume-btn').forEach(btn => {
       btn.addEventListener('click', e => {
         e.stopPropagation();
@@ -322,6 +435,166 @@
           window.location.href = `/reader/${type}/local/${id}/${lastChapter}`;
       });
     });
+
+    // Botón de etiqueta → popup contextual
+    container.querySelectorAll('.status-tag-btn').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        openStatusPopup(btn, btn.dataset.ref);
+      });
+    });
+  }
+
+  // ── Popup contextual de etiqueta ───────────────────────────────────────
+
+  let _statusPopup   = null;
+  let _popupRef      = null;
+  let _popupCloseHandler = null;
+
+  const STATUS_OPTIONS = [
+    { value: 'watching',  label: 'Mirando',   icon: 'fa-eye',          color: 'var(--accent)', border: 'rgba(196,107,255,0.35)', bg: 'rgba(196,107,255,0.1)' },
+    { value: 'completed', label: 'Visto',      icon: 'fa-check-circle', color: '#4ade80',       border: 'rgba(74,222,128,0.35)',  bg: 'rgba(74,222,128,0.1)'  },
+    { value: 'pending',   label: 'Pendiente',  icon: 'fa-clock',        color: '#fbbf24',       border: 'rgba(251,191,36,0.35)', bg: 'rgba(251,191,36,0.1)'  },
+    { value: 'none',      label: 'Sin etiqueta', icon: 'fa-tag',        color: 'var(--muted)',  border: 'var(--border)',         bg: 'transparent'           },
+  ];
+
+  function openStatusPopup(anchorBtn, ref) {
+    closeStatusPopup();
+    _popupRef = ref;
+    const current = _libraryStatuses[ref] || 'none';
+
+    // Crear popup
+    const popup = document.createElement('div');
+    popup.id = 'status-popup';
+    Object.assign(popup.style, {
+      position:       'fixed',
+      zIndex:         '10002',
+      background:     'rgba(10,10,15,0.97)',
+      border:         '1px solid rgba(255,255,255,0.12)',
+      borderRadius:   '12px',
+      padding:        '6px',
+      display:        'flex',
+      flexDirection:  'column',
+      gap:            '3px',
+      backdropFilter: 'blur(16px)',
+      boxShadow:      '0 8px 32px rgba(0,0,0,0.5)',
+      minWidth:       '160px',
+      opacity:        '0',
+      transform:      'scale(0.95) translateY(-4px)',
+      transition:     'opacity 0.15s ease, transform 0.15s ease',
+    });
+
+    // Opciones
+    STATUS_OPTIONS.forEach(opt => {
+      const row = document.createElement('button');
+      const isActive = opt.value === current;
+      Object.assign(row.style, {
+        display:        'flex',
+        alignItems:     'center',
+        gap:            '9px',
+        padding:        '7px 10px',
+        borderRadius:   '8px',
+        border:         isActive ? `1px solid ${opt.border}` : '1px solid transparent',
+        background:     isActive ? opt.bg : 'transparent',
+        color:          isActive ? opt.color : 'var(--muted)',
+        fontSize:       '13px',
+        fontFamily:     'var(--ff-body)',
+        cursor:         'pointer',
+        textAlign:      'left',
+        width:          '100%',
+        transition:     'background 0.12s, color 0.12s',
+      });
+      row.innerHTML = `
+        <i class="fas ${opt.icon}" style="font-size:11px; width:14px; text-align:center; flex-shrink:0;"></i>
+        <span>${opt.label}</span>
+        ${isActive ? '<i class="fas fa-check" style="margin-left:auto; font-size:10px; opacity:0.7;"></i>' : ''}`;
+
+      row.addEventListener('mouseenter', () => {
+        row.style.background = opt.bg || 'rgba(255,255,255,0.05)';
+        row.style.color      = opt.color || 'var(--text)';
+      });
+      row.addEventListener('mouseleave', () => {
+        if (opt.value !== current) {
+          row.style.background = 'transparent';
+          row.style.color      = 'var(--muted)';
+        }
+      });
+
+      row.addEventListener('click', async e => {
+        e.stopPropagation();
+        closeStatusPopup();
+        if (opt.value === current) return; // sin cambio
+        try {
+          const res = await fetch('/api/library/status', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ content_ref: ref, status: opt.value }),
+          });
+          if (res.ok) {
+            _libraryStatuses[ref] = opt.value;
+            showNotification(
+              opt.value === 'none' ? 'Etiqueta eliminada' : `Marcado como ${opt.label}`,
+              'success', 2000
+            );
+            applyLibraryView();
+          } else {
+            showNotification('Error al guardar etiqueta', 'error');
+          }
+        } catch (err) {
+          showNotification(`Error: ${err.message}`, 'error');
+        }
+      });
+
+      popup.appendChild(row);
+    });
+
+    document.body.appendChild(popup);
+    _statusPopup = popup;
+
+    // Posicionar el popup junto al botón, sin salirse de la pantalla
+    const rect   = anchorBtn.getBoundingClientRect();
+    const pw     = 160; // min-width
+    const ph     = 4 * 38; // aprox alto
+    let   top    = rect.bottom + 6;
+    let   left   = rect.left;
+
+    if (left + pw > window.innerWidth - 8)  left  = window.innerWidth  - pw - 8;
+    if (top  + ph > window.innerHeight - 8) top   = rect.top - ph - 6;
+    if (left < 8) left = 8;
+
+    popup.style.top  = `${top}px`;
+    popup.style.left = `${left}px`;
+
+    // Animar entrada
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      popup.style.opacity   = '1';
+      popup.style.transform = 'scale(1) translateY(0)';
+    }));
+
+    // Cerrar al hacer clic fuera o presionar Escape
+    _popupCloseHandler = e => {
+      if (!popup.contains(e.target) && e.target !== anchorBtn) closeStatusPopup();
+    };
+    setTimeout(() => {
+      document.addEventListener('click',   _popupCloseHandler);
+      document.addEventListener('keydown', _escCloseHandler);
+    }, 0);
+  }
+
+  function _escCloseHandler(e) {
+    if (e.key === 'Escape') closeStatusPopup();
+  }
+
+  function closeStatusPopup() {
+    if (!_statusPopup) return;
+    const popup = _statusPopup;
+    _statusPopup = null;
+    _popupRef    = null;
+    popup.style.opacity   = '0';
+    popup.style.transform = 'scale(0.95) translateY(-4px)';
+    setTimeout(() => popup.remove(), 150);
+    document.removeEventListener('click',   _popupCloseHandler);
+    document.removeEventListener('keydown', _escCloseHandler);
   }
 
   // ── Notificaciones ─────────────────────────────────────────────────────

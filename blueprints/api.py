@@ -25,6 +25,9 @@ from core.database import (
     save_content_to_db,
     save_progress,
     update_queue_status,
+    set_series_status,
+    get_series_status,
+    get_all_series_statuses,
 )
 from core.disk_cache import search_cache
 from core.download_worker import download_queue, get_active_jobs
@@ -761,3 +764,31 @@ def api_delete_chapter():
         logger.warning(f"No se pudo actualizar progreso tras eliminar capítulo {chapter}: {exc}")
 
     return jsonify({'status': 'deleted', 'chapter': chapter})
+
+
+# ---------------------------------------------------------------------------
+# Etiquetas de biblioteca (watching / completed / pending)
+# ---------------------------------------------------------------------------
+
+@api_bp.route('/library/status', methods=['GET'])
+def api_library_statuses():
+    """Devuelve todas las etiquetas en un solo request."""
+    return jsonify(get_all_series_statuses())
+
+
+@api_bp.route('/library/status/<path:content_ref>', methods=['GET'])
+def api_get_series_status(content_ref):
+    return jsonify({'content_ref': content_ref, 'status': get_series_status(content_ref)})
+
+
+@api_bp.route('/library/status', methods=['POST'])
+def api_set_series_status():
+    data        = _get_json()
+    content_ref = data.get('content_ref')
+    status      = data.get('status', 'none')
+    if not content_ref:
+        return jsonify({'error': 'Falta content_ref'}), 400
+    if status not in ('watching', 'completed', 'pending', 'none'):
+        return jsonify({'error': f"Estado inválido: {status}"}), 400
+    set_series_status(content_ref, status)
+    return jsonify({'status': status})

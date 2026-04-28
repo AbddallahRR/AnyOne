@@ -34,7 +34,7 @@ def get_conn() -> sqlite3.Connection:
 # Migraciones versionadas
 # ---------------------------------------------------------------------------
 
-SCHEMA_VERSION = 2  # incrementar al agregar una migración nueva
+SCHEMA_VERSION = 3  # incrementar al agregar una migración nueva
 
 def _get_schema_version(conn: sqlite3.Connection) -> int:
     conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)")
@@ -96,6 +96,19 @@ def _run_migrations(conn: sqlite3.Connection, current: int) -> None:
             conn.execute("ALTER TABLE download_queue ADD COLUMN chapter_id TEXT")
         if 'content_ref' not in existing:
             conn.execute("ALTER TABLE download_queue ADD COLUMN content_ref TEXT")
+
+    if current < 3:
+        logger.info("Migracion 3: tabla series_status (etiquetas de biblioteca)")
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS series_status (
+                content_ref TEXT PRIMARY KEY,
+                status      TEXT NOT NULL DEFAULT 'pending',
+                updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_series_status ON series_status(status)"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +248,43 @@ def update_queue_status(job_id: int, **kwargs) -> None:
     with conn:
         conn.execute(f"UPDATE download_queue SET {set_clause} WHERE id = ?", params)
 
+
+
+# ---------------------------------------------------------------------------
+# Etiquetas de biblioteca (watching / completed / pending)
+# ---------------------------------------------------------------------------
+
+_VALID_STATUSES = {'watching', 'completed', 'pending', 'none'}
+
+def set_series_status(content_ref: str, status: str) -> None:
+    """Guarda o actualiza la etiqueta de una serie. 'none' elimina la fila."""
+    conn = get_conn()
+    with conn:
+        if status == 'none':
+            conn.execute('DELETE FROM series_status WHERE content_ref = ?', (content_ref,))
+        else:
+            conn.execute(
+                '''INSERT INTO series_status (content_ref, status, updated_at)
+                   VALUES (?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(content_ref) DO UPDATE SET
+                       status = excluded.status,
+                       updated_at = excluded.updated_at''',
+                (content_ref, status)
+            )
+
+def get_series_status(content_ref: str) -> str:
+    """Devuelve la etiqueta de una serie, o 'none' si no tiene."""
+    conn = get_conn()
+    row = conn.execute(
+        'SELECT status FROM series_status WHERE content_ref = ?', (content_ref,)
+    ).fetchone()
+    return row[0] if row else 'none'
+
+def get_all_series_statuses() -> dict[str, str]:
+    """Devuelve un dict content_ref -> status para todas las series etiquetadas."""
+    conn = get_conn()
+    rows = conn.execute('SELECT content_ref, status FROM series_status').fetchall()
+    return {r[0]: r[1] for r in rows}
 
 # ---------------------------------------------------------------------------
 # Capítulos vistos
