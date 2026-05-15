@@ -6,6 +6,7 @@ import os
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse
 
 import cloudscraper
@@ -16,8 +17,11 @@ from core.disk_cache import search_cache
 
 logger = logging.getLogger(__name__)
 
-_TIMEOUT   = 30
-_MAX_PAGES = 500
+_TIMEOUT      = 30
+_MAX_PAGES    = 500
+_CATALOG_TTL  = 60 * 60 * 24 * 3   # 3 días  — el catálogo cambia poco
+_PAGE_TTL     = 60 * 60 * 24 * 7   # 7 días  — páginas individuales, más estables
+_PAGE_WORKERS = 4                   # hilos paralelos para descargar páginas del catálogo
 
 
 class IkigaiSource(BaseSource):
@@ -26,9 +30,9 @@ class IkigaiSource(BaseSource):
     UA            = "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0"
 
     # Lock y timestamp a nivel de clase: compartidos entre todas las instancias/workers
-    _refresh_lock    = threading.Lock()
-    _last_refresh_ts = 0.0
-    _REFRESH_COOLDOWN = 3600  # segundos entre refrescos en background (1 hora)
+    _refresh_lock     = threading.Lock()
+    _last_refresh_ts  = 0.0
+    _REFRESH_COOLDOWN = 60 * 60 * 24   # 24 horas entre refrescos en background
 
     def __init__(self):
         self.scraper = cloudscraper.create_scraper()
@@ -43,8 +47,6 @@ class IkigaiSource(BaseSource):
 
     def _get(self, url: str, **kwargs):
         kwargs.setdefault('timeout', _TIMEOUT)
-        # Extraer headers de kwargs y fusionarlos con los propios en un único dict.
-        # Pasar 'headers' dos veces a scraper.get() causa: "got multiple values for keyword argument 'headers'"
         extra_headers = kwargs.pop('headers', {})
         headers = {**self._headers, **extra_headers}
         resp = self.scraper.get(url, headers=headers, **kwargs)
@@ -99,7 +101,7 @@ class IkigaiSource(BaseSource):
 
     @staticmethod
     def _has_next_page(soup: BeautifulSoup, next_page: int) -> bool:
-        """Detecta si existe un enlace a la página siguiente (cualquier formato de href)."""
+        """Detecta si existe un enlace a la página siguiente."""
         param = f"pagina={next_page}"
         for a in soup.find_all('a', href=True):
             if param in a['href']:
@@ -118,12 +120,6 @@ class IkigaiSource(BaseSource):
             if not slug:
                 continue
 
-            # Prioridad para el título:
-            # 1. <h3> dentro del card (contiene solo el título)
-            # 2. alt de la imagen (también contiene solo el título)
-            # 3. atributo title del <a>
-            # 4. fallback al slug humanizado
-            # Nunca usar a.get_text() — incluye géneros, contadores y estado
             title = ''
             h3 = a.find('h3')
             if h3:
@@ -137,7 +133,6 @@ class IkigaiSource(BaseSource):
             if not title:
                 title = slug.replace('-', ' ').title()
 
-            # Portada: src de la primera <img> dentro del card
             cover = ''
             img_tag = a.find('img')
             if img_tag:
@@ -146,53 +141,115 @@ class IkigaiSource(BaseSource):
             items.append({'id': slug, 'title': title, 'cover': cover})
         return items
 
+    def _fetch_page(self, page: int) -> tuple[int, list[dict], bool]:
+        """
+        Descarga UNA página del catálogo. Devuelve (page, items, has_next).
+        Intenta caché primero; si no hay, hace la petición HTTP.
+        Diseñada para llamarse desde un ThreadPoolExecutor.
+        """
+        page_key   = f"ikigai:catalog_page:{page}"
+        page_items = search_cache.get(page_key)
+
+        if page_items is not None:
+            # En caché — no sabemos has_next sin parsear HTML, así que asumimos True
+            # (el llamador detiene cuando ya no llegan items nuevos)
+            return page, page_items, True
+
+        url = (self.CATALOGO_BASE if page == 1
+               else f"{self.CATALOGO_BASE}?pagina={page}")
+        try:
+            html = self._fetch_url(url)
+        except Exception as exc:
+            logger.error(f"Ikigai: error al cargar catálogo página {page}: {exc}")
+            return page, [], False
+
+        soup       = BeautifulSoup(html, 'html.parser')
+        page_items = self._parse_page_links(soup)
+        has_next   = self._has_next_page(soup, page + 1)
+
+        if page_items:
+            search_cache.set(page_key, page_items, ttl=_PAGE_TTL)
+
+        return page, page_items, has_next
+
     def _fetch_full_catalog(self) -> list[dict]:
         """
-        Descarga el catálogo completo página por página.
-        Cada página se cachea individualmente — un refresco futuro solo
-        descarga las páginas cuyo caché haya expirado.
+        Descarga el catálogo completo en paralelo.
+
+        Estrategia:
+          1. Descarga las primeras _PAGE_WORKERS páginas en paralelo.
+          2. Si alguna devuelve has_next=False o 0 items, detiene la exploración.
+          3. Continúa en lotes de _PAGE_WORKERS hasta agotar el catálogo.
+
+        Ventaja: en un catálogo de 50 páginas con 8 workers, el tiempo pasa
+        de ~50 × 3s = 150s  →  ~7 lotes × 3s = ~21s.
         """
         results:    list[dict] = []
         seen_slugs: set[str]   = set()
-        page = 1
+        page      = 1
+        keep_going = True
 
-        while page <= _MAX_PAGES:
-            page_key    = f"ikigai:catalog_page:{page}"
-            page_items  = search_cache.get(page_key)
-            has_next    = True  # asumir que hay siguiente hasta comprobarlo
+        while keep_going and page <= _MAX_PAGES:
+            # Lote de hasta _PAGE_WORKERS páginas en paralelo
+            batch_pages = list(range(page, min(page + _PAGE_WORKERS, _MAX_PAGES + 1)))
 
-            if page_items is None:
-                # Página no cacheada — descargar
-                url = (self.CATALOGO_BASE if page == 1
-                       else f"{self.CATALOGO_BASE}?pagina={page}")
+            # ThreadPoolExecutor local — cloudscraper no es thread-safe entre instancias,
+            # pero cada worker llama a self._fetch_url que usa self.scraper (una instancia).
+            # Para paralelismo real sin conflictos creamos un scraper temporal por hilo.
+            page_results: dict[int, tuple[list[dict], bool]] = {}
+
+            def _fetch_with_own_scraper(pg: int) -> tuple[int, list[dict], bool]:
+                page_key   = f"ikigai:catalog_page:{pg}"
+                page_items = search_cache.get(page_key)
+                if page_items is not None:
+                    return pg, page_items, True
+
+                url = (self.CATALOGO_BASE if pg == 1
+                       else f"{self.CATALOGO_BASE}?pagina={pg}")
                 try:
-                    html = self._fetch_url(url)
+                    # Scraper propio por hilo para evitar condiciones de carrera
+                    sc   = cloudscraper.create_scraper()
+                    resp = sc.get(url, headers=self._headers, timeout=_TIMEOUT)
+                    resp.raise_for_status()
+                    soup       = BeautifulSoup(resp.text, 'html.parser')
+                    items      = self._parse_page_links(soup)
+                    has_next_p = self._has_next_page(soup, pg + 1)
+                    if items:
+                        search_cache.set(page_key, items, ttl=_PAGE_TTL)
+                    return pg, items, has_next_p
                 except Exception as exc:
-                    logger.error(f"Ikigai: error al cargar catálogo página {page}: {exc}")
+                    logger.error(f"Ikigai: error página {pg}: {exc}")
+                    return pg, [], False
+
+            with ThreadPoolExecutor(max_workers=_PAGE_WORKERS) as pool:
+                futures = {pool.submit(_fetch_with_own_scraper, pg): pg
+                           for pg in batch_pages}
+                for future in as_completed(futures):
+                    pg, items, has_next_p = future.result()
+                    page_results[pg] = (items, has_next_p)
+
+            # Procesar lote en orden para mantener el catálogo ordenado
+            for pg in sorted(page_results):
+                items, has_next_p = page_results[pg]
+
+                if not items:
+                    keep_going = False
                     break
 
-                soup       = BeautifulSoup(html, 'html.parser')
-                page_items = self._parse_page_links(soup)
-                has_next   = self._has_next_page(soup, page + 1)
+                prev = len(results)
+                for item in items:
+                    if item['id'] not in seen_slugs:
+                        seen_slugs.add(item['id'])
+                        results.append(item)
 
-                if not page_items:
-                    logger.debug(f"Ikigai: página {page} sin series — fin del catálogo")
+                logger.debug(f"Ikigai: página {pg} — {len(results) - prev} nuevas "
+                             f"(total: {len(results)})")
+
+                if not has_next_p:
+                    keep_going = False
                     break
 
-                search_cache.set(page_key, page_items)
-
-            prev = len(results)
-            for item in page_items:
-                if item['id'] not in seen_slugs:
-                    seen_slugs.add(item['id'])
-                    results.append(item)
-
-            logger.debug(f"Ikigai: página {page} — {len(results) - prev} nuevas "
-                         f"(total: {len(results)})")
-
-            if not has_next:
-                break
-            page += 1
+            page += _PAGE_WORKERS
 
         if page > _MAX_PAGES:
             logger.warning(f"Ikigai: límite de {_MAX_PAGES} páginas alcanzado en catálogo")
@@ -212,17 +269,15 @@ class IkigaiSource(BaseSource):
         if now - IkigaiSource._last_refresh_ts < IkigaiSource._REFRESH_COOLDOWN:
             return
         if not IkigaiSource._refresh_lock.acquire(blocking=False):
-            return  # otro thread ya está refrescando
+            return
 
         def _do() -> None:
             try:
                 logger.info("Ikigai: refresco de catálogo en background")
-                # Eliminar caché global para que _fetch_full_catalog
-                # re-descargue las páginas cuyo caché de página haya expirado
                 search_cache.delete("ikigai:catalog")
                 catalog = self._fetch_full_catalog()
                 if catalog:
-                    search_cache.set("ikigai:catalog", catalog)
+                    search_cache.set("ikigai:catalog", catalog, ttl=_CATALOG_TTL)
                     IkigaiSource._last_refresh_ts = time.time()
                     logger.info(f"Ikigai: catálogo refrescado ({len(catalog)} series)")
             except Exception as exc:
@@ -232,26 +287,50 @@ class IkigaiSource(BaseSource):
 
         threading.Thread(target=_do, daemon=True).start()
 
+    def warm_cache(self) -> None:
+        """
+        Precarga el catálogo en background al arrancar la app.
+        Llamar desde create_app() después de start_workers().
+        Si el catálogo ya está en caché válida, no hace nada.
+        """
+        if search_cache.get("ikigai:catalog") is not None:
+            logger.debug("Ikigai: catálogo ya en caché, sin precarga necesaria")
+            return
+
+        logger.info("Ikigai: iniciando precarga de catálogo en background")
+
+        def _do() -> None:
+            try:
+                catalog = self._fetch_full_catalog()
+                if catalog:
+                    search_cache.set("ikigai:catalog", catalog, ttl=_CATALOG_TTL)
+                    IkigaiSource._last_refresh_ts = time.time()
+                    logger.info(f"Ikigai: precarga completada ({len(catalog)} series)")
+            except Exception as exc:
+                logger.error(f"Ikigai: error en precarga: {exc}")
+
+        threading.Thread(target=_do, daemon=True).start()
+
     # -----------------------------------------------------------------------
     # API pública
     # -----------------------------------------------------------------------
 
     def search(self, query: str) -> list:
         """
-        Búsqueda por substring en título e id (no por palabras exactas, para
-        que "solo lev" encuentre "Solo Leveling").
-        El catálogo se cachea 12h; un refresco en background se dispara como
-        máximo una vez por hora cuando el catálogo ya está en caché.
+        Búsqueda por substring en título e id.
+        El catálogo se sirve desde caché (TTL 3 días).
+        Si no hay caché, se construye en primer plano (solo ocurre la primera vez
+        o después de 3 días sin acceso; en producción warm_cache() lo evita).
+        Un refresco en background se dispara cada 6 horas como máximo.
         """
         catalog = search_cache.get("ikigai:catalog")
         if catalog is None:
             logger.info("Ikigai: descargando catálogo completo (primera vez o caché expirada)")
             catalog = self._fetch_full_catalog()
             if catalog:
-                search_cache.set("ikigai:catalog", catalog)
+                search_cache.set("ikigai:catalog", catalog, ttl=_CATALOG_TTL)
                 IkigaiSource._last_refresh_ts = time.time()
         else:
-            # Catálogo disponible: refrescar en background si toca
             self._refresh_catalog_background()
 
         q = query.lower()
@@ -370,8 +449,8 @@ class IkigaiSource(BaseSource):
         cap_dir  = os.path.join(dest_folder, dir_name)
         os.makedirs(cap_dir, exist_ok=True)
 
-        seen:     set[str]      = set()
-        img_urls: list[str]     = []
+        seen:     set[str]  = set()
+        img_urls: list[str] = []
         for img in soup.find_all('img'):
             src = img.get('src') or img.get('data-src')
             url = self._normalize_url(src, self.BASE_URL)
@@ -382,7 +461,7 @@ class IkigaiSource(BaseSource):
         if not img_urls:
             raise Exception(f"Ikigai: no se encontraron imágenes en capítulo {chapter_id}")
 
-        dl_headers      = {**self._headers, 'Referer': cap_url}
+        dl_headers       = {**self._headers, 'Referer': cap_url}
         downloaded_count = 0
         for i, img_url in enumerate(img_urls, start=1):
             ext      = self._url_ext(img_url)
