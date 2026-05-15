@@ -6,7 +6,7 @@ import os
 import re
 import time
 from pathlib import Path
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse
 
 import cloudscraper
 import requests
@@ -21,9 +21,9 @@ _TIMEOUT = 30
 
 
 class NartagSource(BaseSource):
-    BASE_URL = "https://nartag.com"
-    CDN      = "https://nartag.com/wp-content/uploads"
-    UA       = "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0"
+    BASE_URL   = "https://nartag.com"
+    READER_URL = "https://lector.nartag.com"
+    UA         = "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0"
 
     def __init__(self):
         self.scraper = cloudscraper.create_scraper()
@@ -38,20 +38,10 @@ class NartagSource(BaseSource):
 
     def _get(self, url: str, **kwargs):
         kwargs.setdefault('timeout', _TIMEOUT)
-        # Fusionar headers por defecto con los proporcionados en la llamada
         headers = self._headers.copy()
         if 'headers' in kwargs:
             headers.update(kwargs.pop('headers'))
         resp = self.scraper.get(url, headers=headers, **kwargs)
-        resp.raise_for_status()
-        return resp
-
-    def _post(self, url: str, **kwargs):
-        kwargs.setdefault('timeout', _TIMEOUT)
-        headers = self._headers.copy()
-        if 'headers' in kwargs:
-            headers.update(kwargs.pop('headers'))
-        resp = self.scraper.post(url, headers=headers, **kwargs)
         resp.raise_for_status()
         return resp
 
@@ -65,36 +55,16 @@ class NartagSource(BaseSource):
                 last_exc = exc
                 if attempt < retries - 1:
                     wait = backoff * (2 ** attempt)
-                    logger.warning(f"Nartag: reintento {attempt + 1}/{retries - 1} "
-                                   f"para {url[:80]}… (espera {wait:.1f}s): {exc}")
+                    logger.warning(
+                        f"Nartag: reintento {attempt + 1}/{retries - 1} "
+                        f"para {url[:80]}… (espera {wait:.1f}s): {exc}"
+                    )
                     time.sleep(wait)
         raise last_exc
 
     # -----------------------------------------------------------------------
     # URL helpers
     # -----------------------------------------------------------------------
-
-    @staticmethod
-    def _normalize_url(src: str, base_url: str) -> str | None:
-        """
-        Normaliza una URL de imagen a absoluta.
-        Elimina sufijos de thumbnail WordPress (ej. -300x400.jpg → .jpg).
-        Descarta URLs que no sean imágenes o sean banners.
-        """
-        if not src:
-            return None
-        src = src.strip()
-        if src.startswith('//'):
-            src = 'https:' + src
-        elif src.startswith('/'):
-            src = urljoin(base_url, src)
-        if not re.search(r'\.(jpg|jpeg|png|webp)(\?.*)?$', src, re.I):
-            return None
-        # Eliminar dimensiones de thumbnail WordPress: -300x400.jpg → .jpg
-        src = re.sub(r'-\d+x\d+(\.\w+)$', r'\1', src)
-        if 'banner' in src.lower():
-            return None
-        return src
 
     @staticmethod
     def _url_ext(url: str) -> str:
@@ -104,10 +74,6 @@ class NartagSource(BaseSource):
 
     @staticmethod
     def _best_cover_url(img_tag, base_url: str = '') -> str:
-        """
-        Elige la URL de mayor resolución desde srcset, data-srcset o src.
-        Elimina sufijos de thumbnail WordPress del resultado.
-        """
         if not img_tag:
             return ''
         srcset = img_tag.get('srcset', '') or img_tag.get('data-srcset', '')
@@ -135,6 +101,123 @@ class NartagSource(BaseSource):
         )
 
     # -----------------------------------------------------------------------
+    # Lector: hacer POST al authorize y extraer imágenes del manga
+    # -----------------------------------------------------------------------
+
+    def _get_reader_url(self, cap_url: str) -> tuple[str, dict]:
+        """
+        Replica el flujo del form POST automático:
+        1. Obtiene el HTML del capítulo y extrae los campos del form rk_madara_redirect
+        2. Hace POST a /wp-json/rk/v1/authorize con esos campos
+        3. Devuelve (url_final_del_lector, fields) para usarlos como referer y contexto
+        """
+        try:
+            html = self._get(cap_url).text
+        except Exception as exc:
+            raise Exception(f"Nartag: error al obtener página del capítulo: {exc}") from exc
+
+        soup = BeautifulSoup(html, 'html.parser')
+        form = soup.find('form', id='rk_madara_redirect')
+        if not form:
+            raise Exception(
+                f"Nartag: no se encontró el form de redirección en '{cap_url}'"
+            )
+
+        fields = {
+            inp['name']: inp.get('value', '')
+            for inp in form.find_all('input', {'type': 'hidden'})
+            if inp.get('name')
+        }
+        action       = form.get('action', f"{self.READER_URL}/wp-json/rk/v1/authorize")
+        redirect_url = fields.get('redirect_url', '')
+
+        if not redirect_url:
+            raise Exception(
+                f"Nartag: no se encontró redirect_url en el form de '{cap_url}'"
+            )
+
+        logger.debug(f"Nartag: form fields → {fields}")
+
+        try:
+            resp = self.scraper.post(
+                action,
+                data=fields,
+                headers={
+                    **self._headers,
+                    'Referer':      cap_url,
+                    'Origin':       self.BASE_URL,
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                timeout=_TIMEOUT,
+                allow_redirects=True,
+            )
+            resp.raise_for_status()
+        except Exception as exc:
+            raise Exception(
+                f"Nartag: error en POST a authorize '{action}': {exc}"
+            ) from exc
+
+        final_url = resp.url
+        logger.info(f"Nartag: URL final del lector tras authorize → {final_url}")
+        return final_url, fields
+
+    def _extract_manga_images(self, reader_url: str, referer: str) -> list[str]:
+        """
+        Descarga la página del lector (ya autenticada vía cookie de sesión
+        en self.scraper) y extrae las imágenes reales del manga.
+
+        Las imágenes del manga están en:
+          nartag.com/wp-content/uploads/WP-manga/data/...
+        y NO tienen sufijo de thumbnail WordPress (-NNNxNNN).
+        """
+        try:
+            resp = self.scraper.get(
+                reader_url,
+                headers={**self._headers, 'Referer': referer},
+                timeout=_TIMEOUT,
+            )
+            resp.raise_for_status()
+            html = resp.text
+        except Exception as exc:
+            raise Exception(
+                f"Nartag: error al obtener lector '{reader_url}': {exc}"
+            ) from exc
+
+        soup     = BeautifulSoup(html, 'html.parser')
+        img_urls: list[str] = []
+        seen:     set[str]  = set()
+
+        def _is_manga_image(url: str) -> bool:
+            if not url:
+                return False
+            parsed = urlparse(url)
+            # Las imágenes reales vienen de nartag.com, no del lector
+            if parsed.netloc not in ('nartag.com', 'www.nartag.com'):
+                return False
+            # Deben estar en la ruta de datos del manga
+            if 'wp-content/uploads/WP-manga/data/' not in parsed.path:
+                return False
+            # Sin sufijo de thumbnail (-768x432, etc.)
+            if re.search(r'-\d+x\d+\.', parsed.path):
+                return False
+            # Extensión válida
+            if not re.search(r'\.(jpg|jpeg|png|webp|gif)$', parsed.path, re.I):
+                return False
+            return True
+
+        for img in soup.find_all('img'):
+            src = (
+                img.get('src') or img.get('data-src') or
+                img.get('data-original') or img.get('data-lazy-src') or ''
+            ).strip()
+            if _is_manga_image(src) and src not in seen:
+                seen.add(src)
+                img_urls.append(src)
+
+        logger.info(f"Nartag: {len(img_urls)} imágenes del manga en '{reader_url}'")
+        return img_urls
+
+    # -----------------------------------------------------------------------
     # Búsqueda
     # -----------------------------------------------------------------------
 
@@ -147,7 +230,6 @@ class NartagSource(BaseSource):
         encoded = requests.utils.quote(query)
         url     = f"{self.BASE_URL}/?s={encoded}&post_type=wp-manga"
         try:
-            # Usar self.scraper (cloudscraper) para evitar bloqueos de Cloudflare
             html = self._get(url).text
         except Exception as exc:
             logger.error(f"Nartag: error en búsqueda '{query}': {exc}")
@@ -172,7 +254,13 @@ class NartagSource(BaseSource):
             cover = self._best_cover_url(thumb.find('img'), self.BASE_URL)
             results.append({'id': slug, 'title': title, 'cover': cover})
 
-        search_cache.set(cache_key, results)
+        if results:
+            search_cache.set(cache_key, results)
+        else:
+            logger.warning(
+                f"Nartag: búsqueda '{query}' devolvió 0 resultados — no se cachea"
+            )
+
         return results
 
     # -----------------------------------------------------------------------
@@ -192,7 +280,6 @@ class NartagSource(BaseSource):
             logger.error(f"Nartag: error obteniendo detalles para '{content_id}': {exc}")
             return {'title': content_id, 'cover': '', 'synopsis': ''}
 
-        # Título
         title     = content_id
         title_tag = soup.find('h1')
         if title_tag:
@@ -200,14 +287,10 @@ class NartagSource(BaseSource):
                 badge.decompose()
             title = title_tag.get_text(strip=True)
 
-        # Portada — intenta varios selectores en orden
         cover = ''
         for selector in [
-            '.tab-thumb img',
-            '.tab-thumb.c-image-hover img',
-            '.summary_image img',
-            'img.img-responsive',
-            'img.wp-post-image',
+            '.tab-thumb img', '.tab-thumb.c-image-hover img',
+            '.summary_image img', 'img.img-responsive', 'img.wp-post-image',
         ]:
             img = soup.select_one(selector)
             if img:
@@ -215,31 +298,17 @@ class NartagSource(BaseSource):
                 if cover:
                     break
 
-        if cover:
-            logger.debug(f"Nartag: portada encontrada para '{content_id}': {cover}")
-        else:
-            logger.warning(f"Nartag: no se encontró portada para '{content_id}'")
-
-        # Sinopsis
-        synopsis = ''
-        summary_header = soup.find('h5', string=lambda x: x and 'summary' in x.lower())
-        if summary_header:
-            parent = summary_header.find_parent('div')
-            if parent:
-                content_div = parent.find('div', recursive=False)
-                if content_div:
-                    synopsis = content_div.get_text(strip=True)
-        if not synopsis:
-            summary_div = soup.select_one('.summary__content, .description-summary')
-            if summary_div:
-                synopsis = summary_div.get_text(strip=True)
+        synopsis    = ''
+        summary_div = soup.select_one('.summary__content, .description-summary')
+        if summary_div:
+            synopsis = summary_div.get_text(strip=True)
 
         result = {'title': title, 'cover': cover, 'synopsis': synopsis}
         search_cache.set(cache_key, result)
         return result
 
     # -----------------------------------------------------------------------
-    # Capítulos
+    # Capítulos — via AJAX POST
     # -----------------------------------------------------------------------
 
     def get_chapters(self, content_id: str) -> list:
@@ -259,7 +328,9 @@ class NartagSource(BaseSource):
             resp.raise_for_status()
             html = resp.text
         except Exception as exc:
-            logger.error(f"Nartag: error obteniendo capítulos para '{content_id}': {exc}")
+            logger.error(
+                f"Nartag: error obteniendo capítulos para '{content_id}': {exc}"
+            )
             return []
 
         pattern   = re.compile(
@@ -291,50 +362,37 @@ class NartagSource(BaseSource):
                          dest_folder: str) -> str:
         m       = re.search(r'capitulo-(\d+(?:\.\d+)?)', chapter_id)
         cap_num = m.group(1) if m else chapter_id
-        dir_name = (f"cap_{int(float(cap_num)):04d}"
-                    if cap_num.replace('.', '', 1).isdigit()
-                    else f"cap_{cap_num}")
-        cap_dir  = os.path.join(dest_folder, dir_name)
+        dir_name = (
+            f"cap_{int(float(cap_num)):04d}"
+            if cap_num.replace('.', '', 1).isdigit()
+            else f"cap_{cap_num}"
+        )
+        cap_dir = os.path.join(dest_folder, dir_name)
         os.makedirs(cap_dir, exist_ok=True)
 
+        # ── 1. URL canónica del capítulo ─────────────────────────────────────
         cap_url = f"{self.BASE_URL}/manga/{content_id}/capitulos/{chapter_id}/"
-        try:
-            html = self._get(cap_url,
-                             headers={'Referer': f"{self.BASE_URL}/manga/{content_id}/"}).text
-        except Exception as exc:
-            raise Exception(f"Nartag: error HTTP al obtener capítulo '{chapter_id}': {exc}") from exc
 
-        soup = BeautifulSoup(html, 'html.parser')
+        # ── 2. POST al authorize → obtener URL del lector con cookie de sesión
+        reader_url, _ = self._get_reader_url(cap_url)
 
-        # Extraer imágenes respetando orden del DOM
-        container = soup.select_one('.reading-content')
-        imgs      = (container.find_all('img') if container
-                     else soup.find_all('img', class_='wp-manga-chapter-img'))
-        if not imgs:
-            # Fallback: cualquier img con extensión de imagen
-            imgs = [img for img in soup.find_all('img')
-                    if re.search(r'\.(jpg|jpeg|png|webp)', img.get('src', ''), re.I)]
-
-        seen: set[str]      = set()
-        img_urls: list[str] = []
-        for img in imgs:
-            src = img.get('src') or img.get('data-src') or img.get('data-lazy-src')
-            url = self._normalize_url(src, self.BASE_URL)
-            if url and url not in seen:
-                seen.add(url)
-                img_urls.append(url)
-
+        # ── 3. Extraer imágenes del manga desde la página del lector ─────────
+        img_urls = self._extract_manga_images(reader_url, referer=cap_url)
         if not img_urls:
-            raise Exception(f"Nartag: no se encontraron imágenes en '{chapter_id}'")
+            raise Exception(
+                f"Nartag: no se encontraron imágenes del manga en '{reader_url}'"
+            )
 
-        # Verificar completitud real antes de redownload
+        # ── 4. Saltar si ya está completo ────────────────────────────────────
         existing = self._count_images(cap_dir)
         if existing >= len(img_urls):
-            logger.debug(f"Nartag: capítulo ya completo ({existing} imágenes): {cap_dir}")
+            logger.debug(
+                f"Nartag: capítulo ya completo ({existing} imágenes): {cap_dir}"
+            )
             return cap_dir
 
-        # Descargar — lanza en el primer fallo (capítulo completo o nada)
-        dl_headers = {'User-Agent': self.UA, 'Referer': cap_url}
+        # ── 5. Descargar ─────────────────────────────────────────────────────
+        dl_headers = {'User-Agent': self.UA, 'Referer': reader_url}
         for i, img_url in enumerate(img_urls, start=1):
             ext      = self._url_ext(img_url)
             filepath = os.path.join(cap_dir, f"{i:04d}.{ext}")
@@ -351,4 +409,7 @@ class NartagSource(BaseSource):
                     f"del capítulo '{chapter_id}': {exc}"
                 ) from exc
 
+        logger.info(
+            f"Nartag: capítulo '{chapter_id}' descargado ({len(img_urls)} imágenes)"
+        )
         return cap_dir
