@@ -1,16 +1,30 @@
 # core/disk_cache.py
-import os
-import json
 import hashlib
+import json
+import os
+import tempfile
 import time
 from pathlib import Path
 
 # Directorio de caché (en la raíz del proyecto, carpeta 'cache')
 CACHE_DIR = Path(__file__).parent.parent / "cache"
 
+_DEFAULT_TTL = 60 * 60 * 24   # 24 horas
+
+
 class DiskCache:
-    """Caché persistente en disco con expiración por tiempo (TTL)."""
-    def __init__(self, ttl=43200):  # 12 horas por defecto
+    """
+    Caché persistente en disco con expiración por tiempo (TTL).
+
+    Mejoras respecto a la versión original:
+      - set() acepta un parámetro ttl opcional que sobreescribe el TTL de
+        instancia en esa llamada concreta.
+      - Escritura atómica: se escribe en un fichero temporal y luego se
+        renombra (rename es atómico en POSIX). Evita JSON corrupto si el
+        proceso muere a mitad de escritura.
+    """
+
+    def __init__(self, ttl: int = _DEFAULT_TTL):
         self.ttl = ttl
         CACHE_DIR.mkdir(exist_ok=True)
 
@@ -31,33 +45,51 @@ class DiskCache:
                 data = json.load(f)
             if data['expires'] > time.time():
                 return data['value']
-            else:
-                # Expirado, lo borramos
-                path.unlink()
-                return None
-        except (json.JSONDecodeError, OSError):
+            path.unlink(missing_ok=True)
+            return None
+        except (json.JSONDecodeError, KeyError, OSError):
+            # Archivo corrupto o estructura inesperada — lo descartamos
+            path.unlink(missing_ok=True)
             return None
 
-    def set(self, key: str, value):
-        """Guarda un valor en la caché con el TTL configurado."""
+    def set(self, key: str, value, ttl: int | None = None) -> None:
+        """
+        Guarda un valor en la caché.
+
+        Args:
+            key:   Clave de caché.
+            value: Valor serializable en JSON.
+            ttl:   TTL en segundos para esta entrada. Si es None, usa self.ttl.
+        """
+        effective_ttl = ttl if ttl is not None else self.ttl
         path = self._get_path(key)
         data = {
-            'expires': time.time() + self.ttl,
-            'value': value
+            'expires': time.time() + effective_ttl,
+            'value':   value,
         }
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False)
 
-    def delete(self, key: str):
+        # Escritura atómica: temporal en el mismo directorio → rename
+        try:
+            fd, tmp_path = tempfile.mkstemp(dir=CACHE_DIR, suffix='.json.tmp')
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False)
+            os.replace(tmp_path, path)   # atómico en POSIX y Windows (Python 3.3+)
+        except OSError:
+            # Si algo falla, intentamos limpiar el temporal
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+    def delete(self, key: str) -> None:
         """Elimina una entrada de la caché."""
-        path = self._get_path(key)
-        if path.exists():
-            path.unlink()
+        self._get_path(key).unlink(missing_ok=True)
 
-    def clear(self):
+    def clear(self) -> None:
         """Limpia toda la caché."""
         for f in CACHE_DIR.glob("*.json"):
-            f.unlink()
+            f.unlink(missing_ok=True)
 
-# Instancia global para usar en la aplicación
-search_cache = DiskCache(ttl=43200)  # 24 horas
+
+# Instancia global
+search_cache = DiskCache(ttl=_DEFAULT_TTL)

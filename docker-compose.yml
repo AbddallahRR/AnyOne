@@ -9,6 +9,8 @@ services:
       - ~/DescargasComics:/data/descargas
       # Base de datos SQLite persiste en tu máquina
       - ~/.config/comic_web:/data/config
+      # Caché de búsquedas — crítico para no regenerar al reiniciar
+      - ~/.config/comic_web/cache:/app/cache
     environment:
       - BASE_DOWNLOAD_DIR=/data/descargas
       - DB_DIR=/data/config
