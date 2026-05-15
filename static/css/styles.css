@@ -262,3 +262,226 @@
   color: var(--muted);
 }
 .delete-chapter-btn:hover { background: rgba(248,113,113,0.08); border-color: rgba(248,113,113,0.3); color: #f87171; transform: scale(1.08); }
+/* ============================================================
+   RESPONSIVE — Comic Web
+   ============================================================ */
+
+/* ── Nav layout ── */
+.app-nav {
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: rgba(13,13,20,0.88);
+  backdrop-filter: blur(18px);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+}
+@media (min-width: 640px) {
+  .app-nav {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    height: 64px;
+    padding: 0 24px;
+  }
+}
+
+.nav-row { display: flex; align-items: center; }
+
+.nav-row--top {
+  justify-content: space-between;
+  padding: 14px 0 8px;
+}
+.nav-row--tabs {
+  justify-content: center;
+  padding-bottom: 10px;
+}
+@media (min-width: 640px) {
+  .nav-row--top  { padding: 0; }
+  .nav-row--tabs { padding: 0; }
+}
+
+/* ── Search bar rows ── */
+.search-bar-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+@media (min-width: 560px) {
+  .search-bar-row { flex-direction: row; align-items: center; flex-wrap: wrap; }
+}
+
+.search-source-select { width: 100%; }
+@media (min-width: 560px) {
+  .search-source-select { width: auto; min-width: 150px; flex-shrink: 0; }
+}
+
+.search-input-group {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Ocultar texto del botón en pantallas muy estrechas */
+@media (max-width: 400px) {
+  .btn-label { display: none; }
+  .btn-primary { padding: 10px 14px; }
+}
+
+/* ── Library: filter chips con scroll horizontal en móvil ── */
+@media (max-width: 480px) {
+  #library-status-filters {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 4px;
+  }
+  #library-status-filters::-webkit-scrollbar { display: none; }
+  #library-search-input { max-width: 100% !important; }
+}
+
+/* ── Media grid: mínimo 2 cols en pantallas muy pequeñas ── */
+@media (max-width: 360px) {
+  .media-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+}
+
+/* ── Padding del contenedor en móvil ── */
+@media (max-width: 480px) {
+  .app-nav ~ div > div[style*="max-width"] { padding-left: 14px !important; padding-right: 14px !important; }
+}
+
+/* ── Modal: bottom sheet en móvil ── */
+@media (max-width: 480px) {
+  .modal-header { padding: 16px 18px; }
+  .modal-header h3 { font-size: 15px; }
+}
+
+/* ── Contenedor principal ── */
+.page-content {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 28px 24px;
+}
+@media (max-width: 480px) {
+  .page-content { padding: 20px 14px; }
+}
+
+/* ============================================================
+   Library filter chips
+   ============================================================ */
+
+  /* ── Filter chip group — mismo patrón que .tab-nav ── */
+  .lib-filter-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  /* ── Base chip ── */
+  .lib-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--ff-body);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 7px 14px 7px 11px;
+    border-radius: 100px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+    cursor: pointer;
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+    transition:
+      background   0.18s ease,
+      border-color 0.18s ease,
+      color        0.18s ease,
+      box-shadow   0.18s ease,
+      transform    0.12s ease;
+  }
+  .lib-filter:hover:not(.active) {
+    background: var(--raised);
+    border-color: var(--border-hi);
+    color: var(--text-dim);
+  }
+  .lib-filter:active { transform: scale(0.95); }
+
+  /* Sin dot */
+  .lf-none { padding: 7px 14px; }
+
+  /* ── Status dot ── */
+  .lf-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    transition: box-shadow 0.2s ease;
+  }
+  .lf-dot--all       { background: var(--accent); }
+  .lf-dot--watching  { background: #60a5fa; }
+  .lf-dot--completed { background: #34d399; }
+  .lf-dot--pending   { background: #fbbf24; }
+
+  /* ── Active: Todas ── */
+  .lib-filter.active[data-filter="all"] {
+    background: rgba(124,92,252,0.14);
+    border-color: rgba(124,92,252,0.40);
+    color: #c4b5fd;
+    box-shadow: 0 0 0 3px rgba(124,92,252,0.08);
+  }
+  .lib-filter.active[data-filter="all"] .lf-dot--all {
+    box-shadow: 0 0 6px 2px rgba(124,92,252,0.6);
+  }
+
+  /* ── Active: Mirando ── */
+  .lib-filter.active[data-filter="watching"] {
+    background: rgba(96,165,250,0.12);
+    border-color: rgba(96,165,250,0.38);
+    color: #93c5fd;
+    box-shadow: 0 0 0 3px rgba(96,165,250,0.07);
+  }
+  .lib-filter.active[data-filter="watching"] .lf-dot--watching {
+    box-shadow: 0 0 6px 2px rgba(96,165,250,0.6);
+  }
+
+  /* ── Active: Visto ── */
+  .lib-filter.active[data-filter="completed"] {
+    background: rgba(52,211,153,0.10);
+    border-color: rgba(52,211,153,0.36);
+    color: #6ee7b7;
+    box-shadow: 0 0 0 3px rgba(52,211,153,0.07);
+  }
+  .lib-filter.active[data-filter="completed"] .lf-dot--completed {
+    box-shadow: 0 0 6px 2px rgba(52,211,153,0.6);
+  }
+
+  /* ── Active: Pendiente ── */
+  .lib-filter.active[data-filter="pending"] {
+    background: rgba(251,191,36,0.10);
+    border-color: rgba(251,191,36,0.36);
+    color: #fde68a;
+    box-shadow: 0 0 0 3px rgba(251,191,36,0.06);
+  }
+  .lib-filter.active[data-filter="pending"] .lf-dot--pending {
+    box-shadow: 0 0 6px 2px rgba(251,191,36,0.5);
+  }
+
+  /* ── Active: Sin etiqueta ── */
+  .lib-filter.active[data-filter="none"] {
+    background: rgba(255,255,255,0.07);
+    border-color: rgba(255,255,255,0.20);
+    color: var(--text-dim);
+    box-shadow: 0 0 0 3px rgba(255,255,255,0.04);
+  }
+
+  /* ── Library search focus ── */
+  #library-search-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(124,92,252,0.1);
+  }

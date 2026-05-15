@@ -9,7 +9,7 @@
     style.textContent = `
       #qi-indicator {
         position: fixed;
-        top: 14px;
+        top: var(--qi-top, 14px);
         right: 14px;
         background: rgba(10,10,15,0.88);
         border: 1px solid rgba(255,255,255,0.12);
@@ -60,7 +60,7 @@
       /* ── Popup ── */
       #qi-popup {
         position: fixed;
-        top: 58px;
+        top: var(--qi-popup-top, 58px);
         right: 14px;
         background: rgba(10,10,15,0.95);
         border: 1px solid rgba(255,255,255,0.12);
@@ -200,11 +200,29 @@
       .qi-close:hover { background: rgba(255,255,255,0.07); color: var(--text); transform: rotate(90deg); }
 
       @media (max-width: 640px) {
-        #qi-indicator { top: 10px; right: 10px; }
-        #qi-popup { top: 52px; right: 10px; left: 10px; max-width: none; }
+        #qi-indicator { right: 10px; }
+        #qi-popup { right: 10px; left: 10px; max-width: none; }
       }
     `;
     document.head.appendChild(style);
+  }
+
+  // ── Posicionar bajo el nav ─────────────────────────────────────────────
+  function positionUnderNav() {
+    const nav = document.querySelector('.app-nav') || document.querySelector('nav');
+    if (!nav) return;
+    const navBottom = nav.getBoundingClientRect().bottom;
+    const offset = navBottom + 10;
+    document.documentElement.style.setProperty('--qi-top', offset + 'px');
+    document.documentElement.style.setProperty('--qi-popup-top', (offset + 44) + 'px');
+  }
+
+  positionUnderNav();
+
+  // Re-calcular si el nav cambia de altura (responsive wrap)
+  if (window.ResizeObserver) {
+    const nav = document.querySelector('.app-nav') || document.querySelector('nav');
+    if (nav) new ResizeObserver(positionUnderNav).observe(nav);
   }
 
   // ── Crear indicador ────────────────────────────────────────────────────

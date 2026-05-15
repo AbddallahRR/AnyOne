@@ -3,54 +3,163 @@
 
 {% block title %}Comic Web — Anime & Manga{% endblock %}
 
+{% block extra_head %}
+<style>
+  /* ── Filter chip group — mismo patrón que .tab-nav ── */
+  .lib-filter-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  /* ── Base chip ── */
+  .lib-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--ff-body);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 7px 14px 7px 11px;
+    border-radius: 100px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+    cursor: pointer;
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+    transition:
+      background   0.18s ease,
+      border-color 0.18s ease,
+      color        0.18s ease,
+      box-shadow   0.18s ease,
+      transform    0.12s ease;
+  }
+  .lib-filter:hover:not(.active) {
+    background: var(--raised);
+    border-color: var(--border-hi);
+    color: var(--text-dim);
+  }
+  .lib-filter:active { transform: scale(0.95); }
+
+  /* Sin dot */
+  .lf-none { padding: 7px 14px; }
+
+  /* ── Status dot ── */
+  .lf-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    transition: box-shadow 0.2s ease;
+  }
+  .lf-dot--all       { background: var(--accent); }
+  .lf-dot--watching  { background: #60a5fa; }
+  .lf-dot--completed { background: #34d399; }
+  .lf-dot--pending   { background: #fbbf24; }
+
+  /* ── Active: Todas ── */
+  .lib-filter.active[data-filter="all"] {
+    background: rgba(124,92,252,0.14);
+    border-color: rgba(124,92,252,0.40);
+    color: #c4b5fd;
+    box-shadow: 0 0 0 3px rgba(124,92,252,0.08);
+  }
+  .lib-filter.active[data-filter="all"] .lf-dot--all {
+    box-shadow: 0 0 6px 2px rgba(124,92,252,0.6);
+  }
+
+  /* ── Active: Mirando ── */
+  .lib-filter.active[data-filter="watching"] {
+    background: rgba(96,165,250,0.12);
+    border-color: rgba(96,165,250,0.38);
+    color: #93c5fd;
+    box-shadow: 0 0 0 3px rgba(96,165,250,0.07);
+  }
+  .lib-filter.active[data-filter="watching"] .lf-dot--watching {
+    box-shadow: 0 0 6px 2px rgba(96,165,250,0.6);
+  }
+
+  /* ── Active: Visto ── */
+  .lib-filter.active[data-filter="completed"] {
+    background: rgba(52,211,153,0.10);
+    border-color: rgba(52,211,153,0.36);
+    color: #6ee7b7;
+    box-shadow: 0 0 0 3px rgba(52,211,153,0.07);
+  }
+  .lib-filter.active[data-filter="completed"] .lf-dot--completed {
+    box-shadow: 0 0 6px 2px rgba(52,211,153,0.6);
+  }
+
+  /* ── Active: Pendiente ── */
+  .lib-filter.active[data-filter="pending"] {
+    background: rgba(251,191,36,0.10);
+    border-color: rgba(251,191,36,0.36);
+    color: #fde68a;
+    box-shadow: 0 0 0 3px rgba(251,191,36,0.06);
+  }
+  .lib-filter.active[data-filter="pending"] .lf-dot--pending {
+    box-shadow: 0 0 6px 2px rgba(251,191,36,0.5);
+  }
+
+  /* ── Active: Sin etiqueta ── */
+  .lib-filter.active[data-filter="none"] {
+    background: rgba(255,255,255,0.07);
+    border-color: rgba(255,255,255,0.20);
+    color: var(--text-dim);
+    box-shadow: 0 0 0 3px rgba(255,255,255,0.04);
+  }
+
+  /* ── Library search focus ── */
+  #library-search-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(124,92,252,0.1);
+  }
+</style>
+{% endblock %}
+
 {% block content %}
 <div style="position:relative; z-index:1; min-height:100vh;">
 
   <!-- ── Nav ─────────────────────────────────────────────────────────── -->
-  <nav class="nav-enter" style="
-    padding: 0 24px;
-    height: 64px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    border-bottom: 1px solid var(--border);
-    position: sticky;
-    top: 0;
-    background: rgba(13,13,20,0.82);
-    backdrop-filter: blur(18px);
-    z-index: 10;">
-    <span style="font-family:var(--ff-head); font-size:22px; font-weight:800; letter-spacing:-0.8px;" class="accent-gradient">
-      Comic Web
-    </span>
-
-    <!-- Pill tabs inside nav -->
-    <div class="tab-nav">
-      <button id="tab-anime" class="tab-btn">
-        <i class="fas fa-film" style="margin-right:5px; font-size:11px;"></i>Anime
-      </button>
-      <button id="tab-manga" class="tab-btn">
-        <i class="fas fa-book" style="margin-right:5px; font-size:11px;"></i>Manga
-      </button>
-      <button id="tab-library" class="tab-btn active">
-        <i class="fas fa-layer-group" style="margin-right:5px; font-size:11px;"></i>Biblioteca
-      </button>
+  <nav class="nav-enter app-nav">
+    <!-- Logo + queue hint (siempre fila superior) -->
+    <div class="nav-row nav-row--top">
+      <span style="font-family:var(--ff-head); font-size:22px; font-weight:800; letter-spacing:-0.8px;" class="accent-gradient">
+        Comic Web
+      </span>
+      <span id="queue-hint" style="font-size:12px; color:var(--muted);"></span>
     </div>
 
-    <span id="queue-hint" style="font-size:12px; color:var(--muted); min-width:60px; text-align:right;"></span>
+    <!-- Tabs: en desktop van inline con el logo, en móvil bajan -->
+    <div class="nav-row nav-row--tabs">
+      <div class="tab-nav">
+        <button id="tab-anime" class="tab-btn">
+          <i class="fas fa-film" style="margin-right:5px; font-size:11px;"></i>Anime
+        </button>
+        <button id="tab-manga" class="tab-btn">
+          <i class="fas fa-book" style="margin-right:5px; font-size:11px;"></i>Manga
+        </button>
+        <button id="tab-library" class="tab-btn active">
+          <i class="fas fa-layer-group" style="margin-right:5px; font-size:11px;"></i>Biblioteca
+        </button>
+      </div>
+    </div>
   </nav>
 
-  <div style="max-width:1240px; margin:0 auto; padding:28px 24px;">
+  <div class="page-content">
 
     <!-- ── Anime panel ──────────────────────────────────────────────── -->
     <div id="anime-panel" class="content-panel hidden">
       <div class="card" style="padding:16px; margin-bottom:24px;">
-        <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
-          <select id="anime-source" class="input-field" style="width:auto; min-width:150px;">
+        <div class="search-bar-row">
+          <select id="anime-source" class="input-field search-source-select">
             <option value="jkanime">jkanime.net</option>
           </select>
-          <div style="flex:1; min-width:200px; display:flex; gap:8px;">
-            <input type="text" id="anime-search-input" placeholder="Buscar anime… (ej: one piece)" class="input-field" style="flex:1;">
-            <button id="anime-search-btn" class="btn-primary"><i class="fas fa-search"></i> Buscar</button>
+          <div class="search-input-group">
+            <input type="text" id="anime-search-input" placeholder="Buscar anime… (ej: one piece)" class="input-field" style="flex:1; min-width:0;">
+            <button id="anime-search-btn" class="btn-primary"><i class="fas fa-search"></i><span class="btn-label"> Buscar</span></button>
             <button id="anime-refresh-btn" class="btn-ghost" title="Forzar actualización"><i class="fas fa-rotate-right"></i></button>
           </div>
         </div>
@@ -66,17 +175,17 @@
     <!-- ── Manga panel ──────────────────────────────────────────────── -->
     <div id="manga-panel" class="content-panel hidden">
       <div class="card" style="padding:16px; margin-bottom:24px;">
-        <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
-          <select id="manga-source" class="input-field" style="width:auto; min-width:150px;">
+        <div class="search-bar-row">
+          <select id="manga-source" class="input-field search-source-select">
             <option value="all">Todas las fuentes</option>
             <option value="olympus">Olympus Biblioteca</option>
             <option value="nartag">Nartag</option>
             <option value="manhwaweb">ManhwaWeb</option>
             <option value="ikigai">Ikigai</option>
           </select>
-          <div style="flex:1; min-width:200px; display:flex; gap:8px;">
-            <input type="text" id="manga-search-input" placeholder="Buscar manga… (ej: solo leveling)" class="input-field" style="flex:1;">
-            <button id="manga-search-btn" class="btn-primary"><i class="fas fa-search"></i> Buscar</button>
+          <div class="search-input-group">
+            <input type="text" id="manga-search-input" placeholder="Buscar manga… (ej: solo leveling)" class="input-field" style="flex:1; min-width:0;">
+            <button id="manga-search-btn" class="btn-primary"><i class="fas fa-search"></i><span class="btn-label"> Buscar</span></button>
             <button id="manga-refresh-btn" class="btn-ghost" title="Forzar actualización"><i class="fas fa-rotate-right"></i></button>
           </div>
         </div>
@@ -117,19 +226,21 @@
             style="padding-left:36px; border-radius:100px;">
         </div>
 
-        <!-- Filter chips — separador via CSS ::before -->
-        <div style="display:flex; align-items:center; flex-wrap:wrap; gap:6px;" id="library-status-filters">
-          <button class="lib-filter active" data-filter="all">Todas</button>
-          <button class="lib-filter lib-filter--sep" data-filter="watching">
-            <i class="fas fa-eye" style="font-size:10px; margin-right:4px;"></i>Mirando
+        <!-- Filter chips -->
+        <div id="library-status-filters" class="lib-filter-group">
+          <button class="lib-filter active" data-filter="all">
+            <span class="lf-dot lf-dot--all"></span>Todas
           </button>
-          <button class="lib-filter lib-filter--sep" data-filter="completed">
-            <i class="fas fa-check-circle" style="font-size:10px; margin-right:4px;"></i>Visto
+          <button class="lib-filter" data-filter="watching">
+            <span class="lf-dot lf-dot--watching"></span>Mirando
           </button>
-          <button class="lib-filter lib-filter--sep" data-filter="pending">
-            <i class="fas fa-clock" style="font-size:10px; margin-right:4px;"></i>Pendiente
+          <button class="lib-filter" data-filter="completed">
+            <span class="lf-dot lf-dot--completed"></span>Visto
           </button>
-          <button class="lib-filter lib-filter--sep" data-filter="none">Sin etiqueta</button>
+          <button class="lib-filter" data-filter="pending">
+            <span class="lf-dot lf-dot--pending"></span>Pendiente
+          </button>
+          <button class="lib-filter lf-none" data-filter="none">Sin etiqueta</button>
         </div>
 
       </div>
@@ -157,52 +268,6 @@
 </div>
 {% endblock %}
 
-<style>
-  /* Filter chip buttons */
-  .lib-filter {
-    font-size: 12px;
-    font-weight: 600;
-    padding: 6px 16px;
-    border-radius: 100px;
-    border: 1px solid var(--border);
-    background: rgba(255,255,255,0.04);
-    color: var(--muted);
-    cursor: pointer;
-    transition: background .18s, border-color .18s, color .18s, box-shadow .18s;
-    letter-spacing: -0.01em;
-    white-space: nowrap;
-    position: relative;
-  }
-  .lib-filter:hover:not(.active) {
-    background: rgba(255,255,255,0.08);
-    color: var(--text-dim);
-  }
-  .lib-filter.active {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: #fff;
-    box-shadow: 0 0 18px rgba(124,92,252,0.25);
-  }
-
-  /* Dot separator before each non-first chip */
-  .lib-filter--sep::before {
-    content: '';
-    display: inline-block;
-    width: 3px;
-    height: 3px;
-    border-radius: 50%;
-    background: var(--muted);
-    margin-right: 10px;
-    vertical-align: middle;
-    opacity: 0.5;
-  }
-
-  /* Search input pill override */
-  #library-search-input:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(124,92,252,0.1);
-  }
-</style>
 
 {% block extra_scripts %}
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
