@@ -1,5 +1,7 @@
 // static/js/serie.js
 (function () {
+  'use strict';
+
   if (!window.serieData) {
     console.error('serie.js: window.serieData no definido');
     return;
@@ -8,27 +10,27 @@
   const { type, source, id } = window.serieData;
   const isLocal = source === 'local';
 
-  let chapters     = [];
-  let sortAsc      = true;
+  let chapters  = [];   // array canónico; renderChapters() lo refleja en el DOM
+  let sortAsc   = true;
 
   // ── Elementos DOM ──────────────────────────────────────────────────────
-  const coverImg          = document.getElementById('serie-cover');
-  const titleEl           = document.getElementById('serie-title');
-  const synopsisEl        = document.getElementById('serie-synopsis');
-  const downloadAllBtn    = document.getElementById('download-all-btn');
-  const continueBtn       = document.getElementById('continue-btn');
-  const deleteWatchedBtn  = document.getElementById('delete-watched-btn');
-  const currentChapterSpan = document.getElementById('current-chapter');
+  const coverImg            = document.getElementById('serie-cover');
+  const titleEl             = document.getElementById('serie-title');
+  const synopsisEl          = document.getElementById('serie-synopsis');
+  const downloadAllBtn      = document.getElementById('download-all-btn');
+  const continueBtn         = document.getElementById('continue-btn');
+  const deleteWatchedBtn    = document.getElementById('delete-watched-btn');
+  const currentChapterSpan  = document.getElementById('current-chapter');
   const progressPercentSpan = document.getElementById('progress-percent');
-  const progressBarFill   = document.getElementById('progress-bar-fill');
-  const chaptersContainer = document.getElementById('chapters-list');
-  const sortBtn           = document.getElementById('sort-btn');
-  const chaptersCount     = document.getElementById('chapters-count');
-  const badgeEl           = document.getElementById('serie-type-badge');
+  const progressBarFill     = document.getElementById('progress-bar-fill');
+  const chaptersContainer   = document.getElementById('chapters-list');
+  const sortBtn             = document.getElementById('sort-btn');
+  const chaptersCount       = document.getElementById('chapters-count');
+  const badgeEl             = document.getElementById('serie-type-badge');
 
-  function notify(msg, type = 'info') {
-    if (window.showNotification) window.showNotification(msg, type);
-    else console.log(`[${type}] ${msg}`);
+  function notify(msg, t = 'info') {
+    if (window.showNotification) window.showNotification(msg, t);
+    else console.log(`[${t}] ${msg}`);
   }
 
   // ── Detalles de la serie ───────────────────────────────────────────────
@@ -46,8 +48,8 @@
       if (data.cover) { coverImg.dataset.src = data.cover; coverImg.src = data.cover; }
 
       if (badgeEl) {
-        badgeEl.textContent  = type === 'anime' ? 'Anime' : 'Manga';
-        badgeEl.className    = `card-badge ${type === 'anime' ? 'badge-anime' : 'badge-manga'}`;
+        badgeEl.textContent = type === 'anime' ? 'Anime' : 'Manga';
+        badgeEl.className   = `card-badge ${type === 'anime' ? 'badge-anime' : 'badge-manga'}`;
       }
     } catch (err) {
       console.error('loadSerieDetails:', err);
@@ -59,20 +61,31 @@
   // ── Capítulos ──────────────────────────────────────────────────────────
   async function loadChapters() {
     chaptersContainer.innerHTML = `
-      <div style="grid-column:1/-1; display:flex; align-items:center; justify-content:center; gap:12px; padding:48px 20px; color:var(--muted);">
+      <div style="grid-column:1/-1; display:flex; align-items:center; justify-content:center;
+                  gap:12px; padding:48px 20px; color:var(--muted);">
         <div class="loading-spinner"></div>
         <span style="font-size:14px;">Cargando capítulos…</span>
       </div>`;
 
     try {
-      let remote = [];
-      let localSet = new Set();
+      let remote     = [];
+      let localSet   = new Set();
+      let watchedSet = new Set();
 
       if (isLocal) {
-        const res  = await fetch(`/api/chapters/local/${type}/${id}`);
-        const data = res.ok ? await res.json() : [];
-        remote = data.map(ch => ({ ...ch, is_downloaded: true }));
+        // [OPT-1] Capítulos + watched en paralelo
+        const [chapRes, watchRes] = await Promise.all([
+          fetch(`/api/chapters/local/${type}/${id}`),
+          fetch(`/api/watched/local:${id}`),
+        ]);
+        remote = chapRes.ok ? await chapRes.json() : [];
+        remote = remote.map(ch => ({ ...ch, is_downloaded: true }));
+        if (watchRes.ok) {
+          const data = await watchRes.json();
+          watchedSet = new Set((data.watched || []).map(Number));
+        }
       } else {
+        // [OPT-1] Remote + local en paralelo
         const [remoteRes, localRes] = await Promise.all([
           fetch(`/api/chapters/${type}/${source}/${id}`),
           fetch(`/api/chapters/local/${type}/${id}`),
@@ -81,16 +94,6 @@
         const localChaps = localRes.ok ? await localRes.json() : [];
         localSet = new Set(localChaps.map(ch => String(ch.number)));
         remote = remote.map(ch => ({ ...ch, is_downloaded: localSet.has(String(ch.number)) }));
-      }
-
-      // Capítulos vistos (solo local)
-      let watchedSet = new Set();
-      if (isLocal) {
-        try {
-          const res  = await fetch(`/api/watched/local:${id}`);
-          const data = res.ok ? await res.json() : {};
-          watchedSet = new Set((data.watched || []).map(Number));
-        } catch (e) { console.warn(e); }
       }
 
       chapters = remote.map(ch => ({
@@ -109,8 +112,60 @@
     }
   }
 
-  // ── Render capítulos ───────────────────────────────────────────────────
+  // ── Virtualización por lotes ───────────────────────────────────────────
+  // En lugar de volcar todo el HTML de golpe, se renderizan BATCH_SIZE pills
+  // iniciales y se añaden más conforme el sentinel entra en el viewport.
+  // Esto evita el spike de GPU/layout que ocurre al pintar 100-500 nodos
+  // simultáneamente.
+
+  const BATCH_SIZE = 30;          // pills por lote
+  let   _sorted    = [];          // orden actual de chapters
+  let   _rendered  = 0;           // cuántas pills ya están en el DOM
+  let   _sentinel  = null;        // nodo observado por IntersectionObserver
+  let   _observer  = null;        // instancia activa del observer
+
+  function _teardownObserver() {
+    if (_observer) { _observer.disconnect(); _observer = null; }
+    if (_sentinel) { _sentinel.remove();     _sentinel = null; }
+  }
+
+  function _appendBatch() {
+    const end   = Math.min(_rendered + BATCH_SIZE, _sorted.length);
+    const frag  = document.createDocumentFragment();
+
+    for (let i = _rendered; i < end; i++) {
+      const temp = document.createElement('div');
+      temp.innerHTML = buildPillHtml(_sorted[i]);
+      frag.appendChild(temp.firstElementChild);
+    }
+
+    // Mover el sentinel al final (o añadirlo si aún no está)
+    _teardownObserver();
+    chaptersContainer.appendChild(frag);
+    _rendered = end;
+
+    if (_rendered < _sorted.length) {
+      // Hay más pills por renderizar: colocar el sentinel y observarlo
+      _sentinel = document.createElement('div');
+      _sentinel.style.cssText = 'grid-column:1/-1; height:1px; pointer-events:none;';
+      chaptersContainer.appendChild(_sentinel);
+
+      _observer = new IntersectionObserver(entries => {
+        if (entries[0].isIntersecting) _appendBatch();
+      }, { rootMargin: '200px' });  // pre-carga 200 px antes de ser visible
+      _observer.observe(_sentinel);
+    }
+
+    if (window.animateCards) window.animateCards('#chapters-list', '.chapter-pill');
+  }
+
+  // ── Render completo de capítulos ───────────────────────────────────────
+  // Se llama solo en la carga inicial y al cambiar el orden.
+  // Las acciones individuales (toggle watched, delete) actualizan el DOM
+  // en sitio sin pasar por aquí.
   function renderChapters() {
+    _teardownObserver();
+
     if (!chapters.length) {
       chaptersContainer.innerHTML = `
         <div class="empty-state" style="grid-column:1/-1;">
@@ -122,114 +177,106 @@
 
     if (chaptersCount) chaptersCount.textContent = `${chapters.length} capítulos`;
 
-    const sorted = sortAsc ? [...chapters] : [...chapters].reverse();
+    _sorted   = sortAsc ? [...chapters] : [...chapters].reverse();
+    _rendered = 0;
+    chaptersContainer.innerHTML = '';
 
-    chaptersContainer.innerHTML = sorted.map(ch => {
-      const { number, id: chId, is_downloaded, is_watched } = ch;
-
-      const watchedDot = is_watched
-        ? `<span style="width:6px;height:6px;border-radius:50%;background:#4ade80;
-                        flex-shrink:0;box-shadow:0 0 5px rgba(74,222,128,0.5);"></span>`
-        : '';
-
-      const playBtn = is_downloaded ? `
-        <button class="play-chapter-btn" data-chapter="${number}" title="Reproducir" style="
-          background:rgba(196,107,255,0.12); border:1px solid rgba(196,107,255,0.25);
-          color:var(--accent); width:30px; height:30px; border-radius:7px; cursor:pointer;
-          display:flex; align-items:center; justify-content:center; font-size:11px;
-          transition:background .15s, transform .12s;">
-          <i class="fas fa-play"></i>
-        </button>` : `
-        <button class="download-chapter-btn" data-chapter="${number}" data-chapter-id="${chId}" title="Descargar" style="
-          background:rgba(255,255,255,0.05); border:1px solid var(--border);
-          color:var(--muted); width:30px; height:30px; border-radius:7px; cursor:pointer;
-          display:flex; align-items:center; justify-content:center; font-size:11px;
-          transition:background .15s, color .15s, transform .12s;">
-          <i class="fas fa-download"></i>
-        </button>`;
-
-      const localBtns = isLocal ? `
-        <button class="watched-toggle-btn" data-chapter="${number}"
-          title="${is_watched ? 'Quitar visto' : 'Marcar visto'}" style="
-          background:${is_watched ? 'rgba(74,222,128,0.1)' : 'rgba(255,255,255,0.05)'};
-          border:1px solid ${is_watched ? 'rgba(74,222,128,0.25)' : 'var(--border)'};
-          color:${is_watched ? '#4ade80' : 'var(--muted)'};
-          width:30px; height:30px; border-radius:7px; cursor:pointer;
-          display:flex; align-items:center; justify-content:center; font-size:11px;
-          transition:background .15s, color .15s, transform .12s;">
-          <i class="fas fa-check"></i>
-        </button>
-        <button class="delete-chapter-btn" data-chapter="${number}" title="Eliminar" style="
-          background:rgba(255,255,255,0.05); border:1px solid var(--border);
-          color:var(--muted); width:30px; height:30px; border-radius:7px; cursor:pointer;
-          display:flex; align-items:center; justify-content:center; font-size:11px;
-          transition:background .15s, color .15s, transform .12s;">
-          <i class="fas fa-trash-alt"></i>
-        </button>` : '';
-
-      return `
-        <div class="chapter-pill ${is_downloaded ? 'downloaded' : ''}"
-             style="border-color:${is_watched ? 'rgba(74,222,128,0.2)' : 'var(--border)'};">
-          <div style="display:flex; align-items:center; gap:8px; min-width:0; flex:1;">
-            <span style="font-size:13px; font-weight:500;
-                         color:${is_watched ? 'var(--muted)' : 'var(--text)'};
-                         white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-              Cap. ${number}
-            </span>
-            ${watchedDot}
-          </div>
-          <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
-            ${playBtn}
-            ${localBtns}
-          </div>
-        </div>`;
-    }).join('');
-
+    // [OPT-3] Un solo listener por acción en el contenedor, no uno por botón
     bindChapterEvents();
 
-    // Stagger animation (MutationObserver en serie.html lo dispara, pero por si acaso)
-    if (window.animateCards) window.animateCards('#chapters-list', '.chapter-pill');
+    _appendBatch();
   }
 
+  // ── HTML de una pill (sin listeners) ──────────────────────────────────
+  function buildPillHtml(ch) {
+    const { number, id: chId, is_downloaded, is_watched } = ch;
+
+    const watchedDot = is_watched
+      ? `<span class="watched-dot"></span>`
+      : '';
+
+    const actionBtn = is_downloaded
+      ? `<button class="play-chapter-btn chapter-action-btn" data-chapter="${number}" title="Reproducir">
+           <i class="fas fa-play"></i>
+         </button>`
+      : `<button class="download-chapter-btn chapter-action-btn" data-chapter="${number}" data-chapter-id="${chId}" title="Descargar">
+           <i class="fas fa-download"></i>
+         </button>`;
+
+    const localBtns = isLocal ? `
+      <button class="watched-toggle-btn chapter-action-btn ${is_watched ? 'is-watched' : ''}"
+              data-chapter="${number}" title="${is_watched ? 'Quitar visto' : 'Marcar visto'}">
+        <i class="fas fa-check"></i>
+      </button>
+      <button class="delete-chapter-btn chapter-action-btn" data-chapter="${number}" title="Eliminar">
+        <i class="fas fa-trash-alt"></i>
+      </button>` : '';
+
+    return `
+      <div class="chapter-pill ${is_downloaded ? 'downloaded' : ''} ${is_watched ? 'watched' : ''}"
+           data-chapter="${number}">
+        <div class="pill-label">
+          <span class="pill-num ${is_watched ? 'muted' : ''}">Cap. ${number}</span>
+          ${watchedDot}
+        </div>
+        <div class="pill-actions">
+          ${actionBtn}
+          ${localBtns}
+        </div>
+      </div>`;
+  }
+
+  // ── Event delegation ──────────────────────────────────────────────────
+  // [OPT-3] Un bloque único que maneja todos los clics del contenedor.
+  // No se re-registra en cada render de una pill individual.
+  let _delegationBound = false;
   function bindChapterEvents() {
-    chaptersContainer.querySelectorAll('.play-chapter-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        window.location.href = `/reader/${type}/${source}/${id}/${btn.dataset.chapter}`;
-      });
-      btn.addEventListener('mouseenter', () => { btn.style.transform = 'scale(1.08)'; btn.style.background = 'rgba(196,107,255,0.22)'; });
-      btn.addEventListener('mouseleave', () => { btn.style.transform = '';             btn.style.background = 'rgba(196,107,255,0.12)'; });
-    });
+    if (_delegationBound) return;
+    _delegationBound = true;
 
-    chaptersContainer.querySelectorAll('.download-chapter-btn').forEach(btn => {
-      btn.addEventListener('click', () => downloadSingleChapter(btn.dataset.chapter, btn.dataset.chapterId));
-      btn.addEventListener('mouseenter', () => { btn.style.transform = 'scale(1.08)'; btn.style.color = 'var(--text)'; });
-      btn.addEventListener('mouseleave', () => { btn.style.transform = '';             btn.style.color = 'var(--muted)'; });
-    });
+    chaptersContainer.addEventListener('click', e => {
+      const btn = e.target.closest('.chapter-action-btn');
+      if (!btn) return;
+      e.stopPropagation();
+      const { chapter, chapterId } = btn.dataset;
 
-    chaptersContainer.querySelectorAll('.watched-toggle-btn').forEach(btn => {
-      btn.addEventListener('click', e => { e.stopPropagation(); toggleWatched(btn.dataset.chapter); });
-    });
-
-    chaptersContainer.querySelectorAll('.delete-chapter-btn').forEach(btn => {
-      btn.addEventListener('click', e => {
-        e.stopPropagation();
+      if (btn.classList.contains('play-chapter-btn')) {
+        window.location.href = `/reader/${type}/${source}/${id}/${chapter}`;
+      } else if (btn.classList.contains('download-chapter-btn')) {
+        downloadSingleChapter(chapter, chapterId);
+      } else if (btn.classList.contains('watched-toggle-btn')) {
+        toggleWatched(chapter);
+      } else if (btn.classList.contains('delete-chapter-btn')) {
         showConfirm(
-          `¿Eliminar el capítulo ${btn.dataset.chapter}? Esta acción no se puede deshacer.`,
-          () => deleteChapter(btn.dataset.chapter)
+          `¿Eliminar el capítulo ${chapter}? Esta acción no se puede deshacer.`,
+          () => deleteChapter(chapter)
         );
-      });
-      btn.addEventListener('mouseenter', () => { btn.style.color = '#f87171'; btn.style.borderColor = 'rgba(248,113,113,0.3)'; });
-      btn.addEventListener('mouseleave', () => { btn.style.color = 'var(--muted)'; btn.style.borderColor = 'var(--border)'; });
+      }
     });
   }
 
-  // ── Confirm dialog (reemplaza window.confirm) ──────────────────────────
+  // ── Actualizar una pill en sitio (sin re-render completo) ─────────────
+  // [OPT-2] toggleWatched y deleteChapter ya no llaman loadChapters().
+  // Modifican el array chapters[] y parchean el nodo DOM existente.
+  function patchPillInDOM(chapterNum) {
+    const ch = chapters.find(c => String(c.number) === String(chapterNum));
+    if (!ch) return;
+    const pill = chaptersContainer.querySelector(`.chapter-pill[data-chapter="${chapterNum}"]`);
+    if (!pill) return;
+
+    // Reemplazar la pill con el HTML actualizado (mantenemos el nodo raíz
+    // para no mover el scroll)
+    const temp = document.createElement('div');
+    temp.innerHTML = buildPillHtml(ch);
+    const newPill = temp.firstElementChild;
+    pill.replaceWith(newPill);
+  }
+
+  // ── Confirm dialog ─────────────────────────────────────────────────────
   function showConfirm(message, onConfirm) {
-    // Usar el modal existente de base.html como diálogo de confirmación
     const modalTitle = document.getElementById('modal-title');
     const modalBody  = document.getElementById('modal-body');
     if (!modalTitle || !modalBody) {
-      // Fallback si el modal no está disponible
       if (window.confirm(message)) onConfirm();
       return;
     }
@@ -256,6 +303,7 @@
   }
 
   // ── Acciones sobre capítulos ───────────────────────────────────────────
+
   async function toggleWatched(chapterNum) {
     try {
       const res  = await fetch('/api/watched/toggle', {
@@ -265,8 +313,13 @@
       });
       const data = await res.json();
       if (res.ok) {
-        notify(`Cap. ${chapterNum} marcado como ${data.status === 'watched' ? 'visto' : 'no visto'}`, 'success');
-        await loadChapters();
+        const wasWatched = data.status === 'watched';
+        // [OPT-2] Actualizar estado local y parchar solo esa pill
+        const ch = chapters.find(c => String(c.number) === String(chapterNum));
+        if (ch) ch.is_watched = wasWatched;
+        patchPillInDOM(chapterNum);
+        updateProgress();
+        notify(`Cap. ${chapterNum} marcado como ${wasWatched ? 'visto' : 'no visto'}`, 'success');
       } else {
         notify(`Error: ${data.error}`, 'error');
       }
@@ -285,7 +338,10 @@
       const data = await res.json();
       if (res.ok) {
         notify(`Capítulo ${chapterNum} eliminado`, 'success');
-        await loadChapters();
+        // [OPT-2] Eliminar del array local y del DOM sin re-fetch
+        chapters = chapters.filter(c => String(c.number) !== String(chapterNum));
+        chaptersContainer.querySelector(`.chapter-pill[data-chapter="${chapterNum}"]`)?.remove();
+        if (chaptersCount) chaptersCount.textContent = `${chapters.length} capítulos`;
         await loadProgress();
       } else {
         notify(`Error: ${data.error}`, 'error');
@@ -340,54 +396,75 @@
   }
 
   // ── Progreso ───────────────────────────────────────────────────────────
+  // [OPT-5] updateProgress() calcula el progreso desde los datos ya en memoria
+  // cuando sea posible, sin fetches extra.
   async function loadProgress() {
     try {
-      const url  = isLocal
+      const url = isLocal
         ? `/api/progress/local/${type}/${id}`
         : `/api/progress/${type}/${source}/${id}`;
       const res  = await fetch(url);
       const prog = await res.json();
 
       if (currentChapterSpan) currentChapterSpan.textContent = prog.chapter;
-
-      if (type === 'anime') {
-        const savedTime = parseInt(prog.progress) || 0;
-        if (isLocal) {
-          try {
-            const durRes = await fetch(`/api/video-duration/anime/${id}/${prog.chapter}`);
-            if (durRes.ok) {
-              const { duration } = await durRes.json();
-              if (duration > 0) {
-                const pct = Math.round((savedTime / duration) * 100);
-                if (progressPercentSpan) progressPercentSpan.textContent = `${pct}%`;
-                if (progressBarFill)     progressBarFill.style.width     = `${pct}%`;
-                return;
-              }
-            }
-          } catch (e) { console.warn(e); }
-        }
-        const mins = Math.floor(savedTime / 60);
-        const secs = savedTime % 60;
-        if (progressPercentSpan)
-          progressPercentSpan.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
-      } else {
-        // Manga
-        const savedIndex = parseInt(prog.progress) || 0;
-        if (isLocal) {
-          const total = await getTotalImagesInChapter(prog.chapter);
-          if (total > 0) {
-            const pct = Math.round((savedIndex / (total - 1)) * 100);
-            if (progressPercentSpan) progressPercentSpan.textContent = `${pct}%`;
-            if (progressBarFill)     progressBarFill.style.width     = `${pct}%`;
-          } else {
-            if (progressPercentSpan) progressPercentSpan.textContent = '?%';
-          }
-        } else {
-          if (progressPercentSpan) progressPercentSpan.textContent = '—';
-        }
-      }
+      _progressData = prog; // cachear para updateProgress()
+      await _renderProgress(prog);
     } catch (err) {
       console.error('loadProgress:', err);
+    }
+  }
+
+  let _progressData = null;
+
+  // Actualiza la barra de progreso desde los datos cacheados.
+  // Solo recalcula con fetch si el capítulo actual cambió.
+  async function updateProgress() {
+    if (!_progressData) return;
+    await _renderProgress(_progressData);
+  }
+
+  async function _renderProgress(prog) {
+    if (currentChapterSpan) currentChapterSpan.textContent = prog.chapter;
+
+    if (type === 'anime') {
+      const savedTime = parseInt(prog.progress) || 0;
+      if (isLocal) {
+        try {
+          const durRes = await fetch(`/api/video-duration/anime/${id}/${prog.chapter}`);
+          if (durRes.ok) {
+            const { duration } = await durRes.json();
+            if (duration > 0) {
+              const pct = Math.round((savedTime / duration) * 100);
+              if (progressPercentSpan) progressPercentSpan.textContent = `${pct}%`;
+              if (progressBarFill)     progressBarFill.style.width     = `${pct}%`;
+              return;
+            }
+          }
+        } catch (e) { console.warn(e); }
+      }
+      const mins = Math.floor(savedTime / 60);
+      const secs = savedTime % 60;
+      if (progressPercentSpan)
+        progressPercentSpan.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+    } else {
+      const savedIndex = parseInt(prog.progress) || 0;
+      if (isLocal) {
+        // total = número de imágenes del capítulo actual (no de capítulos de la serie)
+        const total = await getTotalImagesInChapter(prog.chapter);
+        if (total > 1) {
+          // Proteger contra división por cero cuando total - 1 = 0
+          const pct = Math.min(100, Math.round((savedIndex / (total - 1)) * 100));
+          if (progressPercentSpan) progressPercentSpan.textContent = `${pct}%`;
+          if (progressBarFill)     progressBarFill.style.width     = `${pct}%`;
+        } else if (total === 1) {
+          if (progressPercentSpan) progressPercentSpan.textContent = '100%';
+          if (progressBarFill)     progressBarFill.style.width     = '100%';
+        } else {
+          if (progressPercentSpan) progressPercentSpan.textContent = '?%';
+        }
+      } else {
+        if (progressPercentSpan) progressPercentSpan.textContent = '—';
+      }
     }
   }
 
@@ -400,36 +477,37 @@
     } catch { return 0; }
   }
 
-  // ── Inicializar ────────────────────────────────────────────────────────
+  // ── Init ──────────────────────────────────────────────────────────────
+  // [OPT-1] Detalles + capítulos en paralelo; progreso después de capítulos
+  // (necesita chapters[] para el cálculo de manga).
   async function init() {
-    await loadSerieDetails();
-    await loadChapters();
-    await loadProgress();
+    await Promise.all([
+      loadSerieDetails(),
+      loadChapters(),     // ya incluye watched en paralelo dentro
+    ]);
+    await loadProgress(); // ahora chapters[] está listo
 
-    // Visibilidad de botones según contexto
+    // Botones según contexto
     if (isLocal) {
-      downloadAllBtn?.style && (downloadAllBtn.style.display = 'none');
-      if (continueBtn)  continueBtn.style.display  = 'inline-flex';
+      if (downloadAllBtn)   downloadAllBtn.style.display   = 'none';
+      if (continueBtn)      continueBtn.style.display      = 'inline-flex';
       if (deleteWatchedBtn) deleteWatchedBtn.style.display = 'inline-flex';
     } else {
-      if (downloadAllBtn) downloadAllBtn.style.display = 'inline-flex';
-      if (continueBtn)    continueBtn.style.display    = 'none';
+      if (downloadAllBtn)   downloadAllBtn.style.display   = 'inline-flex';
+      if (continueBtn)      continueBtn.style.display      = 'none';
       if (deleteWatchedBtn) deleteWatchedBtn.style.display = 'none';
       const progressSection = document.getElementById('progress-section');
-      if (progressSection) progressSection.style.display = 'none';
+      if (progressSection) progressSection.style.display  = 'none';
     }
 
-    // Continuar
     continueBtn?.addEventListener('click', () => {
       let last = currentChapterSpan?.textContent;
       if (!last || last === '—') last = '1';
       window.location.href = `/reader/${type}/local/${id}/${last}`;
     });
 
-    // Descargar serie
     downloadAllBtn?.addEventListener('click', downloadFullSeries);
 
-    // Borrar vistos
     deleteWatchedBtn?.addEventListener('click', () => {
       showConfirm(
         '¿Eliminar todos los capítulos vistos (excepto el último)? Esta acción no se puede deshacer.',
@@ -444,7 +522,14 @@
             if (res.ok) {
               const n = data.deleted?.length ?? 0;
               notify(`Se eliminaron ${n} capítulo${n !== 1 ? 's' : ''}`, 'success');
-              await loadChapters();
+              // [OPT-2] Eliminar del array + DOM sin re-fetch
+              const deletedNums = new Set((data.deleted || []).map(String));
+              chapters = chapters.filter(c => !deletedNums.has(String(c.number)));
+              deletedNums.forEach(num => {
+                chaptersContainer.querySelector(`.chapter-pill[data-chapter="${num}"]`)?.remove();
+              });
+              if (chaptersCount) chaptersCount.textContent = `${chapters.length} capítulos`;
+              await loadProgress();
             } else {
               notify(`Error: ${data.error || 'Error desconocido'}`, 'error');
             }
@@ -455,10 +540,10 @@
       );
     });
 
-    // Ordenar capítulos
     sortBtn?.addEventListener('click', () => {
       sortAsc = !sortAsc;
       sortBtn.classList.toggle('sorted', !sortAsc);
+      _teardownObserver();
       renderChapters();
     });
   }

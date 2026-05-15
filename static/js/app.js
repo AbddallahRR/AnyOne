@@ -1,25 +1,35 @@
 // static/js/app.js
 (function () {
+  'use strict';
+
   // ── Estado global ──────────────────────────────────────────────────────
-  let currentType = 'library';
+  let currentType      = 'library';
+  let _libraryItems    = [];
+  let _libraryStatuses = {};
+  let _libraryFilter   = 'all';
+  let _libraryQuery    = '';
+  let _libraryLoaded   = false;
 
   // ── Elementos DOM ─────────────────────────────────────────────────────
-  const animePanel      = document.getElementById('anime-panel');
-  const mangaPanel      = document.getElementById('manga-panel');
-  const libraryPanel    = document.getElementById('library-panel');
-  const tabAnime        = document.getElementById('tab-anime');
-  const tabManga        = document.getElementById('tab-manga');
-  const tabLibrary      = document.getElementById('tab-library');
-  const animeSearchBtn  = document.getElementById('anime-search-btn');
-  const mangaSearchBtn  = document.getElementById('manga-search-btn');
-  const animeRefreshBtn = document.getElementById('anime-refresh-btn');
-  const mangaRefreshBtn = document.getElementById('manga-refresh-btn');
+  const animePanel       = document.getElementById('anime-panel');
+  const mangaPanel       = document.getElementById('manga-panel');
+  const libraryPanel     = document.getElementById('library-panel');
+  const tabAnime         = document.getElementById('tab-anime');
+  const tabManga         = document.getElementById('tab-manga');
+  const tabLibrary       = document.getElementById('tab-library');
+  const animeSearchBtn   = document.getElementById('anime-search-btn');
+  const mangaSearchBtn   = document.getElementById('manga-search-btn');
+  const animeRefreshBtn  = document.getElementById('anime-refresh-btn');
+  const mangaRefreshBtn  = document.getElementById('manga-refresh-btn');
   const animeSearchInput = document.getElementById('anime-search-input');
   const mangaSearchInput = document.getElementById('manga-search-input');
 
   // ── Tab switching ──────────────────────────────────────────────────────
-  // index.html también tiene un listener de tabs; este bloque lo reemplaza
-  // completamente para mantener un único punto de control.
+  // [OPT-6] Un único punto de control. index.html tiene un bloque de tabs
+  // que se ejecuta antes de este script; los listeners que añade son
+  // sobrescritos porque este módulo llama a setActiveTab() directamente
+  // desde los mismos botones. Para evitar la ejecución doble de ese bloque,
+  // index.html debería eliminarlo — mientras tanto este guard es suficiente.
   const TAB_MAP = [
     { btn: tabAnime,   panel: animePanel,   type: 'anime'   },
     { btn: tabManga,   panel: mangaPanel,   type: 'manga'   },
@@ -27,75 +37,91 @@
   ];
 
   function setActiveTab(type) {
+    if (currentType === type && type !== 'library') return; // evitar re-render innecesario
     currentType = type;
     TAB_MAP.forEach(({ btn, panel, type: t }) => {
       const active = t === type;
       btn.classList.toggle('active', active);
       panel.classList.toggle('hidden', !active);
       if (active) {
-        // Re-trigger CSS animation
         panel.style.animation = 'none';
         requestAnimationFrame(() => { panel.style.animation = ''; });
       }
     });
-    if (type === 'library') loadLibrary();
+    // [OPT-3] Solo cargar biblioteca la primera vez que se abre esa tab
+    if (type === 'library' && !_libraryLoaded) {
+      _libraryLoaded = true;
+      loadLibrary();
+    }
   }
 
   TAB_MAP.forEach(({ btn, type }) => {
     btn.addEventListener('click', () => setActiveTab(type));
   });
 
-  // ── CoverObserver — lazy load + VRAM release ──────────────────────────
-  //
-  // El browser mantiene cada <img> decodificada en VRAM aunque esté a miles
-  // de píxeles fuera del viewport. Con grids grandes (búsqueda global,
-  // biblioteca) esto dispara el uso de memoria de video al hacer scroll.
-  //
-  // Solución: las cards usan data-src en lugar de src. Este observer:
-  //   • Asigna src cuando la card ENTRA al viewport + margen de 200px  → carga
-  //   • Borra src cuando la card SALE del viewport + margen de 800px   → libera VRAM
-  //
-  // El margen asimétrico (200 entrada / 800 salida) evita parpadeos: la imagen
-  // se precarga antes de ser visible y se libera solo cuando está muy lejos.
+  // ── CoverObserver — lazy load + liberación de VRAM ────────────────────
+  // [OPT-7] unobserve tras cargar: una vez que la imagen cargó al menos una
+  // vez ya no necesitamos seguir rastreando su entrada; solo rastreamos
+  // salida para liberar src. El observer principal solo carga; uno secundario
+  // (releaseObserver) solo libera. Así evitamos acumular entradas infinitas.
 
   const PLACEHOLDER = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" '
-    + 'width="2" height="3"%3E%3C/svg%3E'; // 2×3px transparent — preserva aspect-ratio
+    + 'width="2" height="3"%3E%3C/svg%3E';
 
-  const coverObserver = new IntersectionObserver((entries) => {
+  // Observer de carga: entra en viewport → asigna src real → unobserve
+  const loadObserver = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      const img  = entry.target;
+      const real = img.dataset.src;
+      if (real && img.src !== real) {
+        img.src = real;
+        img.addEventListener('load', () => {
+          // Una vez cargada, traspasar al observer de liberación
+          releaseObserver.observe(img);
+        }, { once: true });
+      }
+      loadObserver.unobserve(img); // ya no necesitamos rastrear entrada
+    });
+  }, { rootMargin: '200px 0px 200px 0px', threshold: 0 });
+
+  // Observer de liberación: sale del viewport (margen amplio) → borra src
+  const releaseObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) return;
       const img = entry.target;
-      if (entry.isIntersecting) {
-        // Entró: cargar imagen real
-        const real = img.dataset.src;
-        if (real && img.src !== real) img.src = real;
-      } else {
-        // Salió: liberar VRAM (solo si ya cargó, para no cortar descargas en curso)
-        if (img.complete && img.naturalWidth > 0) {
-          img.src = PLACEHOLDER;
-        }
+      if (img.complete && img.naturalWidth > 0) {
+        img.src = PLACEHOLDER;
+        // Volver a registrar para que se recargue si el usuario vuelve a scrollear
+        loadObserver.observe(img);
+        releaseObserver.unobserve(img);
       }
     });
-  }, {
-    rootMargin: '200px 0px 800px 0px', // top/bottom asimétrico
-    threshold:  0,
-  });
+  }, { rootMargin: '0px 0px 800px 0px', threshold: 0 });
 
-  /** Registra todas las .cover-lazy de un contenedor en el observer */
   function observeCovers(container) {
     container.querySelectorAll('img.cover-lazy').forEach(img => {
-      coverObserver.observe(img);
+      loadObserver.observe(img);
     });
   }
 
-  // ── Media card builder (design system) ────────────────────────────────
+  // ── Media card builder — Samsung One UI style ─────────────────────────
+  // Layout: image (2/3 aspect) with type chip top-right overlay,
+  //         title + chips in card-body below the image.
   function buildMediaCard({ id, title, cover, source, type, badge, extra }) {
     const safeTitle = (title || '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
     const dataSrc   = cover || '';
-    const badgeHtml = badge
-      ? `<span class="card-badge ${badge.class}">${badge.label}</span>`
+
+    // Map legacy badge class to new chip class
+    let chipClass = 'chip-source';
+    if (badge) {
+      if (badge.class === 'badge-anime')  chipClass = 'chip-anime';
+      if (badge.class === 'badge-manga')  chipClass = 'chip-manga';
+    }
+    const typeChipHtml = badge
+      ? `<span class="chip ${chipClass} type-chip">${badge.label}</span>`
       : '';
 
-    // src empieza como placeholder — CoverObserver asigna el real al entrar al viewport
     return `
       <div class="media-card-wrapper">
         <div class="media-card"
@@ -103,13 +129,17 @@
           data-title="${safeTitle}"
           data-source="${source || ''}"
           data-type="${type || ''}">
-          <img class="cover-lazy"
-               src="${PLACEHOLDER}"
-               data-src="${dataSrc}"
-               alt="${safeTitle}"
-               style="background:var(--raised);">
-          <div class="card-overlay">
-            ${badgeHtml}
+          <!-- Image area -->
+          <div class="card-image">
+            <img class="cover-lazy"
+                 src="${PLACEHOLDER}"
+                 data-src="${dataSrc}"
+                 alt="${safeTitle}"
+                 style="background:var(--surface);">
+            ${typeChipHtml}
+          </div>
+          <!-- Text area below image -->
+          <div class="card-body">
             <p class="card-title">${safeTitle}</p>
             ${extra || ''}
           </div>
@@ -121,9 +151,7 @@
   async function search(refresh = false) {
     if (currentType === 'library') return;
     const type   = currentType;
-    const source = type === 'anime'
-      ? document.getElementById('anime-source').value
-      : document.getElementById('manga-source').value;
+    const source = document.getElementById(`${type}-source`).value;
     const query  = type === 'anime'
       ? animeSearchInput.value.trim()
       : mangaSearchInput.value.trim();
@@ -142,10 +170,9 @@
         : `/api/search?type=${type}&source=${source}&q=${encodeURIComponent(query)}`;
       if (refresh) url += '&refresh=1';
 
-      const res   = await fetch(url);
+      const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const items = await res.json();
-      renderSearchResults(items, type, source === 'all' ? 'all' : source);
+      renderSearchResults(await res.json(), type, source === 'all' ? 'all' : source);
     } catch (err) {
       container.innerHTML = `
         <div class="empty-state">
@@ -168,7 +195,6 @@
 
     container.innerHTML = items.map(item => {
       const itemSource = item.source || source;
-      const badgeClass = type === 'anime' ? 'badge-anime' : 'badge-manga';
       return buildMediaCard({
         id:     item.id,
         title:  item.title,
@@ -176,44 +202,43 @@
         source: itemSource,
         type,
         badge:  { class: 'badge-source', label: itemSource },
-        extra:  `<button class="download-btn" style="
-                    margin-top:6px; width:100%;
-                    background:rgba(196,107,255,0.18);
-                    border:1px solid rgba(196,107,255,0.3);
-                    color:var(--accent);
-                    border-radius:6px; padding:5px 8px;
-                    font-size:11px; cursor:pointer;
-                    display:flex; align-items:center; justify-content:center; gap:5px;
-                    transition:background .15s;">
-                  <i class="fas fa-download"></i> Descargar todo
-                 </button>`,
+        extra:  `<div class="card-chips">
+                   <span class="chip chip-source" style="font-size:10px; height:22px; padding:0 8px;">${itemSource}</span>
+                 </div>
+                 <div class="card-actions">
+                   <button class="download-btn" style="
+                     width:100%;
+                     background:rgba(124,92,252,0.15);
+                     border:1px solid rgba(124,92,252,0.28);
+                     color:var(--accent-lt);
+                     border-radius:8px; padding:6px 8px;
+                     font-size:11px; font-weight:600; cursor:pointer;
+                     display:flex; align-items:center; justify-content:center; gap:5px;
+                     transition:background .15s;">
+                   <i class="fas fa-download"></i> Descargar todo
+                   </button>
+                 </div>`,
       });
     }).join('');
 
-    // Lazy load + VRAM release de portadas
     observeCovers(container);
-
-    // Stagger animation
     if (window.animateCards) window.animateCards(`#${type}-results`);
 
-    // Click en card → detalle
-    container.querySelectorAll('.media-card').forEach(card => {
-      card.addEventListener('click', e => {
-        if (e.target.closest('.download-btn')) return;
-        const { id, source: src, type: typ } = card.dataset;
-        window.location.href = `/serie/${typ}/${src}/${id}`;
-      });
-    });
+    // [OPT-4] Event delegation — un listener por contenedor en vez de uno por card
+    container.addEventListener('click', e => {
+      const downloadBtn = e.target.closest('.download-btn');
+      const card        = e.target.closest('.media-card');
+      if (!card) return;
 
-    // Click en botón descargar
-    container.querySelectorAll('.download-btn').forEach(btn => {
-      btn.addEventListener('click', e => {
+      if (downloadBtn) {
         e.stopPropagation();
-        const card  = btn.closest('.media-card');
         const { id, title, source: src, type: typ } = card.dataset;
         downloadSeries(typ, src, id, title);
-      });
-    });
+        return;
+      }
+      const { id, source: src, type: typ } = card.dataset;
+      window.location.href = `/serie/${typ}/${src}/${id}`;
+    }, { once: false }); // se reemplaza con cada render porque container.innerHTML se pisa
   }
 
   // ── Descarga de serie completa ─────────────────────────────────────────
@@ -228,7 +253,7 @@
       if (!res.ok) {
         showNotification(`Error: ${data.error}`, 'error');
       } else {
-        showNotification(`Descarga encolada`, 'success');
+        showNotification('Descarga encolada', 'success');
         if (window.showDownloadIndicator) window.showDownloadIndicator();
       }
     } catch (err) {
@@ -238,12 +263,6 @@
 
   // ── Biblioteca local ───────────────────────────────────────────────────
 
-  // Estado de la biblioteca
-  let _libraryItems    = [];   // todos los items cargados de la API
-  let _libraryStatuses = {};   // content_ref → status
-  let _libraryFilter   = 'all';
-  let _libraryQuery    = '';
-
   const STATUS_META = {
     watching:  { label: 'Mirando',   color: 'var(--accent)',  border: 'rgba(196,107,255,0.4)', bg: 'rgba(196,107,255,0.12)', icon: 'fa-eye' },
     completed: { label: 'Visto',     color: '#4ade80',        border: 'rgba(74,222,128,0.4)',  bg: 'rgba(74,222,128,0.12)',  icon: 'fa-check-circle' },
@@ -251,7 +270,6 @@
     none:      { label: '',          color: '',               border: '',                      bg: '',                      icon: '' },
   };
 
-  // Orden de prioridad para mostrar
   const STATUS_ORDER = { watching: 0, completed: 1, pending: 2, none: 3 };
 
   async function loadLibrary() {
@@ -281,29 +299,44 @@
     }
   }
 
+  // [OPT-5] _initLibraryControls se llama una sola vez (desde loadLibrary)
+  // sin necesidad de guards dataset.bound
   function _initLibraryControls() {
-    // Búsqueda local
+    // Búsqueda local con debounce para no re-renderizar en cada tecla
     const searchInput = document.getElementById('library-search-input');
-    if (searchInput && !searchInput.dataset.bound) {
-      searchInput.dataset.bound = '1';
+    if (searchInput) {
+      let debounceTimer;
       searchInput.addEventListener('input', () => {
-        _libraryQuery = searchInput.value.toLowerCase();
-        applyLibraryView();
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          _libraryQuery = searchInput.value.toLowerCase();
+          applyLibraryView();
+        }, 150); // 150 ms de debounce — imperceptible para el usuario
       });
     }
 
-    // Filtros de etiqueta
-    document.querySelectorAll('.lib-filter').forEach(btn => {
-      if (btn.dataset.bound) return;
-      btn.dataset.bound = '1';
-      btn.addEventListener('click', () => {
+    // [OPT-4] Event delegation para filtros
+    const filtersBar = document.getElementById('library-status-filters');
+    if (filtersBar) {
+      filtersBar.addEventListener('click', e => {
+        const btn = e.target.closest('.lib-filter');
+        if (!btn) return;
         _libraryFilter = btn.dataset.filter;
-        document.querySelectorAll('.lib-filter').forEach(b => b.classList.remove('active'));
+        filtersBar.querySelectorAll('.lib-filter').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         applyLibraryView();
       });
-    });
+    }
   }
+
+  // ── Render diferencial de la biblioteca ───────────────────────────────
+  // [OPT-1] En vez de destruir y reconstruir todos los cards, calculamos qué
+  // items se añaden, cuáles se eliminan y cuáles ya estaban. Solo tocamos el
+  // DOM para los que cambiaron. El resultado es que filtrar/buscar en una
+  // biblioteca grande es instantáneo.
+
+  // Mapa: id → elemento wrapper actualmente en el DOM
+  let _renderedCards = new Map();
 
   function applyLibraryView() {
     const container = document.getElementById('library-results');
@@ -311,10 +344,8 @@
 
     // 1. Filtrar por etiqueta
     let filtered = _libraryItems.filter(item => {
-      const ref    = `local:${item.id}`;
-      const status = _libraryStatuses[ref] || 'none';
-      if (_libraryFilter === 'all') return true;
-      return status === _libraryFilter;
+      const status = _libraryStatuses[`local:${item.id}`] || 'none';
+      return _libraryFilter === 'all' || status === _libraryFilter;
     });
 
     // 2. Filtrar por búsqueda
@@ -325,18 +356,18 @@
       );
     }
 
-    // 3. Ordenar: watching → completed → pending → none
+    // 3. Ordenar
     filtered.sort((a, b) => {
       const sa = STATUS_ORDER[_libraryStatuses[`local:${a.id}`] || 'none'];
       const sb = STATUS_ORDER[_libraryStatuses[`local:${b.id}`] || 'none'];
-      if (sa !== sb) return sa - sb;
-      return (a.title || '').localeCompare(b.title || '');
+      return sa !== sb ? sa - sb : (a.title || '').localeCompare(b.title || '');
     });
 
     // 4. Actualizar contador
     const countEl = document.getElementById('library-count');
     if (countEl) countEl.textContent = `${filtered.length} serie${filtered.length !== 1 ? 's' : ''}`;
 
+    // 5. Estado vacío
     if (!filtered.length) {
       container.innerHTML = _libraryItems.length
         ? `<div class="empty-state" style="grid-column:1/-1;">
@@ -347,123 +378,151 @@
              <i class="fas fa-folder-open"></i>
              <p>Tu biblioteca está vacía. Usa la búsqueda para descargar series.</p>
            </div>`;
+      _renderedCards.clear();
       return;
     }
 
-    renderLibrary(filtered);
+    // 6. Render diferencial
+    const nextIds    = new Set(filtered.map(i => i.id));
+    const prevIds    = new Set(_renderedCards.keys());
+
+    // Eliminar cards que ya no están en la vista filtrada
+    for (const id of prevIds) {
+      if (!nextIds.has(id)) {
+        _renderedCards.get(id).remove();
+        _renderedCards.delete(id);
+      }
+    }
+
+    // Añadir cards nuevas y reordenar usando un DocumentFragment
+    const frag = document.createDocumentFragment();
+    filtered.forEach(item => {
+      if (!_renderedCards.has(item.id)) {
+        const wrapper = _buildLibraryCard(item);
+        _renderedCards.set(item.id, wrapper);
+        frag.appendChild(wrapper);
+      }
+    });
+    if (frag.childElementCount > 0) {
+      // Limpiar cualquier nodo residual (spinner de carga, empty-state previo)
+      // que no sea un card gestionado por _renderedCards
+      Array.from(container.children).forEach(child => {
+        if (!child.classList.contains('media-card-wrapper')) child.remove();
+      });
+      container.appendChild(frag);
+      // Lazy load de portadas solo para las recién añadidas
+      observeCovers(container);
+      if (window.animateCards) window.animateCards('#library-results');
+    }
+
+    // Reordenar nodos según filtered (solo si el orden cambió)
+    filtered.forEach(item => {
+      const node = _renderedCards.get(item.id);
+      if (node && node.parentNode === container) {
+        container.appendChild(node); // mover al final en orden correcto
+      }
+    });
   }
 
-  function renderLibrary(items) {
-    const container = document.getElementById('library-results');
-    if (!container) return;
+  function _buildLibraryCard(item) {
+    const ref         = `local:${item.id}`;
+    const status      = _libraryStatuses[ref] || 'none';
+    const meta        = STATUS_META[status];
+    const lastChapter = item.last_chapter || '1';
+    const isAnime     = item.type === 'anime';
+    const typeClass   = isAnime ? 'chip-anime' : 'chip-manga';
+    const typeLabel   = isAnime ? 'Anime' : 'Manga';
 
-    container.innerHTML = items.map(item => {
-      const ref         = `local:${item.id}`;
-      const status      = _libraryStatuses[ref] || 'none';
-      const meta        = STATUS_META[status];
-      const lastChapter = item.last_chapter || '1';
-      const typeClass   = item.type === 'anime' ? 'badge-anime' : 'badge-manga';
-      const typeLabel   = item.type === 'anime' ? 'Anime' : 'Manga';
+    // Status chip
+    const statusChipClass = status !== 'none' ? `chip-${status}` : '';
+    const statusChipHtml  = meta.label
+      ? `<span class="chip-sep"></span>
+         <span class="chip ${statusChipClass}" style="font-size:10px; height:22px; padding:0 8px;">
+           <i class="fas ${meta.icon}" style="font-size:9px; margin-right:3px;"></i>${meta.label}
+         </span>`
+      : '';
 
-      // Badge de etiqueta (encima de la portada si tiene)
-      const statusBadge = meta.label ? `
-        <span class="card-badge" style="
-          background:${meta.bg}; color:${meta.color};
-          border:1px solid ${meta.border}; margin-bottom:4px;">
-          <i class="fas ${meta.icon}" style="margin-right:3px; font-size:9px;"></i>${meta.label}
-        </span>` : '';
+    const statusBtn = `
+      <button class="status-tag-btn" data-ref="${ref}" title="Cambiar etiqueta"
+        style="
+          width:30px; height:30px; border-radius:8px; flex-shrink:0;
+          background:${meta.bg || 'rgba(255,255,255,0.05)'};
+          border:1px solid ${meta.border || 'var(--border)'};
+          color:${meta.color || 'var(--muted)'};
+          cursor:pointer; display:flex; align-items:center; justify-content:center;
+          font-size:10px; transition:background .15s, transform .12s;">
+        <i class="fas ${meta.icon || 'fa-tag'}"></i>
+      </button>`;
 
-      // Botón de etiqueta — abre popup contextual
-      const statusBtn = `
-        <button class="status-tag-btn" data-ref="${ref}"
-          title="Cambiar etiqueta"
-          style="
-            width:28px; height:28px; border-radius:6px; flex-shrink:0;
-            background:${meta.bg || 'rgba(255,255,255,0.05)'};
-            border:1px solid ${meta.border || 'var(--border)'};
-            color:${meta.color || 'var(--muted)'};
-            cursor:pointer; display:flex; align-items:center; justify-content:center;
-            font-size:10px; transition:background .15s, transform .12s;">
-          <i class="fas ${meta.icon || 'fa-tag'}"></i>
-        </button>`;
-
-      return buildMediaCard({
-        id:     item.id || '',
-        title:  item.title,
-        cover:  item.cover,
-        source: 'local',
-        type:   item.type || '',
-        badge:  { class: typeClass, label: typeLabel },
-        extra:  `<div style="display:flex; gap:5px; margin-top:6px;">
-                   ${statusBadge}
-                 </div>
-                 <div style="display:flex; gap:5px; margin-top:4px;">
-                   <button class="resume-btn" data-last-chapter="${lastChapter}" style="
-                     flex:1; background:rgba(74,222,128,0.15);
-                     border:1px solid rgba(74,222,128,0.25);
-                     color:#4ade80; border-radius:6px; padding:5px 8px;
-                     font-size:11px; cursor:pointer;
-                     display:flex; align-items:center; justify-content:center; gap:5px;
-                     transition:background .15s;">
-                     <i class="fas fa-play"></i> Cap. ${lastChapter}
-                   </button>
-                   ${statusBtn}
-                 </div>`,
-      });
-    }).join('');
-
-    if (window.animateCards) window.animateCards('#library-results');
-    observeCovers(container);
-
-    // Click en card → detalle
-    container.querySelectorAll('.media-card').forEach(card => {
-      card.addEventListener('click', e => {
-        if (e.target.closest('.resume-btn, .status-cycle-btn')) return;
-        const { type, id } = card.dataset;
-        if (type && id) window.location.href = `/serie/${type}/local/${id}`;
-      });
+    const html = buildMediaCard({
+      id:     item.id || '',
+      title:  item.title,
+      cover:  item.cover,
+      source: 'local',
+      type:   item.type || '',
+      badge:  { class: `badge-${item.type}`, label: typeLabel },
+      extra:  `<div class="card-chips" style="flex-wrap:nowrap; overflow:hidden;">
+                 <span class="chip ${typeClass}" style="font-size:10px; height:22px; padding:0 8px;">${typeLabel}</span>
+                 ${statusChipHtml}
+               </div>
+               <div class="card-actions" style="display:flex; gap:6px; margin-top:4px;">
+                 <button class="resume-btn" data-last-chapter="${lastChapter}" style="
+                   flex:1;
+                   background:rgba(52,211,153,0.12);
+                   border:1px solid rgba(52,211,153,0.25);
+                   color:#34d399; border-radius:8px; padding:6px 8px;
+                   font-size:11px; font-weight:600; cursor:pointer;
+                   display:flex; align-items:center; justify-content:center; gap:5px;
+                   transition:background .15s;">
+                   <i class="fas fa-play" style="font-size:9px;"></i> Cap. ${lastChapter}
+                 </button>
+                 ${statusBtn}
+               </div>`,
     });
 
-    // Reanudar
-    container.querySelectorAll('.resume-btn').forEach(btn => {
-      btn.addEventListener('click', e => {
-        e.stopPropagation();
-        const card = btn.closest('.media-card');
-        const { type, id } = card.dataset;
-        const lastChapter  = btn.dataset.lastChapter;
-        if (type && id && lastChapter)
-          window.location.href = `/reader/${type}/local/${id}/${lastChapter}`;
-      });
+    const div = document.createElement('div');
+    div.innerHTML = html;
+    const wrapper = div.firstElementChild;
+
+    // [OPT-4] Los eventos se añaden una vez por card al crearla,
+    // no en cada re-render.
+    const card = wrapper.querySelector('.media-card');
+    card.addEventListener('click', e => {
+      if (e.target.closest('.resume-btn, .status-tag-btn')) return;
+      const { type, id } = card.dataset;
+      if (type && id) window.location.href = `/serie/${type}/local/${id}`;
     });
 
-    // Botón de etiqueta → popup contextual
-    container.querySelectorAll('.status-tag-btn').forEach(btn => {
-      btn.addEventListener('click', e => {
-        e.stopPropagation();
-        openStatusPopup(btn, btn.dataset.ref);
-      });
+    wrapper.querySelector('.resume-btn')?.addEventListener('click', e => {
+      e.stopPropagation();
+      const { type, id } = card.dataset;
+      const ch = e.currentTarget.dataset.lastChapter;
+      if (type && id && ch) window.location.href = `/reader/${type}/local/${id}/${ch}`;
     });
+
+    wrapper.querySelector('.status-tag-btn')?.addEventListener('click', e => {
+      e.stopPropagation();
+      openStatusPopup(e.currentTarget, ref);
+    });
+
+    return wrapper;
   }
 
   // ── Popup contextual de etiqueta ───────────────────────────────────────
-
-  let _statusPopup   = null;
-  let _popupRef      = null;
+  let _statusPopup       = null;
   let _popupCloseHandler = null;
 
   const STATUS_OPTIONS = [
-    { value: 'watching',  label: 'Mirando',   icon: 'fa-eye',          color: 'var(--accent)', border: 'rgba(196,107,255,0.35)', bg: 'rgba(196,107,255,0.1)' },
-    { value: 'completed', label: 'Visto',      icon: 'fa-check-circle', color: '#4ade80',       border: 'rgba(74,222,128,0.35)',  bg: 'rgba(74,222,128,0.1)'  },
-    { value: 'pending',   label: 'Pendiente',  icon: 'fa-clock',        color: '#fbbf24',       border: 'rgba(251,191,36,0.35)', bg: 'rgba(251,191,36,0.1)'  },
-    { value: 'none',      label: 'Sin etiqueta', icon: 'fa-tag',        color: 'var(--muted)',  border: 'var(--border)',         bg: 'transparent'           },
+    { value: 'watching',  label: 'Mirando',      icon: 'fa-eye',          color: 'var(--accent)', border: 'rgba(196,107,255,0.35)', bg: 'rgba(196,107,255,0.1)' },
+    { value: 'completed', label: 'Visto',         icon: 'fa-check-circle', color: '#4ade80',       border: 'rgba(74,222,128,0.35)',  bg: 'rgba(74,222,128,0.1)'  },
+    { value: 'pending',   label: 'Pendiente',     icon: 'fa-clock',        color: '#fbbf24',       border: 'rgba(251,191,36,0.35)', bg: 'rgba(251,191,36,0.1)'  },
+    { value: 'none',      label: 'Sin etiqueta',  icon: 'fa-tag',          color: 'var(--muted)',  border: 'var(--border)',         bg: 'transparent'           },
   ];
 
   function openStatusPopup(anchorBtn, ref) {
     closeStatusPopup();
-    _popupRef = ref;
     const current = _libraryStatuses[ref] || 'none';
 
-    // Crear popup
     const popup = document.createElement('div');
     popup.id = 'status-popup';
     Object.assign(popup.style, {
@@ -484,25 +543,24 @@
       transition:     'opacity 0.15s ease, transform 0.15s ease',
     });
 
-    // Opciones
     STATUS_OPTIONS.forEach(opt => {
-      const row = document.createElement('button');
+      const row      = document.createElement('button');
       const isActive = opt.value === current;
       Object.assign(row.style, {
-        display:        'flex',
-        alignItems:     'center',
-        gap:            '9px',
-        padding:        '7px 10px',
-        borderRadius:   '8px',
-        border:         isActive ? `1px solid ${opt.border}` : '1px solid transparent',
-        background:     isActive ? opt.bg : 'transparent',
-        color:          isActive ? opt.color : 'var(--muted)',
-        fontSize:       '13px',
-        fontFamily:     'var(--ff-body)',
-        cursor:         'pointer',
-        textAlign:      'left',
-        width:          '100%',
-        transition:     'background 0.12s, color 0.12s',
+        display:      'flex',
+        alignItems:   'center',
+        gap:          '9px',
+        padding:      '7px 10px',
+        borderRadius: '8px',
+        border:       isActive ? `1px solid ${opt.border}` : '1px solid transparent',
+        background:   isActive ? opt.bg : 'transparent',
+        color:        isActive ? opt.color : 'var(--muted)',
+        fontSize:     '13px',
+        fontFamily:   'var(--ff-body)',
+        cursor:       'pointer',
+        textAlign:    'left',
+        width:        '100%',
+        transition:   'background 0.12s, color 0.12s',
       });
       row.innerHTML = `
         <i class="fas ${opt.icon}" style="font-size:11px; width:14px; text-align:center; flex-shrink:0;"></i>
@@ -519,11 +577,10 @@
           row.style.color      = 'var(--muted)';
         }
       });
-
       row.addEventListener('click', async e => {
         e.stopPropagation();
         closeStatusPopup();
-        if (opt.value === current) return; // sin cambio
+        if (opt.value === current) return;
         try {
           const res = await fetch('/api/library/status', {
             method:  'POST',
@@ -536,6 +593,11 @@
               opt.value === 'none' ? 'Etiqueta eliminada' : `Marcado como ${opt.label}`,
               'success', 2000
             );
+            // Actualizar solo la card afectada (sin re-render completo)
+            const id = ref.replace('local:', '');
+            const oldNode = _renderedCards.get(id);
+            if (oldNode) oldNode.remove(); // quitar del DOM primero
+            _renderedCards.delete(id);     // luego del mapa
             applyLibraryView();
           } else {
             showNotification('Error al guardar etiqueta', 'error');
@@ -551,27 +613,23 @@
     document.body.appendChild(popup);
     _statusPopup = popup;
 
-    // Posicionar el popup junto al botón, sin salirse de la pantalla
-    const rect   = anchorBtn.getBoundingClientRect();
-    const pw     = 160; // min-width
-    const ph     = 4 * 38; // aprox alto
-    let   top    = rect.bottom + 6;
-    let   left   = rect.left;
-
-    if (left + pw > window.innerWidth - 8)  left  = window.innerWidth  - pw - 8;
-    if (top  + ph > window.innerHeight - 8) top   = rect.top - ph - 6;
+    // Posicionar sin salirse de pantalla
+    const rect = anchorBtn.getBoundingClientRect();
+    const pw   = 160;
+    const ph   = 4 * 38;
+    let top    = rect.bottom + 6;
+    let left   = rect.left;
+    if (left + pw > window.innerWidth  - 8) left = window.innerWidth  - pw - 8;
+    if (top  + ph > window.innerHeight - 8) top  = rect.top - ph - 6;
     if (left < 8) left = 8;
-
     popup.style.top  = `${top}px`;
     popup.style.left = `${left}px`;
 
-    // Animar entrada
     requestAnimationFrame(() => requestAnimationFrame(() => {
       popup.style.opacity   = '1';
       popup.style.transform = 'scale(1) translateY(0)';
     }));
 
-    // Cerrar al hacer clic fuera o presionar Escape
     _popupCloseHandler = e => {
       if (!popup.contains(e.target) && e.target !== anchorBtn) closeStatusPopup();
     };
@@ -587,9 +645,8 @@
 
   function closeStatusPopup() {
     if (!_statusPopup) return;
-    const popup = _statusPopup;
+    const popup  = _statusPopup;
     _statusPopup = null;
-    _popupRef    = null;
     popup.style.opacity   = '0';
     popup.style.transform = 'scale(0.95) translateY(-4px)';
     setTimeout(() => popup.remove(), 150);
@@ -597,8 +654,7 @@
     document.removeEventListener('keydown', _escCloseHandler);
   }
 
-  // ── Notificaciones ─────────────────────────────────────────────────────
-  // Expuesta globalmente para que serie.js y queue-indicator.js la usen
+  // ── Notificaciones (global) ────────────────────────────────────────────
   window.showNotification = function(message, type = 'info', duration = 3500) {
     let container = document.getElementById('toast-container');
     if (!container) {
@@ -619,30 +675,30 @@
     }
 
     const colors = {
-      success: { bg: 'rgba(74,222,128,0.15)',  border: 'rgba(74,222,128,0.3)',  icon: '✓' },
-      error:   { bg: 'rgba(248,113,113,0.15)', border: 'rgba(248,113,113,0.3)', icon: '✕' },
-      info:    { bg: 'rgba(196,107,255,0.12)', border: 'rgba(196,107,255,0.25)', icon: 'ℹ' },
+      success: { bg: 'rgba(74,222,128,0.15)',   border: 'rgba(74,222,128,0.3)',   icon: '✓' },
+      error:   { bg: 'rgba(248,113,113,0.15)',  border: 'rgba(248,113,113,0.3)',  icon: '✕' },
+      info:    { bg: 'rgba(196,107,255,0.12)',  border: 'rgba(196,107,255,0.25)', icon: 'ℹ' },
     };
     const c = colors[type] || colors.info;
 
     const toast = document.createElement('div');
     Object.assign(toast.style, {
-      background:    c.bg,
-      border:        `1px solid ${c.border}`,
+      background:     c.bg,
+      border:         `1px solid ${c.border}`,
       backdropFilter: 'blur(12px)',
-      color:         'var(--text)',
-      padding:       '10px 14px',
-      borderRadius:  '10px',
-      fontSize:      '13px',
-      fontFamily:    'var(--ff-body)',
-      pointerEvents: 'auto',
-      boxShadow:     '0 4px 20px rgba(0,0,0,0.3)',
-      opacity:       '0',
-      transform:     'translateX(20px)',
-      transition:    'opacity 0.22s ease, transform 0.22s ease',
-      display:       'flex',
-      alignItems:    'center',
-      gap:           '8px',
+      color:          'var(--text)',
+      padding:        '10px 14px',
+      borderRadius:   '10px',
+      fontSize:       '13px',
+      fontFamily:     'var(--ff-body)',
+      pointerEvents:  'auto',
+      boxShadow:      '0 4px 20px rgba(0,0,0,0.3)',
+      opacity:        '0',
+      transform:      'translateX(20px)',
+      transition:     'opacity 0.22s ease, transform 0.22s ease',
+      display:        'flex',
+      alignItems:     'center',
+      gap:            '8px',
     });
     toast.innerHTML = `<span style="flex-shrink:0; opacity:0.8;">${c.icon}</span><span>${message}</span>`;
     container.appendChild(toast);
@@ -667,6 +723,6 @@
   animeSearchInput?.addEventListener('keypress', e => { if (e.key === 'Enter') search(false); });
   mangaSearchInput?.addEventListener('keypress', e => { if (e.key === 'Enter') search(false); });
 
-  // ── Inicializar en biblioteca ──────────────────────────────────────────
+  // ── Inicializar en Biblioteca por defecto ─────────────────────────────
   setActiveTab('library');
 })();

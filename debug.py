@@ -1,68 +1,43 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+import cloudscraper
+from bs4 import BeautifulSoup
 
-import sys
-import logging
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+scraper = cloudscraper.create_scraper()
+UA = "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0"
+slug = "el-tutorial-es-demasiado-dificil"
+cap_url = f"https://nartag.com/manga/{slug}/capitulos/capitulo-1/"
 
-from sources.ikigai import IkigaiSource
-from core.disk_cache import search_cache
-from core.utils import normalize_title
+html = scraper.get(cap_url, headers={"User-Agent": UA}, timeout=30).text
+soup = BeautifulSoup(html, 'html.parser')
+form = soup.find('form', id='rk_madara_redirect')
 
-# Configurar logging para ver detalles
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %message)s')
-logger = logging.getLogger(__name__)
+fields = {
+    inp['name']: inp.get('value', '')
+    for inp in form.find_all('input', {'type': 'hidden'})
+}
+action = form.get('action')
+print("Fields:", fields)
+print("Action:", action)
 
-def debug_ikigai():
-    # Limpiar caché para forzar recarga del catálogo
-    print("Limpiando caché de Ikigai...")
-    search_cache.delete("ikigai:catalog")
-    
-    source = IkigaiSource()
-    
-    # 1. Probar búsqueda
-    query = "chupete"
-    print(f"\n--- Búsqueda: {query} ---")
-    results = source.search(query)
-    print(f"Encontrados {len(results)} resultados")
-    for i, res in enumerate(results[:5]):
-        print(f"{i+1}. ID: {res['id']} | Título: {res['title']} | Cover: {res['cover'][:60]}...")
-    
-    if not results:
-        print("No hay resultados. Revisar CATALOGO_BASE y selectores.")
-        return
-    
-    # Tomar el primer resultado para depurar detalles
-    sample_id = results[0]['id']
-    print(f"\n--- Detalles de serie: {sample_id} ---")
-    print(f"URL solicitada: {source.BASE_URL}/series/{sample_id}/")
-    try:
-        details = source.get_details(sample_id)
-        print("Detalles obtenidos correctamente:")
-        print(f"  Título: {details['title']}")
-        print(f"  Portada: {details['cover'][:80]}...")
-        print(f"  Sinopsis: {details['synopsis'][:200]}...")
-    except Exception as e:
-        print(f"ERROR al obtener detalles: {e}")
-        # Intentar obtener el HTML manualmente para inspeccionar
-        try:
-            import requests
-            url = f"{source.BASE_URL}/series/{sample_id}/"
-            resp = source._fetch_url(url)
-            print(f"HTML recibido (primeros 800 caracteres):\n{resp[:800]}")
-        except Exception as html_err:
-            print(f"No se pudo obtener HTML: {html_err}")
-    
-    # 3. Probar capítulos
-    print(f"\n--- Capítulos de serie: {sample_id} ---")
-    try:
-        chapters = source.get_chapters(sample_id)
-        print(f"Obtenidos {len(chapters)} capítulos")
-        for ch in chapters[:5]:
-            print(f"  Capítulo {ch['number']} -> ID {ch['id']}")
-    except Exception as e:
-        print(f"ERROR al obtener capítulos: {e}")
+# Hacer el POST
+resp = scraper.post(
+    action,
+    data=fields,
+    headers={
+        "User-Agent": UA,
+        "Referer": cap_url,
+        "Origin": "https://nartag.com",
+        "Content-Type": "application/x-www-form-urlencoded",
+    },
+    timeout=30,
+    allow_redirects=True,
+)
+print("\nStatus:", resp.status_code)
+print("URL final:", resp.url)
 
-if __name__ == "__main__":
-    debug_ikigai()
+# Ver qué imágenes hay en el HTML resultante
+soup2 = BeautifulSoup(resp.text, 'html.parser')
+imgs = soup2.find_all('img')
+print(f"\nTotal <img>: {len(imgs)}")
+for i, img in enumerate(imgs):
+    src = img.get('src') or img.get('data-src') or ''
+    print(f"  [{i}] {src}")

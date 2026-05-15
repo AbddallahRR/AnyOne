@@ -1,261 +1,172 @@
 /* ============================================================
-   Comic Web — Design System
+   Comic Web — Styles (Samsung One UI inspired)
    ============================================================ */
 
 /* ── Spinner ── */
 .loading-spinner {
-  border: 3px solid rgba(255,255,255,0.08);
-  border-top: 3px solid var(--accent);
+  border: 2px solid rgba(255,255,255,0.07);
+  border-top: 2px solid var(--accent);
   border-radius: 50%;
-  width: 40px;
-  height: 40px;
-  animation: spin 0.8s cubic-bezier(0.6,0,0.4,1) infinite;
+  width: 36px;
+  height: 36px;
+  animation: spin 0.75s linear infinite;
 }
-@keyframes spin {
-  0%   { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
+@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
 /* ── Queue progress bar ── */
-.queue-progress-bar {
-  transition: width 0.4s cubic-bezier(0.4,0,0.2,1);
-}
+.queue-progress-bar { transition: width 0.4s cubic-bezier(0.4,0,0.2,1); }
 
 /* ── Tab active accent ── */
-.tab-btn.active {
-  color: var(--accent);
-}
+.tab-btn.active { color: #fff; }
 
 /* ── Chapter card states ── */
-.chapter-card {
-  transition: all 0.18s cubic-bezier(0.4,0,0.2,1);
-}
+.chapter-card { transition: all 0.18s cubic-bezier(0.4,0,0.2,1); }
 .chapter-card:hover {
   transform: translateY(-2px);
-  background-color: rgba(196,107,255,0.06);
-  border-color: rgba(196,107,255,0.3);
+  background-color: rgba(124,92,252,0.06);
+  border-color: rgba(124,92,252,0.3);
 }
 .chapter-card.downloaded {
-  border-left: 3px solid #10b981;
-  background-color: rgba(16,185,129,0.06);
+  border-left: 3px solid #34d399;
+  background-color: rgba(52,211,153,0.05);
 }
-.chapter-card.not-downloaded {
-  border-left: 3px solid rgba(255,255,255,0.08);
-}
+.chapter-card.not-downloaded { border-left: 3px solid rgba(255,255,255,0.07); }
 
 /* ── Chapter action buttons ── */
 .download-chapter-btn {
-  background: rgba(255,255,255,0.07);
+  background: rgba(255,255,255,0.06);
   transition: background 0.15s ease, transform 0.1s ease;
 }
-.download-chapter-btn:hover {
-  background: rgba(255,255,255,0.14);
-  transform: scale(1.05);
-}
+.download-chapter-btn:hover { background: rgba(255,255,255,0.12); transform: scale(1.05); }
 .play-chapter-btn {
-  background: rgba(139,92,246,0.25);
+  background: rgba(124,92,252,0.2);
   transition: background 0.15s ease, transform 0.1s ease;
 }
-.play-chapter-btn:hover {
-  background: rgba(139,92,246,0.4);
-  transform: scale(1.05);
-}
+.play-chapter-btn:hover { background: rgba(124,92,252,0.35); transform: scale(1.05); }
 
 /* ── Download indicator ── */
 .download-indicator {
   position: fixed;
   top: 14px;
   right: 14px;
-  background: rgba(10,10,15,0.88);
+  background: rgba(13,13,20,0.9);
   color: var(--text);
   border: 1px solid var(--border-hi);
-  border-radius: 10px;
-  padding: 6px 12px;
+  border-radius: 12px;
+  padding: 7px 14px;
   font-size: 12px;
   z-index: 10000;
   cursor: pointer;
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(14px);
   transition: opacity 0.25s ease, transform 0.25s ease;
   transform: translateY(0);
-  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.4);
 }
 .download-indicator.hidden {
   opacity: 0;
   pointer-events: none;
   transform: translateY(-8px);
-  display: flex; /* override display:none so transition fires */
-}
-.download-indicator .indicator-inner {
   display: flex;
-  align-items: center;
-  gap: 6px;
 }
-.download-indicator i {
-  font-size: 13px;
-  color: var(--accent);
-}
+.download-indicator .indicator-inner { display: flex; align-items: center; gap: 7px; }
+.download-indicator i { font-size: 13px; color: var(--accent); }
 
 /* ============================================================
    Page-level transitions
    ============================================================ */
-
-/* Fade-up entrance for entire page content */
 @keyframes fadeUp {
   from { opacity: 0; transform: translateY(14px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes slideDown {
   from { opacity: 0; transform: translateY(-8px); }
   to   { opacity: 1; transform: translateY(0); }
-}
-@keyframes scaleIn {
-  from { opacity: 0; transform: scale(0.96); }
-  to   { opacity: 1; transform: scale(1); }
 }
 @keyframes shimmer {
   0%   { background-position: -400px 0; }
   100% { background-position:  400px 0; }
 }
-
-/* Apply to top-level page wrapper */
-.page-enter {
-  animation: fadeUp 0.4s cubic-bezier(0.4,0,0.2,1) both;
-}
-
-/* Nav bar slides in */
-.nav-enter {
-  animation: slideDown 0.35s cubic-bezier(0.4,0,0.2,1) both;
-}
-
-/* Hero text stagger */
-.hero-enter {
-  animation: fadeUp 0.5s cubic-bezier(0.4,0,0.2,1) both;
-}
-.hero-enter-delay {
-  animation: fadeUp 0.5s 0.1s cubic-bezier(0.4,0,0.2,1) both;
-}
+.page-enter        { animation: fadeUp    0.4s  cubic-bezier(0.4,0,0.2,1) both; }
+.nav-enter         { animation: slideDown 0.32s cubic-bezier(0.4,0,0.2,1) both; }
+.hero-enter        { animation: fadeUp    0.45s cubic-bezier(0.4,0,0.2,1) both; }
+.hero-enter-delay  { animation: fadeUp    0.45s 0.08s cubic-bezier(0.4,0,0.2,1) both; }
 
 /* ============================================================
-   Media grid & cards — staggered entrance
+   Media grid
    ============================================================ */
-
 .media-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 14px;
+  gap: 16px;
 }
-@media (min-width: 640px) {
-  .media-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
-}
-@media (min-width: 1024px) {
-  .media-grid { grid-template-columns: repeat(auto-fill, minmax(175px, 1fr)); }
-}
+@media (min-width: 600px)  { .media-grid { grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)); } }
+@media (min-width: 1024px) { .media-grid { grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); } }
 
 /* Cards animate in when JS adds .visible */
 .media-card-wrapper {
   opacity: 0;
-  transform: translateY(16px);
-  transition: opacity 0.35s cubic-bezier(0.4,0,0.2,1),
-              transform 0.35s cubic-bezier(0.4,0,0.2,1);
+  transform: translateY(14px) scale(0.98);
+  transition: opacity 0.3s cubic-bezier(0.4,0,0.2,1),
+              transform 0.3s cubic-bezier(0.4,0,0.2,1);
 }
-.media-card-wrapper.visible {
-  opacity: 1;
-  transform: translateY(0);
-}
+.media-card-wrapper.visible { opacity: 1; transform: translateY(0) scale(1); }
 
 /* ============================================================
    Skeleton loader
    ============================================================ */
 .skeleton {
-  background: linear-gradient(
-    90deg,
-    var(--raised) 25%,
-    rgba(255,255,255,0.04) 50%,
-    var(--raised) 75%
-  );
+  background: linear-gradient(90deg, var(--raised) 25%, rgba(255,255,255,0.04) 50%, var(--raised) 75%);
   background-size: 400px 100%;
   animation: shimmer 1.4s ease infinite;
-  border-radius: 10px;
+  border-radius: 14px;
 }
-.skeleton-card {
-  aspect-ratio: 2/3;
-  border-radius: 10px;
-}
+.skeleton-card { aspect-ratio: 2/3; border-radius: 14px; }
 
 /* ============================================================
    Tab panel transitions
    ============================================================ */
-.content-panel {
-  animation: fadeIn 0.25s cubic-bezier(0.4,0,0.2,1) both;
-}
-.content-panel.hidden {
-  display: none;
-}
+.content-panel { animation: fadeIn 0.22s cubic-bezier(0.4,0,0.2,1) both; }
+.content-panel.hidden { display: none; }
 
 /* ============================================================
-   Modal — smooth open/close
+   Modal
    ============================================================ */
 .modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.85);
-  backdrop-filter: blur(10px);
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0);
+  backdrop-filter: blur(0px);
   z-index: 50;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: flex; align-items: center; justify-content: center;
   padding: 16px;
-  opacity: 0;
-  transition: opacity 0.2s ease;
+  opacity: 1;
+  transition: background 0.22s ease, backdrop-filter 0.22s ease;
   pointer-events: none;
 }
-.modal-backdrop.open {
-  opacity: 1;
-  pointer-events: auto;
-}
-.modal-backdrop.hidden {
-  display: none;
-}
+.modal-backdrop.open { background: rgba(0,0,0,0.82); backdrop-filter: blur(12px); pointer-events: auto; }
+.modal-backdrop.hidden { display: none; }
 .modal-box {
   background: var(--raised);
   border: 1px solid var(--border-hi);
-  border-radius: 16px;
-  width: 100%;
-  max-width: 860px;
-  max-height: 90vh;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
+  border-radius: 22px;
+  width: 100%; max-width: 860px; max-height: 90vh;
+  overflow: hidden; display: flex; flex-direction: column;
   transform: scale(0.96) translateY(8px);
-  transition: transform 0.25s cubic-bezier(0.34,1.56,0.64,1),
-              opacity  0.2s ease;
+  transition: transform 0.28s cubic-bezier(0.34,1.4,0.64,1), opacity 0.22s ease;
   opacity: 0;
 }
-.modal-backdrop.open .modal-box {
-  transform: scale(1) translateY(0);
-  opacity: 1;
-}
+.modal-backdrop.open .modal-box { transform: scale(1) translateY(0); opacity: 1; }
 
 /* ============================================================
    Chapters list — staggered entrance
    ============================================================ */
 .chapter-pill {
   opacity: 0;
-  transform: translateX(-8px);
-  transition: opacity 0.25s ease,
-              transform 0.25s ease,
-              background 0.15s ease,
-              border-color 0.15s ease,
-              color 0.15s ease;
+  transform: translateX(-6px);
+  transition: opacity 0.22s ease, transform 0.22s ease,
+              background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
-.chapter-pill.visible {
-  opacity: 1;
-  transform: translateX(0);
-}
+.chapter-pill.visible { opacity: 1; transform: translateX(0); }
 
 /* ============================================================
    Serie hero — cover reveal
@@ -265,56 +176,89 @@
   opacity: 0;
   transform: scale(1.03);
 }
-#serie-cover.loaded {
-  opacity: 1;
-  transform: scale(1);
-}
+#serie-cover.loaded { opacity: 1; transform: scale(1); }
 
 /* ============================================================
    Progress bar
    ============================================================ */
-.progress-bar-fill {
-  transition: width 0.6s cubic-bezier(0.4,0,0.2,1);
-}
+.progress-bar-fill { transition: width 0.6s cubic-bezier(0.4,0,0.2,1); }
 
 /* ============================================================
-   Button press feedback
+   Button press
    ============================================================ */
-.btn-primary:active,
-.btn-ghost:active {
-  transform: scale(0.96);
-}
+.btn-primary:active, .btn-ghost:active { transform: scale(0.96); }
 
 /* ============================================================
-   Reader — page-turn transition
+   Reader — page-turn
    ============================================================ */
-@keyframes readerFadeIn {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-.manga-page-entering {
-  animation: readerFadeIn 0.2s ease both;
-}
+@keyframes readerFadeIn { from { opacity: 0; } to { opacity: 1; } }
+.manga-page-entering { animation: readerFadeIn 0.2s ease both; }
 
 /* ============================================================
    Glow pulse on active downloads
    ============================================================ */
 @keyframes glowPulse {
-  0%,100% { box-shadow: 0 0 0 0 rgba(196,107,255,0); }
-  50%      { box-shadow: 0 0 0 6px rgba(196,107,255,0.12); }
+  0%,100% { box-shadow: 0 0 0 0 rgba(124,92,252,0); }
+  50%      { box-shadow: 0 0 0 6px rgba(124,92,252,0.12); }
 }
-.downloading-glow {
-  animation: glowPulse 2s ease infinite;
-}
+.downloading-glow { animation: glowPulse 2s ease infinite; }
 
 /* ============================================================
-   Scrollbar (refined)
+   Scrollbar
    ============================================================ */
-::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb {
-  background: rgba(196,107,255,0.25);
-  border-radius: 3px;
-  transition: background 0.2s;
+::-webkit-scrollbar-thumb { background: rgba(124,92,252,0.28); border-radius: 2px; transition: background 0.2s; }
+::-webkit-scrollbar-thumb:hover { background: rgba(124,92,252,0.5); }
+
+/* ============================================================
+   Pill / Chip — internal structure
+   ============================================================ */
+.pill-label { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+.pill-num { font-size: 13px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pill-num.muted { color: var(--muted); }
+.pill-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+
+/* Watched dot */
+.watched-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: #34d399;
+  flex-shrink: 0; box-shadow: 0 0 5px rgba(52,211,153,0.45);
 }
-::-webkit-scrollbar-thumb:hover { background: rgba(196,107,255,0.45); }
+.chapter-pill.watched { border-color: rgba(52,211,153,0.2); }
+
+/* Chapter action buttons */
+.chapter-action-btn {
+  width: 30px; height: 30px; border-radius: 8px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; font-size: 11px;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+}
+.chapter-action-btn:active { transform: scale(0.92); }
+
+.play-chapter-btn {
+  background: rgba(124,92,252,0.14);
+  border: 1px solid rgba(124,92,252,0.28);
+  color: var(--accent-lt);
+}
+.play-chapter-btn:hover { background: rgba(124,92,252,0.24); border-color: rgba(124,92,252,0.45); transform: scale(1.08); }
+
+.download-chapter-btn {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.download-chapter-btn:hover { background: rgba(255,255,255,0.1); color: var(--text); transform: scale(1.08); }
+
+.watched-toggle-btn {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.watched-toggle-btn:hover { background: rgba(52,211,153,0.1); border-color: rgba(52,211,153,0.3); color: #34d399; transform: scale(1.08); }
+.watched-toggle-btn.is-watched { background: rgba(52,211,153,0.1); border: 1px solid rgba(52,211,153,0.28); color: #34d399; }
+
+.delete-chapter-btn {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.delete-chapter-btn:hover { background: rgba(248,113,113,0.08); border-color: rgba(248,113,113,0.3); color: #f87171; transform: scale(1.08); }

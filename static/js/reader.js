@@ -1,31 +1,27 @@
 // static/js/reader.js
 (function () {
+  'use strict';
+
   const { type, source, content_id, current_chapter } = window.readerData;
 
-  let chaptersList       = [];
+  let chaptersList        = [];
   let currentChapterIndex = -1;
-  let currentChapterNum  = current_chapter;
-  let progressInterval   = null;
+  let currentChapterNum   = current_chapter;
+  let progressInterval    = null;
 
   // ── Elementos DOM ──────────────────────────────────────────────────────
-  const mediaContainer    = document.getElementById('media-content');
-  const chapterWrapper    = document.getElementById('chapter-wrapper');
-  const prevBtn           = document.getElementById('prev-btn');
-  const nextBtn           = document.getElementById('next-btn');
-  const fullscreenBtn     = document.getElementById('fullscreen-btn');
-  const controlsDiv       = document.getElementById('controls');
-  const chapterLabelNum   = document.getElementById('current-chapter-num');
-  const backBtn           = document.getElementById('back-to-serie');
+  const mediaContainer  = document.getElementById('media-content');
+  const chapterWrapper  = document.getElementById('chapter-wrapper');
+  const prevBtn         = document.getElementById('prev-btn');
+  const nextBtn         = document.getElementById('next-btn');
+  const fullscreenBtn   = document.getElementById('fullscreen-btn');
+  const controlsDiv     = document.getElementById('controls');
+  const chapterLabelNum = document.getElementById('current-chapter-num');
+  const backBtn         = document.getElementById('back-to-serie');
 
-  // ── Helpers de UI ──────────────────────────────────────────────────────
   const UI_ELS = [controlsDiv, fullscreenBtn, backBtn].filter(Boolean);
-
-  function showUI() {
-    UI_ELS.forEach(el => el.classList.add('show'));
-  }
-  function hideUI() {
-    UI_ELS.forEach(el => el.classList.remove('show'));
-  }
+  function showUI() { UI_ELS.forEach(el => el.classList.add('show')); }
+  function hideUI() { UI_ELS.forEach(el => el.classList.remove('show')); }
 
   // ── Label del capítulo ─────────────────────────────────────────────────
   function updateChapterLabel() {
@@ -35,7 +31,7 @@
     if (window.animateChapterLabel) window.animateChapterLabel();
   }
 
-  // ── Capítulos vistos ───────────────────────────────────────────────────
+  // ── Marcar visto ───────────────────────────────────────────────────────
   async function markCurrentAsWatched() {
     if (source !== 'local') return;
     try {
@@ -47,7 +43,7 @@
     } catch (e) { console.warn('markCurrentAsWatched:', e); }
   }
 
-  // ── Carga de capítulos ─────────────────────────────────────────────────
+  // ── Lista de capítulos ─────────────────────────────────────────────────
   async function loadChaptersList() {
     try {
       const url = source === 'local'
@@ -57,7 +53,9 @@
       if (!res.ok) throw new Error('No se pudo obtener la lista de capítulos');
       chaptersList = await res.json();
 
-      currentChapterIndex = chaptersList.findIndex(ch => String(ch.number) === String(current_chapter));
+      currentChapterIndex = chaptersList.findIndex(
+        ch => String(ch.number) === String(current_chapter)
+      );
       if (currentChapterIndex === -1 && chaptersList.length) currentChapterIndex = 0;
       if (currentChapterIndex >= 0) currentChapterNum = chaptersList[currentChapterIndex].number;
 
@@ -72,26 +70,22 @@
     }
   }
 
-  // ── Cargar capítulo actual (con transición si está disponible) ─────────
+  // ── Cargar capítulo actual ─────────────────────────────────────────────
   function loadCurrentChapter() {
     if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
 
     const doLoad = () => {
       if (chapterWrapper) chapterWrapper.innerHTML = `
-        <div style="display:flex; align-items:center; justify-content:center; width:100%; height:100%;">
+        <div style="display:flex; align-items:center; justify-content:center;
+                    width:100%; height:100%;">
           <div class="loading-spinner"></div>
         </div>`;
       if (type === 'anime') loadAnimeChapter();
       else                  loadMangaChapter();
     };
 
-    // Usar la transición del reader.html si está disponible
-    if (window.chapterTransition) {
-      window.chapterTransition(doLoad);
-    } else {
-      doLoad();
-    }
-
+    if (window.chapterTransition) window.chapterTransition(doLoad);
+    else doLoad();
     showUI();
   }
 
@@ -106,7 +100,7 @@
 
   function nextChapter() {
     if (currentChapterIndex >= chaptersList.length - 1) return;
-    markCurrentAsWatched();  // marcar antes de avanzar
+    markCurrentAsWatched();
     currentChapterIndex++;
     currentChapterNum = chaptersList[currentChapterIndex].number;
     updateChapterLabel();
@@ -123,21 +117,24 @@
     let duration  = 0;
     let hasMarked = false;
 
-    // Progreso guardado
-    try {
-      const res  = await fetch(`/api/progress/${type}/${source}/${content_id}`);
-      const prog = await res.json();
-      if (String(prog.chapter) === String(currentChapterNum) && prog.progress)
-        savedTime = parseInt(prog.progress);
-    } catch (e) { console.warn(e); }
-
-    // Duración (solo local)
+    // [OPT-1] Progreso + duración en paralelo (eran secuenciales)
+    const fetches = [
+      fetch(`/api/progress/${type}/${source}/${content_id}`)
+        .then(r => r.ok ? r.json() : null)
+        .catch(() => null),
+    ];
     if (source === 'local') {
-      try {
-        const res = await fetch(`/api/video-duration/anime/${content_id}/${currentChapterNum}`);
-        if (res.ok) ({ duration } = await res.json());
-      } catch (e) { console.warn(e); }
+      fetches.push(
+        fetch(`/api/video-duration/anime/${content_id}/${currentChapterNum}`)
+          .then(r => r.ok ? r.json() : null)
+          .catch(() => null)
+      );
     }
+
+    const [prog, durData] = await Promise.all(fetches);
+    if (prog && String(prog.chapter) === String(currentChapterNum) && prog.progress)
+      savedTime = parseInt(prog.progress);
+    if (durData?.duration > 0) duration = durData.duration;
 
     if (chapterWrapper) chapterWrapper.innerHTML = `
       <video id="anime-video" controls autoplay
@@ -149,42 +146,67 @@
     if (!video) return;
 
     if (savedTime > 0)
-      video.addEventListener('loadedmetadata', () => { video.currentTime = savedTime; }, { once: true });
+      video.addEventListener('loadedmetadata', () => {
+        video.currentTime = savedTime;
+      }, { once: true });
 
-    // Guardar progreso cada 2s
-    progressInterval = setInterval(() => {
-      const t = Math.floor(video.currentTime);
-      fetch(`/api/progress/${type}/${source}/${content_id}`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ chapter: currentChapterNum, progress: t }),
-      }).catch(console.error);
+    // [OPT-4] Guardar progreso solo cuando el video está reproduciendo,
+    // suspender si está en pausa o la pestaña no es visible
+    let intervalActive = false;
 
-      if (!hasMarked && duration > 0 && t >= duration * 0.99) {
-        hasMarked = true;
-        markCurrentAsWatched();
-      }
-    }, 2000);
+    function startInterval() {
+      if (intervalActive) return;
+      intervalActive = true;
+      progressInterval = setInterval(() => {
+        if (document.hidden || video.paused) return; // no gastar fetches en pausa
+        const t = Math.floor(video.currentTime);
+        fetch(`/api/progress/${type}/${source}/${content_id}`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ chapter: currentChapterNum, progress: t }),
+        }).catch(console.error);
+
+        if (!hasMarked && duration > 0 && t >= duration * 0.99) {
+          hasMarked = true;
+          markCurrentAsWatched();
+        }
+      }, 2000);
+    }
+
+    function stopInterval() {
+      if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
+      intervalActive = false;
+    }
+
+    video.addEventListener('play',  startInterval);
+    video.addEventListener('pause', stopInterval);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) stopInterval(); else if (!video.paused) startInterval();
+    }, { once: false });
 
     video.addEventListener('ended', () => {
+      stopInterval();
       if (!hasMarked) { hasMarked = true; markCurrentAsWatched(); }
       if (currentChapterIndex < chaptersList.length - 1) nextChapter();
     });
   }
 
-  // ── Manga — visor virtual ──────────────────────────────────────────────
+  // ── Manga — visor virtual con búsqueda binaria ─────────────────────────
   //
-  // Problema: cargar todas las imágenes en el DOM mantiene cada una decodificada
-  // en VRAM aunque no sea visible, disparando el uso de memoria de video.
+  // Mejoras sobre la versión anterior:
   //
-  // Solución: visor virtual con ventana de ±WINDOW páginas alrededor del scroll
-  // actual. Las imágenes fuera de la ventana se reemplazan por placeholders del
-  // mismo alto (preservando la posición de scroll). Solo WINDOW*2+1 imágenes
-  // viven en el DOM como <img> real en cualquier momento.
+  // [OPT-2] getVisibleIndex() usa búsqueda binaria sobre un array de offsets
+  //         acumulados en vez de recorrer todo el array en cada frame de scroll.
   //
-  // Las alturas reales se aprenden la primera vez que cada imagen carga y se
-  // guardan en pageHeights[]. Los placeholders usan esa altura para que el
-  // scrollHeight total no cambie al intercambiar.
+  // [OPT-3] prefixSums[] se construye una vez y se actualiza solo cuando
+  //         pageHeights[i] cambia (al aprender la altura real de una imagen).
+  //         offsetBefore(i) pasa de O(n) a O(1).
+  //
+  // [OPT-5] updateWindow() guarda el rango [prevLo, prevHi] y solo procesa
+  //         los slots que entran o salen de la ventana (delta), no todos.
+  //
+  // [OPT-6] mountImage() tiene un timeout de 12 s; si decode() tarda más,
+  //         libera el slot para que se pueda reintentar.
 
   async function loadMangaChapter() {
     if (source !== 'local') {
@@ -211,20 +233,46 @@
       const imageUrls = relPaths.map(p => `/api/manga/images/${p}`);
       const total     = imageUrls.length;
 
-      // ── Constantes del visor virtual ──
-      const WINDOW     = 2;   // páginas visibles a cada lado del índice actual
-      const IMG_HEIGHT = 1200; // altura estimada (px) hasta que se aprende la real
+      const WINDOW     = 2;
+      const IMG_HEIGHT = 1200;
 
       // Estado
-      const pageHeights = new Array(total).fill(IMG_HEIGHT); // se actualiza al cargar
-      let   currentPage = 0;  // índice de la página más cercana al tope del viewport
+      const pageHeights = new Array(total).fill(IMG_HEIGHT);
+      let   currentPage = 0;
       let   hasMarked   = false;
       let   saveTimeout = null;
       let   rafId       = null;
 
+      // [OPT-3] Array de sumas de prefijo: prefixSums[i] = suma de pageHeights[0..i-1]
+      // prefixSums[0] = 0, prefixSums[total] = altura total
+      const prefixSums = new Array(total + 1).fill(0);
+      function rebuildSums(fromIdx = 0) {
+        // Reconstruir solo desde el índice modificado hacia adelante
+        const start = fromIdx === 0 ? 0 : fromIdx;
+        prefixSums[start] = start === 0 ? 0 : prefixSums[start];
+        for (let i = start; i < total; i++) {
+          prefixSums[i + 1] = prefixSums[i] + pageHeights[i];
+        }
+      }
+      rebuildSums(0);
+
+      // O(1) gracias a prefixSums
+      function offsetBefore(i) { return prefixSums[i]; }
+
+      // [OPT-2] Búsqueda binaria: O(log n) en vez de O(n)
+      function getVisibleIndex() {
+        const scrollMid = viewerDiv.scrollTop + viewerDiv.clientHeight / 2;
+        let lo = 0, hi = total - 1;
+        while (lo < hi) {
+          const mid    = (lo + hi) >> 1;
+          const midEnd = prefixSums[mid + 1];
+          if (midEnd < scrollMid) lo = mid + 1;
+          else                    hi = mid;
+        }
+        return lo;
+      }
+
       // ── Construir esqueleto del viewer ──
-      // Cada slot es un <div> que contendrá un <img> real o será un placeholder.
-      // Sin display:flex en el viewer ni en los slots — evita gaps entre imágenes.
       if (chapterWrapper) chapterWrapper.innerHTML = `
         <div id="manga-viewer"
              style="width:100%; height:100%; overflow-y:auto; overflow-x:hidden;
@@ -239,112 +287,110 @@
 
       const viewerDiv = document.getElementById('manga-viewer');
       if (!viewerDiv) return;
-
       const slots = Array.from(viewerDiv.querySelectorAll('.manga-slot'));
 
-      // ── Helpers ──────────────────────────────────────────────────────────
+      // ── Mount / unmount ─────────────────────────────────────────────────
 
-      /** Devuelve el índice de la página más cercana al tope del viewport */
-      function getVisibleIndex() {
-        const scrollTop = viewerDiv.scrollTop;
-        let   best      = 0;
-        let   bestDist  = Infinity;
-        let   cumulative = 0;
-        for (let i = 0; i < total; i++) {
-          const slotMid = cumulative + pageHeights[i] / 2;
-          const dist    = Math.abs(slotMid - scrollTop);
-          if (dist < bestDist) { bestDist = dist; best = i; }
-          cumulative += pageHeights[i];
-        }
-        return best;
-      }
-
-      /** Devuelve el acumulado de alturas desde el índice 0 hasta i-1 */
-      function offsetBefore(i) {
-        let s = 0;
-        for (let k = 0; k < i; k++) s += pageHeights[k];
-        return s;
-      }
-
-      /** Convierte un slot en <img> real y aprende su altura.
-       *  La imagen se añade al DOM DESPUÉS de decodificarse para evitar
-       *  el pantallazo de una imagen en estado intermedio. */
       function mountImage(i) {
         const slot = slots[i];
-        if (slot.dataset.mounted === '1') return; // ya montada o en proceso
-        slot.dataset.mounted = '1';               // marcar como en proceso
+        if (slot.dataset.mounted === '1') return;
+        slot.dataset.mounted = '1';
 
         const img = document.createElement('img');
         img.src           = imageUrls[i];
         img.style.cssText = 'width:100%; height:auto; display:block;';
 
+        // [OPT-6] Timeout de 12 s para decode — evita bloqueos permanentes
+        let settled = false;
+        const decodeTimeout = setTimeout(() => {
+          if (!settled) {
+            settled = true;
+            slot.dataset.mounted = '0'; // liberar para reintentos
+          }
+        }, 12000);
+
         img.decode()
           .then(() => {
-            if (slot.dataset.mounted !== '1') return; // desmontada mientras cargaba
+            settled = true;
+            clearTimeout(decodeTimeout);
+            if (slot.dataset.mounted !== '1') return;
 
-            // Descartar imágenes demasiado pequeñas (iconos, separadores, logos)
             const MIN_PX = 80;
             if (img.naturalWidth < MIN_PX || img.naturalHeight < MIN_PX) {
               slot.style.height    = '0';
               slot.style.overflow  = 'hidden';
               slot.dataset.mounted = '0';
-              pageHeights[i]       = 0;
+              if (pageHeights[i] !== 0) {
+                pageHeights[i] = 0;
+                rebuildSums(i); // [OPT-3] actualizar sumas desde este índice
+              }
               return;
             }
 
-            slot.style.height = ''; // dejar que la imagen dicte la altura
+            slot.style.height = '';
             slot.innerHTML    = '';
             slot.appendChild(img);
 
-            // Aprender altura real
             const slotW    = slot.offsetWidth || viewerDiv.clientWidth || 800;
             const rendered = img.naturalWidth > 0
               ? Math.round(img.naturalHeight * (slotW / img.naturalWidth))
               : img.offsetHeight;
-            if (rendered > 0) {
-              pageHeights[i]    = rendered;
-              slot.style.height = '';
+            if (rendered > 0 && rendered !== pageHeights[i]) {
+              pageHeights[i] = rendered;
+              rebuildSums(i); // [OPT-3]
             }
           })
           .catch(() => {
+            settled = true;
+            clearTimeout(decodeTimeout);
             slot.dataset.mounted = '0';
           });
       }
 
-      /** Convierte un slot en placeholder (libera la imagen de VRAM) */
       function unmountImage(i) {
         const slot = slots[i];
-        if (slot.dataset.mounted === '0') return; // ya es placeholder
-
-        // Fijar la altura aprendida ANTES de vaciar el slot
+        if (slot.dataset.mounted === '0') return;
         slot.style.height    = pageHeights[i] + 'px';
-        slot.innerHTML       = '';     // elimina <img> → browser libera VRAM
+        slot.innerHTML       = '';
         slot.dataset.mounted = '0';
       }
 
-      /** Actualiza qué slots tienen imagen real vs placeholder */
+      // [OPT-5] Rango previo — solo procesar deltas
+      let prevLo = -1, prevHi = -1;
+
       function updateWindow(centerIdx) {
         const lo = Math.max(0,       centerIdx - WINDOW);
         const hi = Math.min(total-1, centerIdx + WINDOW);
-        for (let i = 0; i < total; i++) {
+        if (lo === prevLo && hi === prevHi) return; // nada cambió
+
+        // Desmontar lo que salió de la ventana
+        const oldLo = prevLo < 0 ? lo : prevLo;
+        const oldHi = prevHi < 0 ? hi : prevHi;
+        for (let i = oldLo; i < lo;  i++) unmountImage(i);
+        for (let i = hi + 1; i <= oldHi; i++) unmountImage(i);
+
+        // Montar lo que entró en la ventana
+        const newLo = prevLo < 0 ? lo : Math.min(lo, oldLo);
+        const newHi = prevHi < 0 ? hi : Math.max(hi, oldHi);
+        for (let i = newLo; i <= newHi; i++) {
           if (i >= lo && i <= hi) mountImage(i);
-          else                    unmountImage(i);
         }
+
+        prevLo = lo;
+        prevHi = hi;
       }
 
-      // ── Scroll handler (rAF-throttled) ───────────────────────────────────
+      // ── Scroll handler (rAF-throttled) ────────────────────────────────
       function onScroll() {
         if (rafId) return;
         rafId = requestAnimationFrame(() => {
           rafId = null;
           const idx = getVisibleIndex();
-
           if (idx !== currentPage) {
             currentPage = idx;
             updateWindow(idx);
           }
 
-          // Guardar progreso (debounced)
           clearTimeout(saveTimeout);
           saveTimeout = setTimeout(() => {
             fetch(`/api/progress/local/manga/${content_id}`, {
@@ -354,7 +400,6 @@
             }).catch(console.error);
           }, 500);
 
-          // Marcar como visto al 90% de scroll
           if (!hasMarked) {
             const pct = (viewerDiv.scrollTop + viewerDiv.clientHeight) / viewerDiv.scrollHeight;
             if (pct >= 0.90) { hasMarked = true; markCurrentAsWatched(); }
@@ -363,6 +408,7 @@
       }
 
       viewerDiv.addEventListener('scroll', onScroll, { passive: true });
+
       window.addEventListener('beforeunload', () => {
         clearTimeout(saveTimeout);
         fetch(`/api/progress/local/manga/${content_id}`, {
@@ -372,7 +418,7 @@
         }).catch(() => {});
       });
 
-      // ── Restaurar posición guardada ───────────────────────────────────────
+      // ── Restaurar posición guardada ────────────────────────────────────
       let savedIndex = 0;
       try {
         const res  = await fetch(`/api/progress/local/manga/${content_id}`);
@@ -383,12 +429,9 @@
         }
       } catch (e) { console.warn(e); }
 
-      // Montar ventana inicial y hacer scroll
       currentPage = savedIndex;
       updateWindow(savedIndex);
-
-      // Scroll al offset acumulado del índice guardado
-      viewerDiv.scrollTop = offsetBefore(savedIndex);
+      viewerDiv.scrollTop = offsetBefore(savedIndex); // O(1) con prefixSums
 
     } catch (err) {
       console.error(err);
@@ -399,13 +442,7 @@
     }
   }
 
-  // ── Pantalla completa ──────────────────────────────────────────────────
-  // reader.html ya maneja toggleFullscreen; sincronizamos solo lo que JS
-  // necesita internamente (fullscreen desde reader.js estaba roto porque
-  // referenciaba 'reader-container' en lugar de 'reader-root').
-  // El botón y las teclas ya están manejados en reader.html.
-
-  // ── Inicializar ────────────────────────────────────────────────────────
+  // ── Init ──────────────────────────────────────────────────────────────
   async function init() {
     await loadChaptersList();
 
@@ -416,7 +453,6 @@
       window.location.href = `/serie/${type}/${source}/${content_id}`;
     });
 
-    // Limpiar interval al salir
     window.addEventListener('beforeunload', () => {
       if (progressInterval) clearInterval(progressInterval);
     });
