@@ -399,10 +399,10 @@ class NartagSource(BaseSource):
             if os.path.exists(filepath):
                 continue
             try:
-                resp = self._get_with_retry(img_url, headers=dl_headers, stream=True)
-                with open(filepath, 'wb') as f:
-                    for chunk in resp.iter_content(8192):
-                        f.write(chunk)
+                with self._get_with_retry(img_url, headers=dl_headers, stream=True) as resp:
+                    with open(filepath, 'wb') as f:
+                        for chunk in resp.iter_content(8192):
+                            f.write(chunk)
             except Exception as exc:
                 raise Exception(
                     f"Nartag: error descargando imagen {i}/{len(img_urls)} "

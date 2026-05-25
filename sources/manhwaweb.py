@@ -138,10 +138,10 @@ class ManhwawebSource(BaseSource):
             if os.path.exists(filepath):
                 continue
             try:
-                resp = self._get_with_retry(norm, headers=headers, stream=True)
-                with open(filepath, 'wb') as f:
-                    for chunk in resp.iter_content(8192):
-                        f.write(chunk)
+                with self._get_with_retry(img_url, headers=dl_headers, stream=True) as resp:
+                    with open(filepath, 'wb') as f:
+                        for chunk in resp.iter_content(8192):
+                            f.write(chunk)
             except Exception as exc:
                 logger.error(f"ManhwaWeb: error descargando imagen {i} ({norm}): {exc}")
                 failures += 1
