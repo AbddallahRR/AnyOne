@@ -1,0 +1,192 @@
+/* ============================================================
+   Comic Web — reader.css
+   Estilos exclusivos del lector (reader.html).
+   ============================================================ */
+
+/* ── Body override ── */
+body {
+  overflow: hidden;
+  background: #000;
+}
+/* Sin grid ni glow en el reader */
+body::before,
+body::after { display: none; }
+
+/* ── Reader root ── */
+.reader-root {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+/* ── Media area ── */
+#media-content {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+/* ── Chapter transition wrapper ── */
+#chapter-wrapper {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+#chapter-wrapper.leaving  { opacity: 0; transform: scale(0.98); }
+#chapter-wrapper.entering { opacity: 0; transform: scale(1.01); }
+#chapter-wrapper.visible  { opacity: 1; transform: scale(1); }
+
+video,
+.manga-viewer {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+/* ── Floating UI (auto-hide) ── */
+.reader-ui {
+  position: fixed;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease, transform 0.22s ease;
+  z-index: 200;
+}
+.reader-ui.show { opacity: 1; pointer-events: auto; }
+
+/* ── Back button ── */
+#back-to-serie {
+  top: 18px; left: 18px;
+  display: flex; align-items: center; gap: 7px;
+  background: rgba(10,10,15,0.75);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.85);
+  font-family: var(--ff-body);
+  font-size: 13px;
+  padding: 7px 13px;
+  border-radius: 8px;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+#back-to-serie:hover { background: rgba(30,30,40,0.92); transform: translateX(-2px); }
+
+/* ── Fullscreen button ── */
+#fullscreen-btn {
+  top: 18px; right: 18px;
+  width: 36px; height: 36px;
+  background: rgba(10,10,15,0.75);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.75);
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(10px);
+  font-size: 14px;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+#fullscreen-btn:hover { background: rgba(30,30,40,0.92); color: #fff; transform: scale(1.08); }
+
+/* ── Controls bar ── */
+.controls-bar {
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: rgba(10,10,15,0.82);
+  border: 1px solid rgba(255,255,255,0.1);
+  padding: 10px 20px;
+  border-radius: 50px;
+  backdrop-filter: blur(14px);
+  white-space: nowrap;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+.reader-ui.show.controls-bar      { transform: translateX(-50%) translateY(0); }
+.reader-ui:not(.show).controls-bar { transform: translateX(-50%) translateY(10px); }
+
+/* ── Manga top variant ── */
+.controls-bar.manga-top {
+  bottom: auto;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  gap: 10px;
+}
+.reader-ui.show.controls-bar.manga-top       { transform: translateX(-50%) translateY(0); }
+.reader-ui:not(.show).controls-bar.manga-top { transform: translateX(-50%) translateY(-8px); }
+.controls-bar.manga-top .nav-btn    { width: 32px; height: 32px; font-size: 13px; }
+.controls-bar.manga-top #chapter-label { font-size: 12px; min-width: 60px; }
+
+/* ── Nav buttons ── */
+.nav-btn {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.85);
+  font-size: 16px;
+  width: 38px; height: 38px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s ease, transform 0.12s ease, border-color 0.15s ease;
+}
+.nav-btn:hover {
+  background: rgba(196,107,255,0.2);
+  border-color: rgba(196,107,255,0.3);
+  transform: scale(1.08);
+}
+.nav-btn:active { transform: scale(0.93); }
+
+/* ── Chapter label ── */
+#chapter-label {
+  font-family: var(--ff-body);
+  font-size: 13px;
+  color: rgba(255,255,255,0.55);
+  min-width: 80px;
+  text-align: center;
+  letter-spacing: 0.01em;
+  transition: color 0.2s ease;
+}
+#chapter-label strong { color: rgba(255,255,255,0.9); font-weight: 500; }
+
+/* Chapter number pop animation */
+@keyframes labelPop {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.15); color: var(--accent); }
+  100% { transform: scale(1); }
+}
+#chapter-label.changed {
+  animation: labelPop 0.35s cubic-bezier(0.34,1.56,0.64,1) both;
+}
+
+/* ── Loading spinner (reader override) ── */
+.loading-spinner {
+  width: 32px; height: 32px;
+  border: 2px solid rgba(255,255,255,0.08);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+/* ── Hide download indicator inside reader ── */
+.download-indicator { display: none !important; }
+
+/* ── Mobile ── */
+@media (max-width: 640px) {
+  .controls-bar { padding: 8px 14px; gap: 10px; }
+  .nav-btn { width: 34px; height: 34px; font-size: 14px; }
+}

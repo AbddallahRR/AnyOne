@@ -1,80 +1,9 @@
-<!--templates/serie.html-->
+<!-- templates/serie.html -->
 {% extends "base.html" %}
 {% block title %}Detalle — Comic Web{% endblock %}
 
 {% block extra_head %}
-<style>
-  /* Cover hover parallax */
-  #cover-wrapper {
-    border-radius: 10px;
-    overflow: hidden;
-    border: 1px solid var(--border);
-    aspect-ratio: 2/3;
-    background: var(--surface);
-    position: relative;
-  }
-  #cover-wrapper::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(135deg, rgba(196,107,255,0.08) 0%, transparent 60%);
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    pointer-events: none;
-  }
-  #cover-wrapper:hover::after { opacity: 1; }
-  #cover-wrapper:hover #serie-cover { transform: scale(1.03); }
-
-  /* Hero card entrance */
-  .hero-card {
-    animation: heroCardIn 0.45s cubic-bezier(0.4,0,0.2,1) both;
-  }
-  @keyframes heroCardIn {
-    from { opacity: 0; transform: translateY(16px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-
-  /* Chapters section entrance */
-  .chapters-section {
-    animation: heroCardIn 0.45s 0.1s cubic-bezier(0.4,0,0.2,1) both;
-  }
-
-  /* Synopsis expand */
-  #serie-synopsis {
-    display: -webkit-box;
-    line-clamp: 4;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    position: relative;
-  }
-  #serie-synopsis.expanded {
-    display: block;
-    line-clamp: unset;
-  }
-
-  /* Sort button spin */
-  #sort-btn.sorted i {
-    transition: transform 0.3s ease;
-    transform: rotate(180deg);
-  }
-
-  /* Delete btn hover */
-  #delete-watched-btn {
-    transition: background 0.15s ease, color 0.15s ease,
-                border-color 0.15s ease, transform 0.12s ease;
-  }
-  #delete-watched-btn:hover {
-    background: rgba(248,113,113,0.1);
-    border-color: rgba(248,113,113,0.4);
-    transform: scale(1.02);
-  }
-
-  @media (max-width: 480px) {
-    #chapters-list { grid-template-columns: 1fr; }
-  }
-</style>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/serie.css') }}">
 {% endblock %}
 
 {% block content %}
@@ -82,7 +11,9 @@
 
   <!-- Back nav -->
   <nav class="nav-enter" style="padding:14px 24px; border-bottom:1px solid var(--border); position:sticky; top:0; background:rgba(10,10,15,0.85); backdrop-filter:blur(14px); z-index:10; display:flex; align-items:center; gap:16px;">
-    <a href="/" style="display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:13px; text-decoration:none; transition:color 0.15s ease, transform 0.15s ease;" onmouseover="this.style.color='var(--text)';this.style.transform='translateX(-2px)'" onmouseout="this.style.color='var(--muted)';this.style.transform='translateX(0)'">
+    <a href="/" style="display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:13px; text-decoration:none; transition:color 0.15s ease, transform 0.15s ease;"
+       onmouseover="this.style.color='var(--text)';this.style.transform='translateX(-2px)'"
+       onmouseout="this.style.color='var(--muted)';this.style.transform='translateX(0)'">
       <i class="fas fa-arrow-left" style="font-size:11px;"></i> Inicio
     </a>
     <span style="color:var(--border-hi);">|</span>
@@ -98,7 +29,7 @@
       <div style="flex-shrink:0; width:180px;">
         <div id="cover-wrapper">
           <img id="serie-cover" src="" alt="Portada"
-            style="width:100%; height:100%; object-fit:cover; display:block; transition:transform 0.35s ease, opacity 0.4s ease; opacity:0; transform:scale(1.03);"
+            style="width:100%; height:100%; object-fit:cover; display:block;"
             onerror="this.src='https://via.placeholder.com/180x270/18181f/7a7a8a?text=Sin+portada'; this.classList.add('loaded')">
         </div>
       </div>
@@ -111,7 +42,7 @@
           <h1 id="serie-title" style="font-family:var(--ff-head); font-size:clamp(20px,3vw,30px); font-weight:800; letter-spacing:-0.5px; line-height:1.2; color:var(--text);">Cargando…</h1>
         </div>
 
-        <!-- Synopsis (click to expand) -->
+        <!-- Synopsis -->
         <p id="serie-synopsis" title="Clic para expandir" style="color:var(--muted); font-size:14px; line-height:1.65;">
           Obteniendo información…
         </p>
@@ -160,7 +91,6 @@
       </div>
 
       <div id="chapters-list" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(220px,1fr)); gap:8px;">
-        <!-- Skeleton placeholders mientras carga -->
         <div style="grid-column:1/-1; display:flex; align-items:center; justify-content:center; gap:12px; padding:48px 20px; color:var(--muted);">
           <div class="loading-spinner"></div>
           <span style="font-size:14px;">Cargando capítulos…</span>
@@ -181,16 +111,14 @@
   // ── Breadcrumb sync ──────────────────────────────────────────────────
   const titleEl = document.getElementById('serie-title');
   const breadEl = document.getElementById('breadcrumb-title');
-  const observer = new MutationObserver(() => {
+  new MutationObserver(() => {
     const t = titleEl.textContent;
     if (t && t !== 'Cargando…') breadEl.textContent = t;
-  });
-  observer.observe(titleEl, { childList: true, subtree: true, characterData: true });
+  }).observe(titleEl, { childList: true, subtree: true, characterData: true });
 
   // ── Cover reveal on load ─────────────────────────────────────────────
   document.getElementById('serie-cover').addEventListener('load', function() {
-    this.style.opacity  = '1';
-    this.style.transform = 'scale(1)';
+    this.classList.add('loaded');
   });
 
   // ── Synopsis expand on click ─────────────────────────────────────────
@@ -198,15 +126,9 @@
     this.classList.toggle('expanded');
   });
 
-  // ── Stagger chapters when they're rendered ───────────────────────────
-  // serie.js calls renderChapters() which populates #chapters-list;
-  // we observe DOM changes and animate each new pill
-  const chaptersObserver = new MutationObserver(() => {
+  // ── Stagger chapters when rendered ──────────────────────────────────
+  new MutationObserver(() => {
     window.animateCards('#chapters-list', '.chapter-pill');
-  });
-  chaptersObserver.observe(
-    document.getElementById('chapters-list'),
-    { childList: true }
-  );
+  }).observe(document.getElementById('chapters-list'), { childList: true });
 </script>
 {% endblock %}

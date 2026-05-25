@@ -1,0 +1,74 @@
+/* ============================================================
+   Comic Web — layout.css
+   Nav, contenedor principal, search bars y breakpoints globales.
+   ============================================================ */
+
+/* ── App nav ── */
+.app-nav {
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: rgba(13,13,20,0.88);
+  backdrop-filter: blur(18px);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+}
+@media (min-width: 640px) {
+  .app-nav {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    height: 64px;
+    padding: 0 24px;
+  }
+}
+
+.nav-row { display: flex; align-items: center; }
+.nav-row--top  { justify-content: space-between; padding: 14px 0 8px; }
+.nav-row--tabs { justify-content: center; padding-bottom: 10px; }
+
+@media (min-width: 640px) {
+  .nav-row--top  { padding: 0; }
+  .nav-row--tabs { padding: 0; }
+}
+
+/* ── Contenedor de página ── */
+.page-content {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 28px 24px;
+}
+@media (max-width: 480px) { .page-content { padding: 20px 14px; } }
+
+/* ── Search bar rows ── */
+.search-bar-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+@media (min-width: 560px) {
+  .search-bar-row { flex-direction: row; align-items: center; flex-wrap: wrap; }
+}
+
+.search-source-select { width: 100%; }
+@media (min-width: 560px) {
+  .search-source-select { width: auto; min-width: 150px; flex-shrink: 0; }
+}
+
+.search-input-group { display: flex; gap: 8px; flex: 1; min-width: 0; }
+
+/* Ocultar label del botón en pantallas muy estrechas */
+@media (max-width: 400px) {
+  .btn-label { display: none; }
+  .btn-primary { padding: 10px 14px; }
+}
+
+/* ── Padding override en móvil (serie.html) ── */
+@media (max-width: 480px) {
+  .app-nav ~ div > div[style*="max-width"] {
+    padding-left: 14px !important;
+    padding-right: 14px !important;
+  }
+}

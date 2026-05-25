@@ -126,7 +126,7 @@ class ManhwawebSource(BaseSource):
         Devuelve el número de fallos. El llamador decide si lanzar excepción.
         Omite imágenes que ya existen en disco.
         """
-        headers  = {'User-Agent': self.UA, 'Referer': referer}
+        dl_headers  = {'User-Agent': self.UA, 'Referer': referer}
         failures = 0
 
         for i, img_url in enumerate(img_urls, start=1):
