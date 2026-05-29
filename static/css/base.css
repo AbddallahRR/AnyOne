@@ -274,8 +274,21 @@ select.input-field {
   overflow: hidden;
   background: var(--surface);
 }
-.media-card img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.3s ease; }
-.media-card:hover img { transform: scale(1.05); }
+/* base.css — línea 277, reemplaza la regla actual */
+.media-card img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+  transform: translateZ(0);          /* promueve a capa GPU */
+  will-change: transform;            /* hint al compositor */
+  transition: transform 0.3s ease;
+  backface-visibility: hidden;       /* evita flickering en Chrome */
+  image-rendering: auto;
+}
+/* base.css línea 267 */
+.media-card:hover {
+  transform: translateY(-6px);       /* quitar el scale(1.02) */
+  border-color: rgba(124,92,252,0.5);
+  box-shadow: 0 24px 48px rgba(0,0,0,0.45), 0 0 0 1px rgba(124,92,252,0.15);
+}
 .media-card .type-chip { position: absolute; top: 8px; right: 8px; z-index: 2; }
 .media-card .card-image::after {
   content: '';

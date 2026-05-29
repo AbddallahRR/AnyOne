@@ -77,15 +77,16 @@ class IkigaiSource(BaseSource):
 
     @staticmethod
     def _normalize_url(src: str, base_url: str) -> str | None:
-        if not src:
+        if not src or src.startswith('data:'):
             return None
         if src.startswith('//'):
             src = 'https:' + src
         elif src.startswith('/'):
             src = base_url + src
-        if not re.search(r'\.(jpg|jpeg|png|webp)(\?.*)?$', src, re.I):
-            return None
-        if 'banner' in src.lower():
+        # Filtrar solo placeholders obvios, no por extensión
+        # (muchos CDNs sirven imágenes sin extensión o con params)
+        lower = src.lower()
+        if any(x in lower for x in ('loading', 'placeholder', 'blank.', 'spinner')):
             return None
         return src
 
@@ -93,7 +94,11 @@ class IkigaiSource(BaseSource):
     def _url_ext(url: str) -> str:
         path = urlparse(url).path
         ext  = os.path.splitext(path)[1].lstrip('.')
-        return ext if ext in {'jpg', 'jpeg', 'png', 'webp'} else 'jpg'
+        # También detectar extensión en query params (ej. ?format=webp)
+        if ext not in {'jpg', 'jpeg', 'png', 'webp'}:
+            m = re.search(r'[?&]format=(jpg|jpeg|png|webp)', url, re.I)
+            ext = m.group(1) if m else 'jpg'
+        return ext
 
     # -----------------------------------------------------------------------
     # Catálogo
@@ -451,8 +456,20 @@ class IkigaiSource(BaseSource):
 
         seen:     set[str]  = set()
         img_urls: list[str] = []
-        for img in soup.find_all('img'):
-            src = img.get('src') or img.get('data-src')
+
+        # Recopilar todos los <img>, incluyendo los dentro de <noscript>
+        # (técnica común de lazy loading donde la img real va en noscript)
+        all_imgs = list(soup.find_all('img'))
+        for noscript in soup.find_all('noscript'):
+            inner = BeautifulSoup(noscript.decode_contents(), 'html.parser')
+            all_imgs.extend(inner.find_all('img'))
+
+        for img in all_imgs:
+            # Priorizar data-src y variantes de lazy loading sobre src,
+            # ya que src puede contener un placeholder (loading.gif, etc.)
+            src = (img.get('data-src') or img.get('data-lazy') or
+                   img.get('data-original') or img.get('data-url') or
+                   img.get('src'))
             url = self._normalize_url(src, self.BASE_URL)
             if url and url not in seen:
                 seen.add(url)

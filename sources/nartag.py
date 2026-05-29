@@ -70,7 +70,11 @@ class NartagSource(BaseSource):
     def _url_ext(url: str) -> str:
         path = urlparse(url).path
         ext  = os.path.splitext(path)[1].lstrip('.')
-        return ext if ext in {'jpg', 'jpeg', 'png', 'webp'} else 'jpg'
+        # También detectar extensión en query params (ej. ?format=webp)
+        if ext not in {'jpg', 'jpeg', 'png', 'webp'}:
+            m = re.search(r'[?&]format=(jpg|jpeg|png|webp)', url, re.I)
+            ext = m.group(1) if m else 'jpg'
+        return ext
 
     @staticmethod
     def _best_cover_url(img_tag, base_url: str = '') -> str:

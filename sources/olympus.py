@@ -68,13 +68,16 @@ class OlympusSource(BaseSource):
 
     @staticmethod
     def _normalize_url(src: str, base_url: str) -> str | None:
-        if not src:
+        if not src or src.startswith('data:'):
             return None
         if src.startswith('//'):
             src = 'https:' + src
         elif src.startswith('/'):
             src = base_url + src
-        if not re.search(r'\.(jpg|jpeg|png|webp)(\?.*)?$', src, re.I):
+        # Filtrar solo placeholders obvios, no por extensión
+        # (muchos CDNs sirven imágenes sin extensión o con params)
+        lower = src.lower()
+        if any(x in lower for x in ('loading', 'placeholder', 'blank.', 'spinner')):
             return None
         return src
 
@@ -82,7 +85,11 @@ class OlympusSource(BaseSource):
     def _url_ext(url: str) -> str:
         path = urlparse(url).path          # urlparse importado al tope
         ext  = os.path.splitext(path)[1].lstrip('.')
-        return ext if ext in {'jpg', 'jpeg', 'png', 'webp'} else 'jpg'
+        # También detectar extensión en query params (ej. ?format=webp)
+        if ext not in {'jpg', 'jpeg', 'png', 'webp'}:
+            m = re.search(r'[?&]format=(jpg|jpeg|png|webp)', url, re.I)
+            ext = m.group(1) if m else 'jpg'
+        return ext
 
     @staticmethod
     def _count_images(cap_dir: str) -> int:

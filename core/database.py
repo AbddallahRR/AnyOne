@@ -7,7 +7,8 @@ import sqlite3
 import logging
 import threading
 
-from config import DB_PATH
+from config import DB_PATH, ANIME_DOWNLOAD_DIR, MANGA_DOWNLOAD_DIR
+from core.utils import normalize_title
 
 logger = logging.getLogger(__name__)
 
@@ -138,9 +139,6 @@ def cleanup_download_queue() -> None:
     como 'failed'. La lógica de rutas vive aquí, no en database.py puro, pero
     se mantiene en este módulo para no romper la API pública existente.
     """
-    from core.utils import normalize_title
-    from config import ANIME_DOWNLOAD_DIR, MANGA_DOWNLOAD_DIR
-
     conn = get_conn()
 
     # Jobs que estaban descargando cuando el servidor se cayó

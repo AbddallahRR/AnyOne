@@ -26,7 +26,11 @@ download_queue: Queue = Queue()
 _active_jobs: dict[int, dict] = {}
 _active_jobs_lock = threading.Lock()
 
-NUM_WORKERS = 3
+# Leer de config si existe, sino usar 3 por defecto
+try:
+    from config import DOWNLOAD_NUM_WORKERS as NUM_WORKERS  # type: ignore[attr-defined]
+except ImportError:
+    NUM_WORKERS = 3
 
 
 # ---------------------------------------------------------------------------
@@ -37,13 +41,19 @@ def _save_series_metadata(series_folder: str, title: str, source_name: str,
                            content_id: str, content_type: str, source) -> None:
     """
     Descarga la portada (si no existe) y escribe series_info.json.
+    Ahora también actualiza la BD con el título/portada definitivos desde la fuente
+    (los que antes se obtenían en api_download, que ahora encola sin bloquear).
     Llamar ANTES del bucle de capítulos; los errores son no-fatales.
     """
+    from core.database import save_content_to_db   # import local para evitar ciclo
+
     info_path    = os.path.join(series_folder, 'series_info.json')
     cover_filename = ''
+    final_title  = title   # puede mejorarse con get_details
 
     try:
         details   = source.get_details(content_id)
+        final_title = details.get('title', title)
         cover_url = details.get('cover', '')
 
         if cover_url:
@@ -63,12 +73,19 @@ def _save_series_metadata(series_folder: str, title: str, source_name: str,
                     f.write(img_data)
                 logger.info(f"Portada guardada: {cover_path}")
 
+        # Actualizar BD con datos definitivos (título real + portada)
+        try:
+            save_content_to_db(content_type, source_name, content_id,
+                               final_title, cover_filename)
+        except Exception as db_exc:
+            logger.warning(f"No se pudo actualizar BD para '{final_title}': {db_exc}")
+
     except Exception as exc:
-        logger.error(f"Error descargando portada para '{title}': {exc}")
+        logger.error(f"Error descargando portada/detalles para '{title}': {exc}")
         cover_filename = ''  # no rompe la descarga
 
     info = {
-        'title':      title,
+        'title':      final_title,
         'source':     source_name,
         'content_id': content_id,
         'type':       content_type,
@@ -157,6 +174,7 @@ def _download_worker(worker_id: int) -> None:
                                   content_id, content_type, source)
 
             # ── 4. Bucle de descarga ─────────────────────────────────────────
+            _PROGRESS_EVERY = 5   # actualizar BD cada N capítulos (reduce I/O ~80%)
             for idx, chapter in enumerate(chapters, start=1):
                 chap_num = chapter['number']
                 chap_id  = chapter['id']
@@ -171,12 +189,23 @@ def _download_worker(worker_id: int) -> None:
                     # Capítulo individual: marcar completado al terminar el único capítulo
                     update_queue_status(job_id, status='completed', current_progress=100)
                 else:
-                    update_queue_status(job_id, current_chapter=idx, current_progress=percent)
-                    logger.debug(f"Job {job_id}: progreso {percent}% ({idx}/{total})")
+                    # Throttle: actualizar solo cada N caps o en el último
+                    if idx % _PROGRESS_EVERY == 0 or idx == total:
+                        update_queue_status(job_id, current_chapter=idx, current_progress=percent)
+                        logger.debug(f"Job {job_id}: progreso {percent}% ({idx}/{total})")
 
             # ── 5. Finalizar ─────────────────────────────────────────────────
             if not chapter_id:
                 update_queue_status(job_id, status='completed', current_progress=100)
+
+            # Invalidar el índice en memoria para que la nueva serie aparezca
+            try:
+                from blueprints.api import _invalidate_series_index
+                from pathlib import Path as _Path
+                base = _Path(ANIME_DOWNLOAD_DIR if content_type == 'anime' else MANGA_DOWNLOAD_DIR)
+                _invalidate_series_index(base)
+            except Exception:
+                pass   # no es crítico
 
             logger.info(f"Job {job_id} completado: '{title}'")
 

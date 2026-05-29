@@ -22,17 +22,24 @@ class DiskCache:
       - Escritura atómica: se escribe en un fichero temporal y luego se
         renombra (rename es atómico en POSIX). Evita JSON corrupto si el
         proceso muere a mitad de escritura.
+      - namespace: prefijo que se añade a la clave antes de hashear para
+        aislar instancias y evitar colisiones entre módulos.
+      - evict_expired(): elimina entradas caducadas de disco (útil al arrancar
+        o en un scheduler periódico).
     """
 
-    def __init__(self, ttl: int = _DEFAULT_TTL):
+    def __init__(self, ttl: int = _DEFAULT_TTL, namespace: str = 'default'):
         self.ttl = ttl
+        self.namespace = namespace
         CACHE_DIR.mkdir(exist_ok=True)
 
     def _get_path(self, key: str) -> Path:
         """Genera la ruta del archivo de caché a partir de la clave."""
         if not isinstance(key, str):
             key = json.dumps(key, sort_keys=True)
-        hashed = hashlib.md5(key.encode()).hexdigest()
+        # Incluir namespace evita colisiones entre instancias distintas
+        namespaced = f"{self.namespace}:{key}"
+        hashed = hashlib.md5(namespaced.encode()).hexdigest()
         return CACHE_DIR / f"{hashed}.json"
 
     def get(self, key: str):
@@ -81,6 +88,28 @@ class DiskCache:
             except Exception:
                 pass
 
+    def evict_expired(self) -> int:
+        """
+        Elimina del disco todas las entradas expiradas.
+        Devuelve el número de archivos eliminados.
+        Llamar al arrancar la app o en un scheduler periódico para mantener
+        la carpeta cache/ limpia.
+        """
+        now = time.time()
+        removed = 0
+        for f in CACHE_DIR.glob("*.json"):
+            try:
+                with open(f, 'r', encoding='utf-8') as fp:
+                    data = json.load(fp)
+                if data.get('expires', 0) <= now:
+                    f.unlink(missing_ok=True)
+                    removed += 1
+            except Exception:
+                # Archivo corrupto — también lo eliminamos
+                f.unlink(missing_ok=True)
+                removed += 1
+        return removed
+
     def delete(self, key: str) -> None:
         """Elimina una entrada de la caché."""
         self._get_path(key).unlink(missing_ok=True)
@@ -92,4 +121,4 @@ class DiskCache:
 
 
 # Instancia global
-search_cache = DiskCache(ttl=_DEFAULT_TTL)
+search_cache = DiskCache(ttl=_DEFAULT_TTL, namespace='search')

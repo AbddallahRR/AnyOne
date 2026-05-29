@@ -416,8 +416,8 @@ class JkanimeSource(BaseSource):
             if s['server'] in _SERVER_PRIORITY else len(_SERVER_PRIORITY)
         ))
 
-        # Ruta de destino común
-        cap_num  = int(chapter_id)
+        # Ruta de destino común — usar float primero para soportar decimales (ej. "12.5")
+        cap_num  = int(float(chapter_id)) if chapter_id.replace('.', '', 1).isdigit() else 0
         filename = f"{content_id}_{cap_num:03d}.mp4"
         filepath = os.path.join(dest_folder, filename)
         os.makedirs(dest_folder, exist_ok=True)
@@ -452,12 +452,10 @@ class JkanimeSource(BaseSource):
 
             except Exception as exc:
                 logger.warning(f"Jkanime: servidor {name!r} falló: {exc}")
-                # Limpiar archivo parcial antes de intentar el siguiente servidor
-                if os.path.exists(filepath) and os.path.getsize(filepath) == 0:
+                # Limpiar archivo parcial (vacío o corrupto) antes del siguiente servidor
+                if os.path.exists(filepath):
                     os.remove(filepath)
                 continue
-
-            time.sleep(0.5)
 
         raise Exception(f"No se pudo descargar el capítulo {chapter_id} desde ningún servidor")
 

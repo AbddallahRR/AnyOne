@@ -329,11 +329,25 @@
 
             slot.style.height = '';
             slot.innerHTML    = '';
+
+            // [OPT-7] En PC, si la imagen es más angosta que el contenedor
+            // se muestra a tamaño natural centrada en vez de estirarse.
+            // En móvil (< 768 px) se mantiene el fill completo.
+            const slotW      = slot.offsetWidth || viewerDiv.clientWidth || 800;
+            const naturalW   = img.naturalWidth;
+            const IS_DESKTOP = window.innerWidth >= 768;
+            const fitNatural = IS_DESKTOP && naturalW > 0 && naturalW < slotW;
+
+            if (fitNatural) {
+              img.style.cssText = `width:${naturalW}px; height:auto; display:block; margin:0 auto;`;
+            } else {
+              img.style.cssText = 'width:100%; height:auto; display:block;';
+            }
+
             slot.appendChild(img);
 
-            const slotW    = slot.offsetWidth || viewerDiv.clientWidth || 800;
-            const rendered = img.naturalWidth > 0
-              ? Math.round(img.naturalHeight * (slotW / img.naturalWidth))
+            const rendered = naturalW > 0
+              ? Math.round(img.naturalHeight * (fitNatural ? 1 : slotW / naturalW))
               : img.offsetHeight;
             if (rendered > 0 && rendered !== pageHeights[i]) {
               pageHeights[i] = rendered;

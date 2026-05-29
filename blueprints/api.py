@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 
 from flask import Blueprint, abort, jsonify, request, send_file
@@ -37,6 +38,55 @@ from core.utils import _normalize_path_name, normalize_title, scan_downloaded_se
 logger = logging.getLogger(__name__)
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
+
+
+# ---------------------------------------------------------------------------
+# Índice en memoria: content_id → Path de carpeta local
+# Se construye lazy la primera vez y se invalida cuando completa una descarga.
+# Evita escanear todos los series_info.json en cada request.
+# ---------------------------------------------------------------------------
+
+_series_index: dict[str, dict[str, Path]] = {}   # base_dir_str → {content_id: Path}
+_series_index_lock = threading.Lock()
+
+def _build_series_index(base_dir: Path) -> dict[str, Path]:
+    """Escanea base_dir UNA vez y devuelve {content_id: carpeta}."""
+    index: dict[str, Path] = {}
+    if not base_dir.exists():
+        return index
+    for cand_dir in base_dir.iterdir():
+        if not cand_dir.is_dir():
+            continue
+        info_path = cand_dir / 'series_info.json'
+        if info_path.exists():
+            try:
+                with open(info_path, 'r', encoding='utf-8') as f:
+                    info = json.load(f)
+                cid = info.get('content_id')
+                if cid:
+                    index[cid] = cand_dir
+            except Exception:
+                pass
+    return index
+
+
+def _get_series_index(base_dir: Path) -> dict[str, Path]:
+    """Devuelve el índice cacheado, construyéndolo si no existe."""
+    key = str(base_dir)
+    with _series_index_lock:
+        if key not in _series_index:
+            _series_index[key] = _build_series_index(base_dir)
+        return _series_index[key]
+
+
+def _invalidate_series_index(base_dir: Path | None = None) -> None:
+    """Invalida el índice para que se reconstruya en el próximo acceso.
+    Si base_dir es None, invalida todos los índices."""
+    with _series_index_lock:
+        if base_dir is None:
+            _series_index.clear()
+        else:
+            _series_index.pop(str(base_dir), None)
 
 
 # ---------------------------------------------------------------------------
@@ -136,29 +186,29 @@ def _content_title_by_ref(ref: str) -> str | None:
 
 def _find_local_serie_dir(base_dir: Path, content_id: str) -> Path | None:
     """
-    Busca la carpeta de una serie por content_id en series_info.json,
-    con fallback a normalización de nombre.
-    Evita abrir JSONs innecesariamente si el directorio no existe.
+    Busca la carpeta de una serie usando el índice en memoria (O(1)).
+    El índice se construye la primera vez y se invalida al completar descargas.
+    Fallback a normalización de nombre si no aparece en el índice.
     """
-    # Método 1: buscar por content_id en series_info.json
-    for cand_dir in base_dir.iterdir():
-        if not cand_dir.is_dir():
-            continue
-        info_path = cand_dir / 'series_info.json'
-        if info_path.exists():
-            try:
-                with open(info_path, 'r', encoding='utf-8') as f:
-                    info = json.load(f)
-                if info.get('content_id') == content_id:
-                    return cand_dir
-            except Exception:
-                pass
+    index = _get_series_index(base_dir)
+
+    # Método 1: índice en memoria — O(1)
+    if content_id in index:
+        candidate = index[content_id]
+        if candidate.exists():       # podría haberse borrado en disco
+            return candidate
+        # La carpeta ya no existe: reconstruir índice y reintentar
+        _invalidate_series_index(base_dir)
+        index = _get_series_index(base_dir)
+        if content_id in index:
+            return index[content_id]
 
     # Método 2: fallback por normalización de nombre
     norm_id = _normalize_path_name(content_id)
-    for cand_dir in base_dir.iterdir():
-        if cand_dir.is_dir() and _normalize_path_name(cand_dir.name) == norm_id:
-            return cand_dir
+    if base_dir.exists():
+        for cand_dir in base_dir.iterdir():
+            if cand_dir.is_dir() and _normalize_path_name(cand_dir.name) == norm_id:
+                return cand_dir
 
     return None
 
@@ -230,11 +280,28 @@ def api_search():
 
     try:
         results = source.search(query)
-        for r in results:
-            ref = get_content_ref(content_type, source_name, r['id'])
-            chapter, progress = get_progress(ref)
+
+        # Una sola query para todos los refs en lugar de N queries en loop
+        refs = [get_content_ref(content_type, source_name, r['id']) for r in results]
+        if refs:
+            placeholders = ','.join('?' * len(refs))
+            conn = get_conn()
+            progress_map = {
+                row[0]: (row[1], row[2])
+                for row in conn.execute(
+                    f'SELECT content_id, chapter, progress FROM user_progress '
+                    f'WHERE content_id IN ({placeholders})',
+                    refs
+                ).fetchall()
+            }
+        else:
+            progress_map = {}
+
+        for r, ref in zip(results, refs):
+            chapter, progress = progress_map.get(ref, ('1', '0'))
             r['last_chapter'] = chapter
             r['progress']     = progress
+
         search_cache.set(cache_key, results)
         return jsonify(results)
     except Exception as exc:
@@ -329,23 +396,15 @@ def api_chapters_with_local(type, source, id):
     try:
         remote_chapters = src.get_chapters(id)
 
-        # Capítulos locales
+        # Reutiliza _find_local_serie_dir (índice en memoria) + helpers existentes
+        base_dir  = Path(_base_folder(type))
+        serie_dir = _find_local_serie_dir(base_dir, id)
+
         local_chapters: set[int] = set()
-        if type == 'anime':
-            serie_dir = Path(ANIME_DOWNLOAD_DIR) / id
-            if serie_dir.exists():
-                for f in serie_dir.glob("*.mp4"):
-                    m = re.search(r'_(\d+)\.mp4$', f.name)
-                    if m:
-                        local_chapters.add(int(m.group(1)))
-        else:
-            serie_dir = Path(MANGA_DOWNLOAD_DIR) / id
-            if serie_dir.exists():
-                for d in serie_dir.iterdir():
-                    if d.is_dir() and d.name.startswith('cap_'):
-                        m = re.search(r'cap_(\d+)', d.name)
-                        if m:
-                            local_chapters.add(int(m.group(1)))
+        if serie_dir:
+            local_list = (_local_chapters_anime(serie_dir) if type == 'anime'
+                          else _local_chapters_manga(serie_dir))
+            local_chapters = {ch['number'] for ch in local_list}
 
         result = []
         for ch in remote_chapters:
@@ -572,13 +631,12 @@ def api_download():
     if not src:
         return jsonify({'error': 'Fuente no encontrada'}), 404
 
-    # Guardar en BD (best-effort, no bloquea si falla)
+    # NOTA: get_details() se ha movido al worker para no bloquear este request.
+    # Guardamos en BD con el título que ya viene en el body (best-effort).
     try:
-        details = src.get_details(content_id)
-        save_content_to_db(content_type, source_name, content_id,
-                           details.get('title', title), details.get('cover', ''))
+        save_content_to_db(content_type, source_name, content_id, title, '')
     except Exception as exc:
-        logger.warning(f"No se pudieron obtener detalles para {content_id}: {exc}")
+        logger.warning(f"No se pudo guardar content en BD para {content_id}: {exc}")
 
     ref = get_content_ref(content_type, source_name, content_id)
 
@@ -624,12 +682,11 @@ def api_download_chapter():
     if not src:
         return jsonify({'error': 'Fuente no encontrada'}), 404
 
+    # NOTA: get_details() se ha movido al worker. Guardamos con el título del body.
     try:
-        details = src.get_details(content_id)
-        save_content_to_db(content_type, source_name, content_id,
-                           details.get('title', title), details.get('cover', ''))
+        save_content_to_db(content_type, source_name, content_id, title, '')
     except Exception as exc:
-        logger.warning(f"No se pudieron obtener detalles para {content_id}: {exc}")
+        logger.warning(f"No se pudo guardar content en BD para {content_id}: {exc}")
 
     ref = get_content_ref(content_type, source_name, content_id)
 
