@@ -10,8 +10,10 @@
   const { type, source, id } = window.serieData;
   const isLocal = source === 'local';
 
-  let chapters  = [];   // array canónico; renderChapters() lo refleja en el DOM
-  let sortAsc   = true;
+  let chapters        = [];
+  let sortAsc         = true;
+  let originalSource  = null;   // fuente real (e.g. "jkanime") para series locales
+  let originalId      = null;   // content_id real para series locales
 
   // ── Elementos DOM ──────────────────────────────────────────────────────
   const coverImg            = document.getElementById('serie-cover');
@@ -27,6 +29,7 @@
   const sortBtn             = document.getElementById('sort-btn');
   const chaptersCount       = document.getElementById('chapters-count');
   const badgeEl             = document.getElementById('serie-type-badge');
+  const checkUpdatesBtn = document.getElementById('check-updates-btn');
 
   function notify(msg, t = 'info') {
     if (window.showNotification) window.showNotification(msg, t);
@@ -46,6 +49,12 @@
       titleEl.textContent    = data.title    || 'Sin título';
       synopsisEl.textContent = data.synopsis || 'Sin descripción disponible.';
       if (data.cover) { coverImg.dataset.src = data.cover; coverImg.src = data.cover; }
+
+      // Guardar la fuente real de series descargadas localmente
+      if (isLocal && data.source) {
+        originalSource = data.source;
+        originalId     = data.remote_id || null;
+      }
 
       if (badgeEl) {
         badgeEl.textContent = type === 'anime' ? 'Anime' : 'Manga';
@@ -395,6 +404,121 @@
     }
   }
 
+  async function checkForUpdates() {
+    if (!isLocal) return;
+  
+    checkUpdatesBtn.disabled = true;
+    const icon = checkUpdatesBtn.querySelector('i');
+    if (icon) {
+      icon.className = 'fas fa-spinner fa-spin';
+    }
+    checkUpdatesBtn.querySelector('.btn-label').textContent = 'Buscando…';
+  
+    try {
+      const refSource = originalSource || source;
+      const refId     = originalId     || id;
+      const contentRef = `${refSource}:${refId}`;
+      const res  = await fetch(`/api/library/check-updates/${contentRef}`, {
+        method: 'POST',
+      });
+      const data = await res.json();
+  
+      if (!res.ok || data.error) {
+        notify(`Error al buscar actualizaciones: ${data.error || res.status}`, 'error');
+        return;
+      }
+  
+      const newChaps     = data.new_chapters     || [];
+      const newChapIds   = data.new_chapter_ids  || [];
+      if (newChaps.length === 0) {
+        notify('✓ Serie al día, no hay episodios nuevos', 'success');
+      } else {
+        const label = newChaps.length === 1
+          ? `1 capítulo nuevo (cap. ${newChaps[0]})`
+          : `${newChaps.length} capítulos nuevos (${newChaps[0]}–${newChaps[newChaps.length - 1]})`;
+        notify(`🆕 ${label} — descargando…`, 'info');
+  
+        _showUpdateBadge(newChaps.length);
+  
+        // Descargar automáticamente los nuevos capítulos
+        await downloadNewChapters(refSource, refId, newChapIds);
+      }
+  
+      checkUpdatesBtn.title = `Última comprobación: ${new Date().toLocaleTimeString()}`;
+  
+    } catch (err) {
+      notify(`Error: ${err.message}`, 'error');
+    } finally {
+      _restoreCheckBtn(/* skipIconRestore */ false);
+    }
+  }
+
+  async function downloadNewChapters(refSource, refId, chapterIds) {
+    if (!chapterIds.length) return;
+
+    _restoreCheckBtn(true);
+    const icon = checkUpdatesBtn.querySelector('i');
+    if (icon) icon.className = 'fas fa-spinner fa-spin';
+    checkUpdatesBtn.querySelector('.btn-label').textContent = 'Descargando…';
+
+    try {
+      const res  = await fetch('/api/download/chapters', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type:        type,
+          source:      refSource,
+          content_id:  refId,
+          title:       titleEl.textContent,
+          chapter_ids: chapterIds,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        notify(`${data.message}`, 'success');
+        if (window.showDownloadIndicator) window.showDownloadIndicator();
+        // Quitar badge de novedades
+        _showUpdateBadge(0);
+      } else {
+        notify(`Error al descargar: ${data.error}`, 'error');
+      }
+    } catch (err) {
+      notify(`Error al descargar: ${err.message}`, 'error');
+    }
+  }
+
+  function _restoreCheckBtn(skipIconRestore) {
+    checkUpdatesBtn.disabled = false;
+    if (!skipIconRestore) {
+      const icon = checkUpdatesBtn.querySelector('i');
+      if (icon) icon.className = 'fas fa-sync-alt';
+    }
+    checkUpdatesBtn.querySelector('.btn-label').textContent = 'Actualizar';
+  }
+
+  function _showUpdateBadge(count) {
+    // Eliminar badge anterior si existe
+    checkUpdatesBtn.querySelector('.update-badge')?.remove();
+    if (count <= 0) return;
+    const badge = document.createElement('span');
+    badge.className = 'update-badge';
+    badge.textContent = count;
+    badge.style.cssText = `
+      position: absolute;
+      top: -6px; right: -6px;
+      background: var(--accent2, #f59e0b);
+      color: #000;
+      font-size: 10px;
+      font-weight: 700;
+      border-radius: 999px;
+      padding: 1px 5px;
+      line-height: 1.4;
+      pointer-events: none;
+    `;
+    checkUpdatesBtn.style.position = 'relative';
+    checkUpdatesBtn.appendChild(badge);
+  }
+
   // ── Progreso ───────────────────────────────────────────────────────────
   // [OPT-5] updateProgress() calcula el progreso desde los datos ya en memoria
   // cuando sea posible, sin fetches extra.
@@ -487,11 +611,32 @@
     ]);
     await loadProgress(); // ahora chapters[] está listo
 
+    // ── Acknowledge updates ────────────────────────────────────────────
+    // Al visitar una serie local con fuente remota, limpiar el flag de
+    // novedades para que el badge global se actualice.
+    if (isLocal && originalSource) {
+      const contentRef = `${originalSource}:${originalId}`;
+      fetch('/api/library/acknowledge-updates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content_ref: contentRef }),
+      }).catch(() => {});
+    }
+
     // Botones según contexto
     if (isLocal) {
       if (downloadAllBtn)   downloadAllBtn.style.display   = 'none';
       if (continueBtn)      continueBtn.style.display      = 'inline-flex';
       if (deleteWatchedBtn) deleteWatchedBtn.style.display = 'inline-flex';
+      if (checkUpdatesBtn) {
+        // Mostrar solo si la serie local tiene una fuente remota asociada
+        if (originalSource) {
+          checkUpdatesBtn.style.display = 'inline-flex';
+          checkUpdatesBtn.addEventListener('click', checkForUpdates);
+        } else {
+          checkUpdatesBtn.style.display = 'none';
+        }
+      }
     } else {
       if (downloadAllBtn)   downloadAllBtn.style.display   = 'inline-flex';
       if (continueBtn)      continueBtn.style.display      = 'none';

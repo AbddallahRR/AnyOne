@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import json
 import os
 import shutil
 import sqlite3
@@ -35,7 +36,7 @@ def get_conn() -> sqlite3.Connection:
 # Migraciones versionadas
 # ---------------------------------------------------------------------------
 
-SCHEMA_VERSION = 3  # incrementar al agregar una migración nueva
+SCHEMA_VERSION = 5  # incrementar al agregar una migración nueva
 
 def _get_schema_version(conn: sqlite3.Connection) -> int:
     conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)")
@@ -110,6 +111,23 @@ def _run_migrations(conn: sqlite3.Connection, current: int) -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_series_status ON series_status(status)"
         )
+
+    if current < 4:
+        logger.info("Migracion 4: columna last_checked_at en series_status")
+        existing = [r[1] for r in conn.execute("PRAGMA table_info(series_status)")]
+        if 'last_checked_at' not in existing:
+            conn.execute(
+                "ALTER TABLE series_status ADD COLUMN last_checked_at TIMESTAMP"
+            )
+    
+    if current < 5:
+        logger.info("Migracion 5: columna new_chapters_found en series_status")
+        existing = [r[1] for r in conn.execute("PRAGMA table_info(series_status)")]
+        if 'new_chapters_found' not in existing:
+            conn.execute(
+                "ALTER TABLE series_status ADD COLUMN new_chapters_found TEXT DEFAULT ''"
+            )
+    
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +301,94 @@ def get_all_series_statuses() -> dict[str, str]:
     conn = get_conn()
     rows = conn.execute('SELECT content_ref, status FROM series_status').fetchall()
     return {r[0]: r[1] for r in rows}
+
+def get_series_to_check(min_interval_seconds: int = 86400) -> list[dict]:
+    """
+    Devuelve las series con status 'watching' o 'completed' que no se han
+    comprobado en los últimos `min_interval_seconds` segundos (por defecto 24 h).
+    Cada elemento: {'content_ref': str, 'status': str}
+    """
+    conn = get_conn()
+    rows = conn.execute(
+        """
+        SELECT content_ref, status
+        FROM series_status
+        WHERE status IN ('watching', 'completed')
+          AND (
+            last_checked_at IS NULL
+            OR (strftime('%s','now') - strftime('%s', last_checked_at)) >= ?
+          )
+        """,
+        (min_interval_seconds,)
+    ).fetchall()
+    return [{'content_ref': r[0], 'status': r[1]} for r in rows]
+ 
+ 
+def mark_series_checked(content_ref: str) -> None:
+    """Actualiza last_checked_at de una serie a la hora actual."""
+    conn = get_conn()
+    with conn:
+        conn.execute(
+            "UPDATE series_status SET last_checked_at = CURRENT_TIMESTAMP "
+            "WHERE content_ref = ?",
+            (content_ref,)
+        )
+ 
+ 
+def get_last_checked(content_ref: str) -> str | None:
+    """Devuelve el timestamp ISO de la última comprobación, o None."""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT last_checked_at FROM series_status WHERE content_ref = ?",
+        (content_ref,)
+    ).fetchone()
+    return row[0] if row else None
+
+
+def set_series_updates(content_ref: str, new_chapters: list[int]) -> None:
+    """
+    Guarda la lista de capítulos nuevos detectados.
+    Si la lista está vacía, limpia el campo.
+    """
+    conn = get_conn()
+    value = json.dumps(new_chapters) if new_chapters else ''
+    with conn:
+        conn.execute(
+            "UPDATE series_status SET new_chapters_found = ? WHERE content_ref = ?",
+            (value, content_ref)
+        )
+
+
+def get_series_with_updates() -> list[dict]:
+    """
+    Devuelve todas las series que tienen capítulos nuevos pendientes.
+    Cada elemento: {'content_ref': str, 'new_chapters': list[int]}
+    """
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT content_ref, new_chapters_found FROM series_status "
+        "WHERE new_chapters_found IS NOT NULL AND new_chapters_found != ''"
+    ).fetchall()
+    result = []
+    for r in rows:
+        try:
+            chapters = json.loads(r[1])
+            if chapters:
+                result.append({'content_ref': r[0], 'new_chapters': chapters})
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return result
+
+
+def clear_series_updates(content_ref: str) -> None:
+    """Limpia el campo new_chapters_found de una serie."""
+    conn = get_conn()
+    with conn:
+        conn.execute(
+            "UPDATE series_status SET new_chapters_found = '' WHERE content_ref = ?",
+            (content_ref,)
+        )
+
 
 # ---------------------------------------------------------------------------
 # Capítulos vistos

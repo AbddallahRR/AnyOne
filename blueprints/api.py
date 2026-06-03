@@ -29,6 +29,12 @@ from core.database import (
     set_series_status,
     get_series_status,
     get_all_series_statuses,
+    get_series_to_check,
+    mark_series_checked,
+    get_last_checked,
+    set_series_updates,
+    get_series_with_updates,
+    clear_series_updates,
 )
 from core.disk_cache import search_cache
 from core.download_worker import download_queue, get_active_jobs
@@ -441,16 +447,26 @@ def api_local_content_details(type, id):
     title    = id
     synopsis = 'Contenido descargado localmente.'
     info_path = serie_path / 'series_info.json'
+    source_name = ''
+    remote_id   = ''
     if info_path.exists():
         try:
             with open(info_path, 'r', encoding='utf-8') as f:
                 info = json.load(f)
-            title    = info.get('title', id)
-            synopsis = info.get('synopsis', synopsis)
+            title      = info.get('title', id)
+            synopsis   = info.get('synopsis', synopsis)
+            source_name = info.get('source', '') or ''
+            remote_id   = info.get('content_id', '') or ''
         except Exception:
             pass
 
-    return jsonify({'title': title, 'cover': cover_url, 'synopsis': synopsis})
+    return jsonify({
+        'title':    title,
+        'cover':    cover_url,
+        'synopsis': synopsis,
+        'source':   source_name,
+        'remote_id': remote_id,
+    })
 
 
 @api_bp.route('/chapters/local/<type>/<id>')
@@ -705,6 +721,57 @@ def api_download_chapter():
     return jsonify({'job_id': job_id, 'message': 'Capítulo encolado para descarga'})
 
 
+@api_bp.route('/download/chapters', methods=['POST'])
+def api_download_chapters():
+    """
+    Encola la descarga de múltiples capítulos a la vez.
+    Body: { type, source, content_id, title, chapter_ids: [...] }
+    """
+    data         = _get_json()
+    content_type = data.get('type')
+    source_name  = data.get('source')
+    content_id   = data.get('content_id')
+    title        = data.get('title')
+    chapter_ids  = data.get('chapter_ids', [])
+
+    if not all([content_type, source_name, content_id, title]):
+        return jsonify({'error': 'Faltan campos: type, source, content_id, title'}), 400
+    if not chapter_ids or not isinstance(chapter_ids, list):
+        return jsonify({'error': 'chapter_ids debe ser una lista no vacía'}), 400
+
+    src = get_source(content_type, source_name)
+    if not src:
+        return jsonify({'error': 'Fuente no encontrada'}), 404
+
+    try:
+        save_content_to_db(content_type, source_name, content_id, title, '')
+    except Exception as exc:
+        logger.warning(f"No se pudo guardar content en BD para {content_id}: {exc}")
+
+    ref = get_content_ref(content_type, source_name, content_id)
+
+    job_ids = []
+    for ch_id in chapter_ids:
+        existing = _queue_find_active(ref, ch_id)
+        if existing:
+            continue
+        job_id = _queue_insert(ref, content_type, title, ch_id)
+        download_queue.put({
+            'id':          job_id,
+            'content_ref': ref,
+            'type':        content_type,
+            'title':       title,
+            'chapter_id':  ch_id,
+        })
+        job_ids.append(job_id)
+
+    return jsonify({
+        'job_ids': job_ids,
+        'count':   len(job_ids),
+        'message': f'{len(job_ids)} de {len(chapter_ids)} capítulos encolados',
+    })
+
+
 # ---------------------------------------------------------------------------
 # Capítulos vistos
 # ---------------------------------------------------------------------------
@@ -849,3 +916,183 @@ def api_set_series_status():
         return jsonify({'error': f"Estado inválido: {status}"}), 400
     set_series_status(content_ref, status)
     return jsonify({'status': status})
+
+@api_bp.route('/library/updates', methods=['GET'])
+def api_library_updates():
+    """
+    Devuelve todas las series con capítulos nuevos pendientes.
+    Para cada serie incluye content_ref y la lista de capítulos nuevos.
+    El frontend usa esto para mostrar el badge global.
+    """
+    series = get_series_with_updates()
+    # Resolver título de cada serie desde content / disco
+    results = []
+    for s in series:
+        parts = s['content_ref'].split(':', 1)
+        if len(parts) == 2:
+            source_name, content_id = parts
+            title = _resolve_series_title(source_name, content_id)
+        else:
+            title = s['content_ref']
+        results.append({
+            'content_ref':  s['content_ref'],
+            'title':        title,
+            'new_chapters': s['new_chapters'],
+        })
+    return jsonify({
+        'total':  len(results),
+        'series': results,
+    })
+
+
+@api_bp.route('/library/acknowledge-updates', methods=['POST'])
+def api_acknowledge_updates():
+    """
+    Limpia el flag de novedades de una o varias series.
+    Se llama cuando el usuario visita la página de una serie.
+    Body: {'content_ref': '...'} o {'content_refs': ['...', '...']}
+    """
+    data = _get_json()
+    refs = data.get('content_refs') or ([data.get('content_ref')] if data.get('content_ref') else [])
+    if not refs:
+        return jsonify({'error': 'Falta content_ref o content_refs'}), 400
+    for ref in refs:
+        clear_series_updates(ref)
+    return jsonify({'cleared': len(refs)})
+
+
+def _resolve_series_title(source_name: str, content_id: str) -> str:
+    """Intenta resolver el título de una serie desde content DB o disco."""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT title FROM content WHERE id = ?",
+        (f"{source_name}:{content_id}",)
+    ).fetchone()
+    if row:
+        return row[0]
+    for ct, base in [('anime', ANIME_DOWNLOAD_DIR), ('manga', MANGA_DOWNLOAD_DIR)]:
+        base_path = Path(base)
+        serie_dir = _find_local_serie_dir(base_path, content_id)
+        if serie_dir:
+            info_path = serie_dir / 'series_info.json'
+            if info_path.exists():
+                try:
+                    info = json.loads(info_path.read_text(encoding='utf-8'))
+                    return info.get('title', content_id)
+                except Exception:
+                    pass
+    return content_id
+
+
+# ---------------------------------------------------------------------------
+# Comprobación de actualizaciones (watching / completed)
+# ---------------------------------------------------------------------------
+ 
+def _check_series_for_new_chapters(content_ref: str) -> dict:
+    """
+    Lógica central de comprobación: compara capítulos remotos con locales.
+    Devuelve un dict con el resultado y los capítulos nuevos encontrados.
+    No lanza excepciones; las captura y las devuelve en 'error'.
+    """
+    try:
+        # content_ref puede ser "source:content_id" o "local:folder_name"
+        if content_ref.startswith('local:'):
+            return {'content_ref': content_ref, 'new_chapters': [], 'error': 'Serie solo local, sin fuente remota'}
+ 
+        source_name, content_id = content_ref.split(':', 1)
+ 
+        # Detectar tipo leyendo series_info.json en disco
+        content_type = None
+        for ct, base in [('anime', ANIME_DOWNLOAD_DIR), ('manga', MANGA_DOWNLOAD_DIR)]:
+            base_path = Path(base)
+            serie_dir = _find_local_serie_dir(base_path, content_id)
+            if serie_dir:
+                content_type = ct
+                local_dir    = serie_dir
+                break
+ 
+        if not content_type:
+            return {'content_ref': content_ref, 'new_chapters': [], 'error': 'Serie no encontrada en disco'}
+ 
+        src = get_source(content_type, source_name)
+        if not src:
+            return {'content_ref': content_ref, 'new_chapters': [], 'error': f"Fuente '{source_name}' no disponible"}
+ 
+        # Capítulos remotos
+        remote_chapters = src.get_chapters(content_id)
+        remote_nums     = {int(float(ch['number'])) for ch in remote_chapters}
+ 
+        # Capítulos locales
+        if content_type == 'anime':
+            local_list = _local_chapters_anime(local_dir)
+        else:
+            local_list = _local_chapters_manga(local_dir)
+        local_nums = {ch['number'] for ch in local_list}
+ 
+        new_nums = sorted(remote_nums - local_nums)
+
+        remote_by_num = {int(float(ch['number'])): ch['id'] for ch in remote_chapters}
+        new_chapter_ids = [remote_by_num[n] for n in new_nums if n in remote_by_num]
+
+        mark_series_checked(content_ref)
+        set_series_updates(content_ref, new_nums)
+
+        return {
+            'content_ref':     content_ref,
+            'new_chapters':    new_nums,
+            'new_chapter_ids': new_chapter_ids,
+            'total_remote':    len(remote_nums),
+            'total_local':     len(local_nums),
+            'error':           None,
+        }
+ 
+    except Exception as exc:
+        logger.exception(f"Error comprobando actualizaciones para {content_ref}:")
+        return {'content_ref': content_ref, 'new_chapters': [], 'error': str(exc)}
+ 
+ 
+@api_bp.route('/library/check-updates/<path:content_ref>', methods=['POST'])
+def api_check_updates(content_ref):
+    """
+    Comprueba si hay capítulos nuevos para una serie concreta.
+    Llamado por el botón manual en serie.html.
+    Responde con los números de capítulo nuevos encontrados.
+    """
+    result = _check_series_for_new_chapters(content_ref)
+    if result.get('error') and not result.get('new_chapters') is not None:
+        return jsonify(result), 500
+    return jsonify(result)
+ 
+ 
+@api_bp.route('/library/check-all-updates', methods=['POST'])
+def api_check_all_updates():
+    """
+    Comprueba todas las series con status 'watching' o 'completed'
+    que no se han comprobado en las últimas 24 horas.
+    Llamado por el scheduler automático o manualmente.
+    """
+    pending = get_series_to_check()
+    if not pending:
+        return jsonify({'checked': 0, 'results': [], 'message': 'No hay series pendientes de comprobación'})
+ 
+    results = []
+ 
+    # Comprobación paralela (mismo pool que search-all)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            executor.submit(_check_series_for_new_chapters, s['content_ref']): s
+            for s in pending
+        }
+        for future in concurrent.futures.as_completed(futures):
+            results.append(future.result())
+ 
+    series_with_updates = [r for r in results if r.get('new_chapters')]
+    logger.info(
+        f"check-all-updates: {len(results)} series comprobadas, "
+        f"{len(series_with_updates)} con capítulos nuevos"
+    )
+    return jsonify({
+        'checked':             len(results),
+        'with_updates':        len(series_with_updates),
+        'results':             results,
+    })

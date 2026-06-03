@@ -111,12 +111,20 @@ class ManhwawebSource(BaseSource):
 
     @staticmethod
     def _dedup_sort_chapters(chapters: list[dict]) -> list[dict]:
-        """Elimina duplicados por número y ordena ascendentemente."""
+        """Elimina duplicados por número, filtra decimales y ordena ascendentemente."""
         seen: set[str] = set()
         result: list[dict] = []
+        _log = logging.getLogger(__name__)
         for ch in chapters:
-            if ch['number'] not in seen:
-                seen.add(ch['number'])
+            num = ch['number']
+            try:
+                if float(num) != int(float(num)):
+                    _log.debug(f"ManhwaWeb: ignorando capítulo decimal {num!r}")
+                    continue
+            except (ValueError, TypeError):
+                pass
+            if num not in seen:
+                seen.add(num)
                 result.append(ch)
         result.sort(key=lambda x: float(x['number'])
                     if x['number'].replace('.', '', 1).isdigit() else 0)

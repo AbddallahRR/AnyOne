@@ -353,6 +353,12 @@ class NartagSource(BaseSource):
         for slug in sorted(cap_slugs, key=_extract_num):
             m      = re.search(r'capitulo-(\d+(?:\.\d+)?)', slug)
             number = m.group(1) if m else slug
+            try:
+                if float(number) != int(float(number)):
+                    logger.debug(f"Nartag: ignorando capítulo decimal {number!r} en '{content_id}'")
+                    continue
+            except (ValueError, TypeError):
+                pass
             chapters.append({'number': number, 'id': slug})
 
         search_cache.set(cache_key, chapters)

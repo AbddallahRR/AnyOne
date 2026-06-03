@@ -290,12 +290,51 @@
       _libraryStatuses = statusRes.ok ? await statusRes.json() : {};
       _initLibraryControls();
       applyLibraryView();
+      fetchUpdatesBadge();
     } catch (err) {
       container.innerHTML = `
         <div class="empty-state">
           <i class="fas fa-exclamation-circle" style="color:var(--accent2);"></i>
           <p>Error al cargar biblioteca: ${err.message}</p>
         </div>`;
+    }
+  }
+
+  // ── Badge global de novedades ─────────────────────────────────────────
+  async function fetchUpdatesBadge() {
+    try {
+      const res  = await fetch('/api/library/updates');
+      const data = await res.json();
+      const total = data.total || 0;
+
+      // Quitar badge anterior si existe
+      const oldBadge = tabLibrary.querySelector('.update-badge-global');
+      if (oldBadge) oldBadge.remove();
+
+      if (total > 0) {
+        const badge = document.createElement('span');
+        badge.className = 'update-badge-global';
+        badge.textContent = total > 99 ? '99+' : total;
+        badge.title = `${total} serie${total !== 1 ? 's' : ''} con capítulos nuevos`;
+        Object.assign(badge.style, {
+          position: 'absolute',
+          top: '-5px',
+          right: '-6px',
+          background: 'var(--accent2, #f59e0b)',
+          color: '#000',
+          fontSize: '9px',
+          fontWeight: '700',
+          borderRadius: '999px',
+          padding: '1px 5px',
+          lineHeight: '1.5',
+          pointerEvents: 'none',
+          zIndex: '5',
+        });
+        tabLibrary.style.position = 'relative';
+        tabLibrary.appendChild(badge);
+      }
+    } catch (err) {
+      console.warn('fetchUpdatesBadge:', err);
     }
   }
 

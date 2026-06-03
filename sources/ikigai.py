@@ -421,6 +421,13 @@ class IkigaiSource(BaseSource):
                     logger.warning(f"Ikigai: no se pudo extraer número del capítulo "
                                    f"{chap_id} en '{content_id}', usando id como fallback")
 
+                try:
+                    if float(num) != int(float(num)):
+                        logger.debug(f"Ikigai: ignorando capítulo decimal {num!r} en '{content_id}'")
+                        continue
+                except (ValueError, TypeError):
+                    pass
+
                 chapters.append({'number': num, 'id': chap_id})
 
             if not self._has_next_page(soup, page + 1):
