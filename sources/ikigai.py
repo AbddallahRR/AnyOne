@@ -14,6 +14,7 @@ from bs4 import BeautifulSoup
 
 from . import BaseSource
 from core.disk_cache import search_cache
+from core.throttle import rate_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ class IkigaiSource(BaseSource):
         return {'User-Agent': self.UA}
 
     def _get(self, url: str, **kwargs):
+        rate_limiter.wait(url)
         kwargs.setdefault('timeout', _TIMEOUT)
         extra_headers = kwargs.pop('headers', {})
         headers = {**self._headers, **extra_headers}
@@ -212,6 +214,7 @@ class IkigaiSource(BaseSource):
                 url = (self.CATALOGO_BASE if pg == 1
                        else f"{self.CATALOGO_BASE}?pagina={pg}")
                 try:
+                    rate_limiter.wait(url)
                     # Scraper propio por hilo para evitar condiciones de carrera
                     sc   = cloudscraper.create_scraper()
                     resp = sc.get(url, headers=self._headers, timeout=_TIMEOUT)

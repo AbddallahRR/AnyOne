@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 
 from . import BaseSource
 from core.disk_cache import search_cache
+from core.throttle import rate_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ class AnimeflvSource(BaseSource):
         return f"https://{self._domain}"
 
     def _get(self, url: str, referer: str | None = None, **kwargs):
+        rate_limiter.wait(url)
         headers = {**self._headers}
         if referer:
             headers['Referer'] = referer

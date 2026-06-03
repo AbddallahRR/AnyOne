@@ -3,7 +3,6 @@
 
 # Importar todas las fuentes
 from sources.jkanime import JkanimeSource
-from sources.olympus import OlympusSource
 from sources.nartag import NartagSource
 from sources.manhwaweb import ManhwawebSource
 from sources.ikigai import IkigaiSource
@@ -14,7 +13,6 @@ SOURCES = {
         'jkanime': JkanimeSource()
     },
     'manga': {
-        'olympus': OlympusSource(),
         'nartag': NartagSource(),
         'manhwaweb': ManhwawebSource(),
         'ikigai': IkigaiSource()

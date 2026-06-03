@@ -14,6 +14,7 @@ from bs4 import BeautifulSoup
 
 from . import BaseSource
 from core.disk_cache import search_cache
+from core.throttle import rate_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ class NartagSource(BaseSource):
         return {'User-Agent': self.UA}
 
     def _get(self, url: str, **kwargs):
+        rate_limiter.wait(url)
         kwargs.setdefault('timeout', _TIMEOUT)
         headers = self._headers.copy()
         if 'headers' in kwargs:
@@ -143,6 +145,7 @@ class NartagSource(BaseSource):
         logger.debug(f"Nartag: form fields → {fields}")
 
         try:
+            rate_limiter.wait(action)
             resp = self.scraper.post(
                 action,
                 data=fields,
@@ -175,6 +178,7 @@ class NartagSource(BaseSource):
         y NO tienen sufijo de thumbnail WordPress (-NNNxNNN).
         """
         try:
+            rate_limiter.wait(reader_url)
             resp = self.scraper.get(
                 reader_url,
                 headers={**self._headers, 'Referer': referer},
@@ -328,6 +332,7 @@ class NartagSource(BaseSource):
             'Referer': f"{self.BASE_URL}/manga/{content_id}/",
         }
         try:
+            rate_limiter.wait(ajax_url)
             resp = self.scraper.post(ajax_url, headers=headers, timeout=_TIMEOUT)
             resp.raise_for_status()
             html = resp.text

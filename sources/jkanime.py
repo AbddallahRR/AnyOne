@@ -15,6 +15,7 @@ from bs4 import BeautifulSoup
 
 from . import BaseSource
 from core.disk_cache import search_cache
+from core.throttle import rate_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,7 @@ class JkanimeSource(BaseSource):
         return {'User-Agent': self.UA}
 
     def _get(self, url: str, referer: str | None = None, **kwargs):
+        rate_limiter.wait(url)
         headers = {**self._headers}
         if referer:
             headers['Referer'] = referer
@@ -57,6 +59,7 @@ class JkanimeSource(BaseSource):
         return resp
 
     def _post(self, url: str, data=None, referer: str | None = None):
+        rate_limiter.wait(url)
         headers = {
             **self._headers,
             'X-Requested-With': 'XMLHttpRequest',
@@ -298,6 +301,7 @@ class JkanimeSource(BaseSource):
     def _resolve_generic(self, slug: str) -> str:
         """Intenta obtener una URL directa de un servidor genérico (jkplayers)."""
         candidate = f"https://c1.jkplayers.com/d/{slug}/"
+        rate_limiter.wait(candidate)
         resp = self.scraper.get(
             candidate, headers=self._headers, timeout=_TIMEOUT_HTTP, allow_redirects=True
         )

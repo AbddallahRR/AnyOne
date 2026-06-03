@@ -1,10 +1,13 @@
 # core/disk_cache.py
 import hashlib
 import json
+import logging
 import os
 import tempfile
 import time
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Directorio de caché (en la raíz del proyecto, carpeta 'cache')
 CACHE_DIR = Path(__file__).parent.parent / "cache"
@@ -82,7 +85,7 @@ class DiskCache:
                 json.dump(data, f, ensure_ascii=False)
             os.replace(tmp_path, path)   # atómico en POSIX y Windows (Python 3.3+)
         except OSError:
-            # Si algo falla, intentamos limpiar el temporal
+            logger.warning("Error escribiendo caché a %s", path)
             try:
                 os.unlink(tmp_path)
             except Exception:

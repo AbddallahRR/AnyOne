@@ -100,7 +100,7 @@ def _save_series_metadata(series_folder: str, title: str, source_name: str,
 # ---------------------------------------------------------------------------
 
 def _resolve_chapters(source, content_id: str, chapter_id: str | None,
-                       excluded: list[int]) -> tuple[list, int]:
+                       excluded: list[int] | None = None) -> tuple[list, int]:
     """
     Llama a get_chapters UNA sola vez y devuelve (chapters_a_descargar, total).
     Lanza Exception si no hay capítulos válidos.
@@ -119,7 +119,7 @@ def _resolve_chapters(source, content_id: str, chapter_id: str | None,
     if not all_chapters:
         raise Exception("No hay capítulos disponibles")
 
-    if excluded:
+    if excluded is not None:
         original = len(all_chapters)
         all_chapters = [ch for ch in all_chapters if int(ch['number']) not in excluded]
         if not all_chapters:

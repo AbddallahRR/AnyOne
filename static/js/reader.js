@@ -170,7 +170,7 @@
           hasMarked = true;
           markCurrentAsWatched();
         }
-      }, 2000);
+      }, 15000);
     }
 
     function stopInterval() {

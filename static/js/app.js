@@ -158,6 +158,12 @@
     if (!query) return;
 
     const container = document.getElementById(`${type}-results`);
+
+    if (source === 'all') {
+      searchAllStream(type, query, container);
+      return;
+    }
+
     container.innerHTML = `
       <div class="empty-state">
         <div class="loading-spinner"></div>
@@ -165,14 +171,12 @@
       </div>`;
 
     try {
-      let url = source === 'all'
-        ? `/api/search-all?type=${type}&q=${encodeURIComponent(query)}`
-        : `/api/search?type=${type}&source=${source}&q=${encodeURIComponent(query)}`;
+      let url = `/api/search?type=${type}&source=${source}&q=${encodeURIComponent(query)}`;
       if (refresh) url += '&refresh=1';
 
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      renderSearchResults(await res.json(), type, source === 'all' ? 'all' : source);
+      renderSearchResults(await res.json(), type, source);
     } catch (err) {
       container.innerHTML = `
         <div class="empty-state">
@@ -180,6 +184,114 @@
           <p>Error al buscar: ${err.message}</p>
         </div>`;
     }
+  }
+
+  function searchAllStream(type, query, container) {
+    container.innerHTML = `
+      <div class="empty-state" id="stream-loading">
+        <div class="loading-spinner"></div>
+        <p>Buscando en todas las fuentes…</p>
+      </div>`;
+
+    const seen = new Set();
+    const es = new EventSource(`/api/search-all-stream?type=${type}&q=${encodeURIComponent(query)}`);
+
+    // Bind persistent click delegation once per container
+    if (!container.dataset.streamBound) {
+      container.dataset.streamBound = '1';
+      container.addEventListener('click', e => {
+        const downloadBtn = e.target.closest('.download-btn');
+        const card        = e.target.closest('.media-card');
+        if (!card) return;
+
+        if (downloadBtn) {
+          e.stopPropagation();
+          const { id, title, source: src, type: typ } = card.dataset;
+          downloadSeries(typ, src, id, title);
+          return;
+        }
+        const { id, source: src, type: typ } = card.dataset;
+        window.location.href = `/serie/${typ}/${src}/${id}`;
+      });
+    }
+
+    function showEmpty() {
+      container.innerHTML = `
+        <div class="empty-state">
+          <i class="fas fa-search"></i>
+          <p>Sin resultados para esa búsqueda.</p>
+        </div>`;
+    }
+
+    function showError(msg) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <i class="fas fa-exclamation-circle" style="color:var(--accent2);"></i>
+          <p>${msg}</p>
+        </div>`;
+    }
+
+    es.addEventListener('results', e => {
+      const data = JSON.parse(e.data);
+      const items = data.results;
+      if (!items.length) return;
+
+      const newItems = [];
+      for (const item of items) {
+        const key = `${item.source}:${item.id}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          newItems.push(item);
+        }
+      }
+      if (!newItems.length) return;
+
+      // Remove loading state on first batch
+      const loadingEl = document.getElementById('stream-loading');
+      if (loadingEl) loadingEl.remove();
+
+      const html = newItems.map(item =>
+        buildMediaCard({
+          id:     item.id,
+          title:  item.title,
+          cover:  item.cover,
+          source: item.source,
+          type,
+          badge:  { class: 'badge-source', label: item.source },
+          extra:  `<div class="card-chips">
+                     <span class="chip chip-source" style="font-size:10px; height:22px; padding:0 8px;">${item.source}</span>
+                   </div>
+                   <div class="card-actions">
+                     <button class="download-btn" style="
+                       width:100%;
+                       background:rgba(124,92,252,0.15);
+                       border:1px solid rgba(124,92,252,0.28);
+                       color:var(--accent-lt);
+                       border-radius:8px; padding:6px 8px;
+                       font-size:11px; font-weight:600; cursor:pointer;
+                       display:flex; align-items:center; justify-content:center; gap:5px;
+                       transition:background .15s;">
+                     <i class="fas fa-download"></i> Descargar todo
+                     </button>
+                   </div>`,
+        })
+      ).join('');
+
+      container.insertAdjacentHTML('beforeend', html);
+      observeCovers(container);
+      if (window.animateCards) window.animateCards(`#${type}-results`);
+    });
+
+    es.addEventListener('done', () => {
+      es.close();
+      if (seen.size === 0) showEmpty();
+    });
+
+    es.addEventListener('error', () => {
+      if (es.readyState === EventSource.CLOSED) {
+        if (seen.size === 0) showError('Error al conectar con el servidor.');
+      }
+    });
   }
 
   function renderSearchResults(items, type, source) {

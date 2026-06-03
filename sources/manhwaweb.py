@@ -4,7 +4,9 @@
 import logging
 import os
 import re
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
@@ -14,6 +16,7 @@ from bs4 import BeautifulSoup
 
 from . import BaseSource
 from core.disk_cache import search_cache
+from core.throttle import rate_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +28,11 @@ class ManhwawebSource(BaseSource):
     BASE_URL = "https://www.manhwaweb.com"
     API_BASE = "https://manhwawebbackend-production.up.railway.app"
     UA       = "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0"
+
+    _CATALOG_TTL = 60 * 60 * 24 * 3   # 3 días
+
+    _refresh_lock    = threading.Lock()
+    _last_refresh_ts = 0.0
 
     def __init__(self):
         self.scraper = cloudscraper.create_scraper()
@@ -38,6 +46,7 @@ class ManhwawebSource(BaseSource):
         return {'User-Agent': self.UA}
 
     def _get(self, url: str, **kwargs):
+        rate_limiter.wait(url)
         kwargs.setdefault('timeout', _TIMEOUT)
         headers = self._headers.copy()
         if 'headers' in kwargs:
@@ -173,24 +182,94 @@ class ManhwawebSource(BaseSource):
         )
 
     # -----------------------------------------------------------------------
+    # Background cache
+    # -----------------------------------------------------------------------
+
+    def warm_cache(self) -> None:
+        """Precarga el catálogo en background al arrancar la app."""
+        if search_cache.get("manhwaweb:catalog") is not None:
+            logger.debug("ManhwaWeb: catálogo ya en caché, sin precarga necesaria")
+            return
+
+        logger.info("ManhwaWeb: iniciando precarga de catálogo en background")
+
+        def _do() -> None:
+            try:
+                catalog = self._fetch_full_catalog()
+                if catalog:
+                    search_cache.set("manhwaweb:catalog", catalog, ttl=self._CATALOG_TTL)
+            except Exception as exc:
+                logger.error(f"ManhwaWeb: error en precarga: {exc}")
+
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _refresh_catalog_background(self) -> None:
+        """Refresca el catálogo en background si ha pasado suficiente tiempo."""
+        now = time.time()
+        if now - ManhwawebSource._last_refresh_ts < self._CATALOG_TTL:
+            return
+        if not ManhwawebSource._refresh_lock.acquire(blocking=False):
+            return
+
+        def _do() -> None:
+            try:
+                logger.info("ManhwaWeb: refresco de catálogo en background")
+                search_cache.delete("manhwaweb:catalog")
+                catalog = self._fetch_full_catalog()
+                if catalog:
+                    search_cache.set("manhwaweb:catalog", catalog, ttl=self._CATALOG_TTL)
+                    ManhwawebSource._last_refresh_ts = time.time()
+                    logger.info(f"ManhwaWeb: catálogo refrescado ({len(catalog)} series)")
+            except Exception as exc:
+                logger.error(f"ManhwaWeb: error en refresco de catálogo: {exc}")
+            finally:
+                ManhwawebSource._refresh_lock.release()
+
+        threading.Thread(target=_do, daemon=True).start()
+
+    # -----------------------------------------------------------------------
     # Búsqueda
     # -----------------------------------------------------------------------
 
     def _fetch_full_catalog(self) -> list[dict]:
         """
-        Descarga el catálogo completo paginado desde la API.
-        Solo cachea si se obtuvo al menos una página correctamente.
+        Descarga el catálogo completo paginado desde la API en paralelo.
+        Estrategia: lotes de _PAGE_WORKERS páginas en paralelo.
         """
+        _PAGE_WORKERS = 8
         results:  list[dict] = []
         seen_ids: set[str]   = set()
         got_first_page       = False
 
-        for page in range(_MAX_PAGES):
-            url = f"{self.API_BASE}/manhwa/library?buscar=&page={page}"
+        def _fetch_page(pg: int) -> list[dict]:
+            url = f"{self.API_BASE}/manhwa/library?buscar=&page={pg}"
             try:
                 data  = self._get_json(url)
                 items = data.get('data', [])
+                return items
+            except Exception:
+                return None
+
+        page = 0
+        while page < _MAX_PAGES:
+            batch = list(range(page, min(page + _PAGE_WORKERS, _MAX_PAGES)))
+            with ThreadPoolExecutor(max_workers=_PAGE_WORKERS) as pool:
+                futures = {pool.submit(_fetch_page, pg): pg for pg in batch}
+                results_map = {}
+                for future in as_completed(futures):
+                    pg = futures[future]
+                    results_map[pg] = future.result()
+
+            stop = False
+            for pg in sorted(results_map):
+                items = results_map[pg]
+                if items is None:
+                    if not got_first_page:
+                        return []
+                    stop = True
+                    break
                 if not items:
+                    stop = True
                     break
                 got_first_page = True
                 for item in items:
@@ -202,32 +281,34 @@ class ManhwawebSource(BaseSource):
                              or item.get('_name') or _id)
                     results.append({'id': _id, 'title': title,
                                     'cover': item.get('_imagen', '')})
-            except Exception as exc:
-                logger.error(f"ManhwaWeb: error en catálogo página {page}: {exc}")
-                if not got_first_page:
-                    return []   # no cachear un catálogo vacío por error de red
+            if stop:
                 break
-        else:
+            page += _PAGE_WORKERS
+
+        if page >= _MAX_PAGES:
             logger.warning(f"ManhwaWeb: límite de {_MAX_PAGES} páginas alcanzado en catálogo")
 
+        logger.info(f"ManhwaWeb: catálogo descargado con {len(results)} series")
         return results
 
     def search(self, query: str) -> list:
+        """
+        Busca en el catálogo cacheados si está disponible.
+        Si no hay catálogo en caché, hace una búsqueda por scraping directa
+        (rápida) y dispara la descarga del catálogo en background para
+        próximas búsquedas.
+        """
         cache_key = "manhwaweb:catalog"
         catalog = search_cache.get(cache_key)
-        if catalog is None:
-            logger.info("ManhwaWeb: intentando descargar catálogo completo desde API")
-            catalog = self._fetch_full_catalog()
-            if catalog:
-                search_cache.set(cache_key, catalog)
-            else:
-                # Si no se pudo obtener el catálogo (API caída), no cacheamos nada
-                logger.warning("ManhwaWeb: no se pudo obtener catálogo desde API, se usará búsqueda por scraping")
-                # No cacheamos un catálogo vacío, y usamos búsqueda directa
-                return self._search_scrape(query)
+        if catalog is not None:
+            self._refresh_catalog_background()
+            q = query.lower()
+            return [r for r in catalog if q in r['title'].lower() or q in r['id'].lower()]
 
-        q = query.lower()
-        return [r for r in catalog if q in r['title'].lower() or q in r['id'].lower()]
+        # Sin catálogo en caché: búsqueda rápida por scraping + precarga en background
+        logger.info("ManhwaWeb: sin catálogo en caché, usando búsqueda directa")
+        self.warm_cache()
+        return self._search_scrape(query)
     
     def _search_scrape(self, query: str) -> list:
         """Búsqueda mediante scraping de la página web (fallback cuando API falla)."""

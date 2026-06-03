@@ -28,4 +28,11 @@ class BaseSource:
     def get_stream_url(self, content_id: str, chapter_id: str) -> str | None:
         """Opcional: retorna URL directa para streaming (solo anime)."""
         return None
+
+    def warm_cache(self) -> None:
+        """Precarga datos en segundo plano al arrancar la app.
+        Opcional: cada fuente puede implementarlo si tiene un catálogo
+        completo que valga la pena precachear.
+        """
+        pass
        

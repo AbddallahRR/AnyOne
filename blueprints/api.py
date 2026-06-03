@@ -11,7 +11,7 @@ import subprocess
 import threading
 from pathlib import Path
 
-from flask import Blueprint, abort, jsonify, request, send_file
+from flask import Blueprint, abort, jsonify, request, send_file, Response
 
 from config import ANIME_DOWNLOAD_DIR, MANGA_DOWNLOAD_DIR
 from core.database import (
@@ -71,8 +71,8 @@ def _build_series_index(base_dir: Path) -> dict[str, Path]:
                 cid = info.get('content_id')
                 if cid:
                     index[cid] = cand_dir
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Error leyendo %s: %s", info_path, exc)
     return index
 
 
@@ -288,7 +288,7 @@ def api_search():
         results = source.search(query)
 
         # Una sola query para todos los refs en lugar de N queries en loop
-        refs = [get_content_ref(content_type, source_name, r['id']) for r in results]
+        refs = [get_content_ref(source_name, r['id']) for r in results]
         if refs:
             placeholders = ','.join('?' * len(refs))
             conn = get_conn()
@@ -360,6 +360,86 @@ def api_search_all():
 
     search_cache.set(cache_key, results)
     return jsonify(results)
+
+
+_SSE_TIMEOUT = 90  # segundos máximos esperando a todas las fuentes
+
+@api_bp.route('/search-all-stream')
+def api_search_all_stream():
+    """
+    Búsqueda en todas las fuentes con resultados progresivos vía SSE.
+    Cada fuente envía sus resultados tan pronto como están disponibles.
+    - Timeout global de _SSE_TIMEOUT segundos.
+    - Los resultados se cachean para que al volver a la página estén disponibles.
+    """
+    content_type = request.args.get('type')
+    query        = request.args.get('q', '')
+
+    if not content_type or not query:
+        return jsonify({'error': 'Faltan parámetros type y q'}), 400
+
+    sources_dict = SOURCES.get(content_type, {})
+    if not sources_dict:
+        return jsonify({'error': 'Tipo no soportado'}), 400
+
+    # Cache hit — devolver inmediatamente
+    cache_key = f"search_all_stream:{content_type}:{query}"
+    cached = search_cache.get(cache_key)
+    if cached is not None:
+        def _from_cache():
+            for src_name, items in cached.items():
+                yield f"event: results\ndata: {json.dumps({'source': src_name, 'results': items})}\n\n"
+            yield "event: done\ndata: {}\n\n"
+        return Response(_from_cache(), mimetype='text/event-stream',
+                        headers={'Cache-Control': 'no-cache'})
+
+    def search_in_source(source_name: str, src) -> tuple[str, list]:
+        try:
+            items = src.search(query)
+            for item in items:
+                item['source'] = source_name
+            return source_name, items
+        except Exception as exc:
+            logger.error(f"Error buscando en {source_name}: {exc}")
+            return source_name, []
+
+    def generate():
+        all_results: dict[str, list] = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            fut_to_name = {
+                executor.submit(search_in_source, name, src): name
+                for name, src in sources_dict.items()
+            }
+
+            try:
+                for future in concurrent.futures.as_completed(fut_to_name, timeout=_SSE_TIMEOUT):
+                    source_name, items = future.result()
+                    all_results[source_name] = items
+                    yield f"event: results\ndata: {json.dumps({'source': source_name, 'results': items})}\n\n"
+            except concurrent.futures.TimeoutError:
+                # Recoger resultados de las que sí terminaron
+                for future in fut_to_name:
+                    if future.done() and not future.cancelled():
+                        try:
+                            source_name, items = future.result()
+                            if source_name not in all_results:
+                                all_results[source_name] = items
+                                yield f"event: results\ndata: {json.dumps({'source': source_name, 'results': items})}\n\n"
+                        except Exception:
+                            pass
+                logger.warning(f"SSE search-all timeout tras {_SSE_TIMEOUT}s para '{query}'")
+            finally:
+                for future in fut_to_name:
+                    if not future.done():
+                        future.cancel()
+
+        # Cachear resultados para próximas visitas
+        if all_results:
+            search_cache.set(cache_key, all_results)
+        yield "event: done\ndata: {}\n\n"
+
+    return Response(generate(), mimetype='text/event-stream',
+                    headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive'})
 
 
 # ---------------------------------------------------------------------------
@@ -504,7 +584,7 @@ def api_play(content_type, source, content_id, chapter):
     if content_type != 'anime':
         return jsonify({'message': 'Usa el visor de manga en el frontend'})
 
-    ref = get_content_ref(content_type, source, content_id)
+    ref = get_content_ref(source, content_id)
     title = _content_title_by_ref(ref)
     if not title:
         return jsonify({'error': 'Contenido no encontrado'}), 404
@@ -523,21 +603,26 @@ def api_play(content_type, source, content_id, chapter):
 
 @api_bp.route('/play/local/<type>/<id>/<chapter>')
 def api_play_local(type, id, chapter):
+    base = _base_folder(type)
+    safe = _safe_path(base, id)
+    if not safe:
+        abort(403)
+    if not safe.exists():
+        abort(404)
     if type == 'anime':
-        serie_dir = Path(ANIME_DOWNLOAD_DIR) / id
-        if not serie_dir.exists():
-            abort(404)
         try:
             chap_num = int(chapter)
         except ValueError:
             abort(400)
-        files = list(serie_dir.glob(f"*_{chap_num:03d}.mp4"))
+        files = list(safe.glob(f"*_{chap_num:03d}.mp4"))
         if not files:
             abort(404)
         return send_file(files[0], conditional=True)
     else:
-        serie_dir = Path(MANGA_DOWNLOAD_DIR) / id
-        cap_dir   = serie_dir / f"cap_{int(chapter):04d}"
+        try:
+            cap_dir = safe / f"cap_{int(chapter):04d}"
+        except ValueError:
+            abort(400)
         if not cap_dir.exists():
             abort(404)
         images = (
@@ -594,7 +679,7 @@ def video_duration(content_id, chapter):
 
 @api_bp.route('/progress/<content_type>/<source>/<content_id>', methods=['GET', 'POST'])
 def api_progress(content_type, source, content_id):
-    ref = get_content_ref(content_type, source, content_id)
+    ref = get_content_ref(source, content_id)
     if request.method == 'GET':
         chapter, progress = get_progress(ref)
         return jsonify({'chapter': chapter, 'progress': progress})
@@ -654,7 +739,7 @@ def api_download():
     except Exception as exc:
         logger.warning(f"No se pudo guardar content en BD para {content_id}: {exc}")
 
-    ref = get_content_ref(content_type, source_name, content_id)
+    ref = get_content_ref(source_name, content_id)
 
     # Capítulos excluidos (ya vistos localmente)
     excluded_chapters: list[int] = []
@@ -704,7 +789,7 @@ def api_download_chapter():
     except Exception as exc:
         logger.warning(f"No se pudo guardar content en BD para {content_id}: {exc}")
 
-    ref = get_content_ref(content_type, source_name, content_id)
+    ref = get_content_ref(source_name, content_id)
 
     existing = _queue_find_active(ref, chapter_id)
     if existing:
@@ -748,7 +833,7 @@ def api_download_chapters():
     except Exception as exc:
         logger.warning(f"No se pudo guardar content en BD para {content_id}: {exc}")
 
-    ref = get_content_ref(content_type, source_name, content_id)
+    ref = get_content_ref(source_name, content_id)
 
     job_ids = []
     for ch_id in chapter_ids:
@@ -1059,7 +1144,7 @@ def api_check_updates(content_ref):
     Responde con los números de capítulo nuevos encontrados.
     """
     result = _check_series_for_new_chapters(content_ref)
-    if result.get('error') and not result.get('new_chapters') is not None:
+    if result.get('error'):
         return jsonify(result), 500
     return jsonify(result)
  

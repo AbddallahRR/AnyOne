@@ -1,0 +1,357 @@
+# AnyOne — Arquitectura
+
+Aplicación web Flask para buscar, descargar y leer/ver anime y manga desde múltiples fuentes (scrapers).
+
+---
+
+## Estructura general
+
+```
+AnyOne/
+├── app.py                    → Factory de la app Flask
+├── config.py                 → Variables de entorno y rutas
+├── requirements.txt          → Dependencias Python
+├── Dockerfile                → Imagen Docker (python:3.12-slim)
+├── docker-compose.yml        → Orquestación local
+│
+├── blueprints/               → Flask blueprints (rutas)
+│   ├── main.py               →   Rutas HTML (/, /serie, /reader)
+│   └── api.py                →   API REST (/api/*)
+│
+├── core/                     → Lógica compartida
+│   ├── database.py           →   SQLite (migraciones, progreso, cola, etiquetas)
+│   ├── disk_cache.py         →   Caché JSON en disco con TTL
+│   ├── download_worker.py    →   Workers en hilos para descarga
+│   ├── sources.py            →   Registro de fuentes disponibles
+│   ├── throttle.py           →   Rate limiter por dominio
+│   └── utils.py              →   Normalización de títulos, escaneo local
+│
+├── sources/                  → Scrapers (uno por sitio upstream)
+│   ├── __init__.py           →   Clase base BaseSource
+│   ├── jkanime.py            →   jkanime.net (anime)
+│   ├── nartag.py             →   nartag.com (manga)
+│   ├── manhwaweb.py          →   manhwaweb.com (manga)
+│   └── ikigai.py             →   visorikigai (manga)
+│
+├── templates/                → Jinja2 (server-side rendered)
+│   ├── base.html             →   Layout: fonts, icons, CSS, JS globales
+│   ├── index.html            →   Home: búsqueda + biblioteca
+│   ├── serie.html            →   Detalle de serie (capítulos, portada)
+│   └── reader.html           →   Lector de video / manga
+│
+└── static/                   → Frontend
+    ├── css/
+    │   ├── base.css          →   Design tokens, componentes (cards, modal, spinner…)
+    │   ├── layout.css        →   Nav, page-content, responsive breakpoints
+    │   ├── index.css         →   Filtros de biblioteca
+    │   ├── serie.css         →   Cover parallax, hero, synopsis
+    │   └── reader.css        →   Lector full-screen, controles
+    └── js/
+        ├── app.js            →   Lógica de index.html
+        ├── serie.js          →   Lógica de serie.html
+        ├── reader.js         →   Lógica de reader.html
+        └── queue-indicator.js →  Indicador flotante de descargas
+```
+
+---
+
+## Módulos — descripción y funcionamiento
+
+### `config.py` — Configuración
+
+Variables desde entorno con fallbacks para desarrollo:
+
+- `SECRET_KEY` — firma de cookies de sesión (obligatorio en producción)
+- `DEBUG` — modo debug (`true`/`false`)
+- `BASE_DOWNLOAD_DIR` — carpeta raíz de descargas
+- `DB_DIR` — carpeta de base de datos SQLite
+- `HOST`, `PORT` — bind del servidor
+
+Crea automáticamente los directorios si no existen.
+
+---
+
+### `app.py` — Application factory
+
+Punto de entrada. `create_app()`:
+
+1. Crea la app Flask, carga `config.py`, activa CORS
+2. Ejecuta migraciones de BD (`init_db`)
+3. Limpia la cola de descargas interrumpidas (`cleanup_download_queue`)
+4. Inicia 3 workers de descarga en hilos daemon
+5. Arranca el scheduler de actualizaciones (cada 24 h)
+6. Registra los blueprints (`main`, `api`)
+7. Lanza precarga en background de todas las fuentes (`warm_cache`)
+
+---
+
+### `blueprints/main.py` — Rutas HTML
+
+Tres rutas que renderizan templates Jinja2:
+
+| Ruta | Template | Función |
+|------|----------|---------|
+| `/` | `index.html` | Página principal (búsqueda + biblioteca local) |
+| `/serie/<type>/<source>/<id>` | `serie.html` | Detalle de serie y lista de capítulos |
+| `/reader/<type>/<source>/<content_id>/<chapter>` | `reader.html` | Lector/reproductor a pantalla completa |
+
+Sin lógica propia — todo el peso está en el frontend (JS) y la API.
+
+---
+
+### `blueprints/api.py` — API REST
+
+~1180 líneas. Corazón del backend. Rutas agrupadas por funcionalidad:
+
+**Búsqueda:**
+- `GET /api/search/<type>/<source>?q=...` — busca en una fuente
+- `GET /api/search-all?type=...&q=...` — busca en todas las fuentes del tipo
+- `GET /api/search-all-stream?type=...&q=...` — SSE con resultados progresivos
+
+**Contenido:**
+- `GET /api/details/<type>/<source>/<id>` — portada, sinopsis
+- `GET /api/chapters/<type>/<source>/<id>` — lista de capítulos
+- `GET /api/play/<type>/<source>/<id>/<chapter>` — sirve video local
+- `GET /api/play/local/<type>/<id>/<chapter>` — reproducción local (con protección path traversal)
+- `GET /api/local-chapters/<type>/<id>` — capítulos en disco
+- `GET /api/local-cover/<type>/<filename>` — portada local
+- `GET /api/manga/images/<path>` — imágenes de manga
+- `GET /api/video-duration/anime/<id>/<chapter>` — duración con ffprobe
+
+**Descargas:**
+- `POST /api/download` — encola serie completa
+- `POST /api/download/chapter` — encola un capítulo
+- `POST /api/download/chapters` — encola múltiples capítulos
+- `GET /api/queue` — estado de la cola
+- `POST /api/queue/cancel/<id>` — cancela un job
+
+**Progreso y etiquetas:**
+- `GET/POST /api/progress/<type>/<source>/<id>` — progreso de lectura
+- `POST /api/progress/save` — guarda progreso
+- `POST /api/watched/mark` / `/unmark` — marca capítulo visto
+- `GET /api/watched/<ref>` — lista de vistos
+- `POST /api/series-status/<ref>` — cambia etiqueta (watching/completed/pending)
+- `GET /api/library` — biblioteca local con etiquetas
+- `POST /api/library/check-updates/<ref>` — comprueba capítulos nuevos
+- `POST /api/library/check-all-updates` — comprueba todas las series
+
+**Utilidades internas:**
+- `_safe_path(base, untrusted)` — previene path traversal
+- `_build_series_index` / `_get_series_index` / `_invalidate_series_index` — índice en memoria de series locales
+- `_find_local_serie_dir` — busca carpeta por content_id (índice O(1) + fallback)
+- `_content_title_by_ref` — obtiene título desde BD
+- `_check_series_for_new_chapters` — lógica de detección de capítulos nuevos
+
+---
+
+### `core/database.py` — SQLite
+
+Conexión por hilo (`threading.local()`) con WAL mode.
+
+**Migraciones versionadas** (versión actual: 5):
+- Tablas: `content`, `user_progress`, `download_queue`, `watched_chapters`, `series_status`, `schema_version`
+
+**Operaciones:**
+- `init_db()` — crea esquema y aplica migraciones
+- `cleanup_download_queue()` — al arrancar, limpia descargas interrumpidas
+- `save_content_to_db()` / `get_content_ref()` — CRUD de contenidos
+- `get_progress()` / `save_progress()` — progreso usuario
+- `update_queue_status()` — estado de cola de descarga
+- `set_series_status()` / `get_series_status()` — etiquetas biblioteca
+- `mark_chapter_as_watched()` / `is_chapter_watched()` — capítulos vistos
+- `get_series_to_check()` / `mark_series_checked()` — para scheduler de actualizaciones
+- `set_series_updates()` / `get_series_with_updates()` — capítulos nuevos detectados
+
+---
+
+### `core/disk_cache.py` — Caché en disco
+
+Clase `DiskCache` con:
+
+- Clave hasheada con MD5 + namespace (evita colisiones)
+- TTL por entrada (default 24 h)
+- Escritura atómica (temp → rename)
+- `get(key)` → devuelve valor o `None` si expirado
+- `set(key, value, ttl?)` → guarda con expiración
+- `evict_expired()` → elimina entradas vencidas
+- `delete(key)` / `clear()` → limpieza manual
+
+Instancia global `search_cache` usada por todas las fuentes para cachear catálogos, detalles y capítulos.
+
+---
+
+### `core/download_worker.py` — Workers de descarga
+
+Arquitectura productor-consumidor con `Queue`:
+
+- `download_queue`: cola threadsafe de jobs
+- `_active_jobs`: dict con lock para jobs en curso
+- `start_workers(n)`: inicia N hilos daemon (default 3)
+
+Cada worker:
+1. Toma un job de la cola
+2. Resuelve capítulos a descargar (`_resolve_chapters` — UNA llamada HTTP)
+3. Crea carpeta de destino (`normalize_title`)
+4. Descarga portada y guarda `series_info.json` (`_save_series_metadata`)
+5. Itera capítulos llamando a `source.download_chapter()`
+6. Actualiza progreso cada 5 capítulos
+7. Marca completado e invalida el índice de series
+
+---
+
+### `core/sources.py` — Registro de fuentes
+
+```python
+SOURCES = {
+    'anime': {'jkanime': JkanimeSource()},
+    'manga': {'nartag': NartagSource(), 'manhwaweb': ManhwawebSource(), 'ikigai': IkigaiSource()}
+}
+```
+
+Función `get_source(type, name)` → instancia o `None`.
+
+---
+
+### `core/throttle.py` — Rate limiter
+
+Per-domain rate limiter con lock. Espera un mínimo de 2 segundos entre requests al mismo dominio. Usa `urlparse` para extraer el netloc.
+
+---
+
+### `core/utils.py` — Utilidades
+
+- `normalize_title(raw)` — limpia títulos para nombres de carpeta (ASCII, sin acentos, sin caracteres especiales, max 100 chars)
+- `_normalize_path_name(text)` — normalización para comparación de rutas
+- `normalize_for_comparison(text)` — solo alfanuméricos, minúsculas, sin tildes
+- `scan_downloaded_series()` — escanea `ANIME_DOWNLOAD_DIR` y `MANGA_DOWNLOAD_DIR` y devuelve lista de series enriquecida con progreso desde BD
+
+---
+
+### `sources/__init__.py` — BaseSource
+
+Clase abstracta que define el contrato de todas las fuentes:
+
+| Método | Retorno | Descripción |
+|--------|---------|-------------|
+| `search(query)` | `list[dict]` | Busca por título → `{id, title, cover}` |
+| `get_details(id)` | `dict` | Portada y sinopsis → `{title, cover, synopsis}` |
+| `get_chapters(id)` | `list[dict]` | Capítulos → `[{number, id}]` |
+| `download_chapter(id, chapter_id, dest)` | `str` | Descarga un capítulo, devuelve ruta |
+| `get_stream_url(id, chapter_id)` | `str\|None` | URL directa para streaming (solo anime) |
+| `warm_cache()` | `None` | Precarga catálogo en background (opcional) |
+
+---
+
+### `sources/jkanime.py` — JKanime (anime)
+
+Scraper de `jkanime.net`:
+
+- **Búsqueda**: scraping HTML con BeautifulSoup
+- **Detalles**: scraping de página de serie (portada, sinopsis)
+- **Capítulos**: extrae lista de `div.numChapter` con IDs codificados en base64
+- **Streaming**: decodifica base64 para obtener URL embed, usa `yt-dlp` para extraer URL directa
+- **Descarga**: `yt-dlp` con prioridad de servidores (`_SERVER_PRIORITY`). Soporta: Mediafire, Mp4upload, Mega, Streamwish, VOE, Vidhide, etc.
+- **Cache**: catálogo no, solo detalles y capítulos por serie
+
+---
+
+### `sources/nartag.py` — Nartag (manga)
+
+Scraper de `nartag.com`:
+
+- **Autenticación**: POST con `form` redirect (`rk_madara_redirect`) para bypass anti-bot
+- **Búsqueda**: catálogo paginado desde API interna + scraping como fallback
+- **Detalles**: API + scraping
+- **Capítulos**: API (`/wp-json/...`) con paginación
+- **Descarga imágenes**: iteración sobre `<img>` en página del capítulo, con soporte de `<noscript>` para lazy-loading
+- **Cache**: catálogo completo (TTL 3 días), detalles y capítulos por serie
+
+---
+
+### `sources/manhwaweb.py` — ManhwaWeb (manga)
+
+Scraper de `manhwaweb.com`:
+
+- **Búsqueda**: catálogo desde API backend (`manhwawebbackend-production.up.railway.app`) con paginación paralela (8 workers por lote, max 500 páginas). Fallback a scraping HTML.
+- **Detalles**: API + scraping
+- **Capítulos**: API (campo `chapters[]`) + scraping de enlaces `/leer/`
+- **Descarga imágenes**: API (`/chapters/see/{chapter_id}`) o scraping. Descarga por lotes con retry (3 intentos, backoff exponencial)
+- **Cache**: catálogo completo (TTL 3 días), detalles y capítulos por serie
+- **Background**: `warm_cache()` + `_refresh_catalog_background()` en daemon threads
+
+---
+
+### `sources/ikigai.py` — VisorIkigai (manga)
+
+Scraper de `ikigai.yomod.xyz`:
+
+- **Búsqueda**: catálogo desde API con paginación secuencial
+- **Detalles y capítulos**: API REST
+- **Descarga imágenes**: API → lista de URLs → descarga secuencial
+- **Cache**: catálogo completo, detalles y capítulos
+- Usa `cloudscraper` para bypass de Cloudflare
+
+---
+
+## Frontend
+
+### Templates Jinja2
+
+Herencia: `base.html` → `{index, serie, reader}.html`
+
+- **`base.html`**: layout raíz. Carga Google Fonts (Inter), Font Awesome, `base.css`, `layout.css`, JS global (`queue-indicator.js`), helpers de modal y animación de cards
+- **`index.html`**: dos paneles (Anime / Manga) con pestañas, búsqueda por fuente, biblioteca local con filtros por estado
+- **`serie.html`**: portada con parallax, sinopsis expandible, lista de capítulos con botones de play/download/watched, badge de actualizaciones
+- **`reader.html`**: reproductor de video o visor de manga a pantalla completa
+
+### CSS — Design system
+
+- **`base.css`**: tokens (`:root`), reset, componentes reutilizables (buttons, cards, modal, spinner, progress bar, scrollbar, animaciones)
+- **`layout.css`**: navegación sticky con blur, estructura de página, responsive breakpoints
+- **`index.css`**: filtros de biblioteca tipo chip con scroll horizontal en móvil
+- **`serie.css`**: efecto parallax en cover, hero card, expansión de sinopsis
+- **`reader.css`**: layout full-screen, barra de controles, botones de navegación
+
+### JavaScript
+
+- **`app.js`**: tabs (Anime/Manga), búsqueda, biblioteca con filtros por estado, notificaciones toast, popup de estado
+- **`serie.js`**: carga de capítulos, progreso, descarga individual/completa, marcado como visto, detección de actualizaciones
+- **`reader.js`**: reproductor de video con guardado de progreso cada 5s, visor de manga con scroll virtual, atajos de teclado
+- **`queue-indicator.js`**: indicador flotante de descargas activas con popup de progreso
+
+---
+
+## Flujo de datos típico
+
+### Búsqueda
+```
+Usuario escribe "naruto" → JS llama GET /api/search/anime/jkanime?q=naruto
+  → api.py llama source.search(query)
+    → scraper hace HTTP a jkanime.net, parsea HTML
+  → api.py enriquece resultados con estado de BD (descargado, progreso)
+→ JS renderiza grid de resultados
+```
+
+### Descarga
+```
+Usuario hace clic en "Descargar serie completa"
+  → JS POST /api/download {type, source, content_id, title}
+    → api.py encola job en download_queue (SQLite)
+  → Worker toma el job:
+      1. get_chapters() → lista remota
+      2. Crea carpeta: /Descargas/Manga/naruto/
+      3. Descarga portada + series_info.json
+      4. Por cada capítulo: download_chapter() → imágenes
+      5. Actualiza progreso en BD
+  → JS polling a GET /api/queue para mostrar progreso
+```
+
+### Actualizaciones automáticas
+```
+Scheduler (daemon thread, cada 24h):
+  → POST /api/library/check-all-updates
+    → api.py consulta series con status 'watching'/'completed'
+    → Por cada serie: compara capítulos remotos vs locales
+    → Si hay nuevos: guarda en series_status.new_chapters_found
+    → El frontend muestra badge en la serie
+```

@@ -22,7 +22,7 @@ _local = threading.local()
 def get_conn() -> sqlite3.Connection:
     """Devuelve la conexión SQLite del hilo actual, creándola si no existe."""
     if not hasattr(_local, 'conn') or _local.conn is None:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=5)
         conn.row_factory = sqlite3.Row          # acceso por nombre de columna
         conn.execute("PRAGMA journal_mode=WAL") # lecturas y escrituras no se bloquean entre sí
         conn.execute("PRAGMA synchronous=NORMAL")  # más rápido, igual de seguro que FULL
@@ -218,9 +218,8 @@ def save_content_to_db(content_type: str, source: str, content_id: str,
         )
 
 
-def get_content_ref(content_type: str, source: str, content_id: str) -> str:
+def get_content_ref(source: str, content_id: str) -> str:
     """Genera la clave compuesta para referenciar un contenido."""
-    # content_type no se usa, se mantiene por compatibilidad
     return f"{source}:{content_id}"
 
 

@@ -4,7 +4,9 @@
 import logging
 import os
 import re
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -13,6 +15,7 @@ from bs4 import BeautifulSoup
 
 from . import BaseSource
 from core.disk_cache import search_cache
+from core.throttle import rate_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +26,11 @@ class OlympusSource(BaseSource):
     BASE_URL = "https://olympusbiblioteca.com"
     API_BASE = "https://dashboard.olympusbiblioteca.com/api"
     UA       = "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0"
+
+    _CATALOG_TTL = 60 * 60 * 24 * 3   # 3 días
+
+    _refresh_lock    = threading.Lock()
+    _last_refresh_ts = 0.0
 
     def __init__(self):
         self.scraper = cloudscraper.create_scraper()
@@ -36,6 +44,7 @@ class OlympusSource(BaseSource):
         return {'User-Agent': self.UA, 'Accept': 'application/json'}
 
     def _get(self, url: str, **kwargs):
+        rate_limiter.wait(url)
         kwargs.setdefault('timeout', _TIMEOUT)
         headers = self._headers.copy()
         if 'headers' in kwargs:
@@ -112,47 +121,125 @@ class OlympusSource(BaseSource):
         return slug if slug.startswith('comic-') else f"comic-{slug}"
 
     # -----------------------------------------------------------------------
+    # Background cache
+    # -----------------------------------------------------------------------
+
+    def warm_cache(self) -> None:
+        """Precarga el catálogo en background al arrancar la app."""
+        if search_cache.get("olympus:catalog") is not None:
+            logger.debug("Olympus: catálogo ya en caché, sin precarga necesaria")
+            return
+
+        logger.info("Olympus: iniciando precarga de catálogo en background")
+
+        def _do() -> None:
+            try:
+                catalog = self._fetch_full_catalog()
+                if catalog:
+                    search_cache.set("olympus:catalog", catalog, ttl=self._CATALOG_TTL)
+            except Exception as exc:
+                logger.error(f"Olympus: error en precarga: {exc}")
+
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _refresh_catalog_background(self) -> None:
+        """Refresca el catálogo en background si ha pasado suficiente tiempo."""
+        now = time.time()
+        if now - OlympusSource._last_refresh_ts < self._CATALOG_TTL:
+            return
+        if not OlympusSource._refresh_lock.acquire(blocking=False):
+            return
+
+        def _do() -> None:
+            try:
+                logger.info("Olympus: refresco de catálogo en background")
+                search_cache.delete("olympus:catalog")
+                catalog = self._fetch_full_catalog()
+                if catalog:
+                    search_cache.set("olympus:catalog", catalog, ttl=self._CATALOG_TTL)
+                    OlympusSource._last_refresh_ts = time.time()
+                    logger.info(f"Olympus: catálogo refrescado ({len(catalog)} series)")
+            except Exception as exc:
+                logger.error(f"Olympus: error en refresco de catálogo: {exc}")
+            finally:
+                OlympusSource._refresh_lock.release()
+
+        threading.Thread(target=_do, daemon=True).start()
+
+    # -----------------------------------------------------------------------
     # Búsqueda
     # -----------------------------------------------------------------------
 
     def _fetch_full_catalog(self) -> list[dict]:
         """
-        Descarga todas las páginas del catálogo.
-        Devuelve lista vacía si falla antes de obtener cualquier resultado,
-        para evitar cachear un catálogo incompleto por error de red.
+        Descarga todas las páginas del catálogo en paralelo.
+        Obtiene la primera página, determina last_page, y descarga el resto
+        en lotes paralelos (como ikigai).
         """
+        _PAGE_WORKERS = 8
         results:    list[dict] = []
         seen_slugs: set[str]   = set()
-        got_first_page         = False
-        page                   = 1
 
-        while True:
-            url = f"{self.API_BASE}/series?type=comic&direction=asc&page={page}"
+        # Primera página para conocer last_page
+        first_url = f"{self.API_BASE}/series?type=comic&direction=asc&page=1"
+        try:
+            data = self._get_json(first_url)
+        except Exception as exc:
+            logger.error(f"Olympus: error al cargar página 1: {exc}")
+            return []
+
+        first_series = data.get('data', {}).get('series', {}).get('data', [])
+        if not first_series:
+            return []
+
+        last_page = data.get('data', {}).get('series', {}).get('last_page', 1)
+
+        for s in first_series:
+            slug = s.get('slug')
+            if slug and slug not in seen_slugs:
+                seen_slugs.add(slug)
+                results.append({
+                    'id':    slug,
+                    'title': s.get('name', slug),
+                    'cover': s.get('cover', ''),
+                })
+
+        if last_page <= 1:
+            return results
+
+        def _fetch_page(pg: int) -> list[dict]:
+            url = f"{self.API_BASE}/series?type=comic&direction=asc&page={pg}"
             try:
-                data   = self._get_json(url)
-                series = data.get('data', {}).get('series', {}).get('data', [])
-                if not series:
-                    break
-                got_first_page = True
-                for s in series:
-                    slug = s.get('slug')
-                    if not slug or slug in seen_slugs:
-                        continue
-                    seen_slugs.add(slug)
-                    results.append({
-                        'id':    slug,
-                        'title': s.get('name', slug),
-                        'cover': s.get('cover', ''),
-                    })
-                last_page = data.get('data', {}).get('series', {}).get('last_page', 1)
-                if page >= last_page:
-                    break
-                page += 1
+                data  = self._get_json(url)
+                items = data.get('data', {}).get('series', {}).get('data', [])
+                return items
             except Exception as exc:
-                logger.error(f"Olympus: error al cargar catálogo página {page}: {exc}")
-                if not got_first_page:
-                    return []   # no cachear catálogo vacío por error de red
-                break
+                logger.error(f"Olympus: error página {pg}: {exc}")
+                return None
+
+        pages = list(range(2, last_page + 1))
+        for i in range(0, len(pages), _PAGE_WORKERS):
+            batch = pages[i:i + _PAGE_WORKERS]
+            with ThreadPoolExecutor(max_workers=_PAGE_WORKERS) as pool:
+                futures = {pool.submit(_fetch_page, pg): pg for pg in batch}
+                results_map = {}
+                for future in as_completed(futures):
+                    pg = futures[future]
+                    results_map[pg] = future.result()
+
+            for pg in sorted(results_map):
+                items = results_map[pg]
+                if items is None:
+                    continue
+                for s in items:
+                    slug = s.get('slug')
+                    if slug and slug not in seen_slugs:
+                        seen_slugs.add(slug)
+                        results.append({
+                            'id':    slug,
+                            'title': s.get('name', slug),
+                            'cover': s.get('cover', ''),
+                        })
 
         logger.info(f"Olympus: catálogo descargado con {len(results)} series")
         return results
@@ -160,15 +247,32 @@ class OlympusSource(BaseSource):
     def search(self, query: str) -> list:
         cache_key = "olympus:catalog"
         catalog   = search_cache.get(cache_key)
-        if catalog is None:
-            logger.info("Olympus: descargando catálogo completo (primera vez o caché expirada)")
-            catalog = self._fetch_full_catalog()
-            if catalog:                         # no cachear catálogo vacío
-                search_cache.set(cache_key, catalog)
+        if catalog is not None:
+            self._refresh_catalog_background()
+            q = query.lower()
+            return [r for r in catalog if q in r['title'].lower() or q in r['id'].lower()]
 
-        q = query.lower()
-        return [r for r in (catalog or [])
-                if q in r['title'].lower() or q in r['id'].lower()]
+        # Sin catálogo: lo precargamos en background y mientras tanto
+        # devolvemos la primera página filtrada por query si la API lo soporta
+        logger.info("Olympus: sin catálogo, precargando en background")
+        self.warm_cache()
+
+        # Intentar búsqueda directa en API
+        try:
+            data = self._get_json(
+                f"{self.API_BASE}/series?type=comic&direction=asc&page=1"
+            )
+            series = data.get('data', {}).get('series', {}).get('data', [])
+            q = query.lower()
+            return [{
+                'id': s['slug'],
+                'title': s.get('name', s['slug']),
+                'cover': s.get('cover', ''),
+            } for s in series if s.get('slug') and (
+                q in s.get('name', '').lower() or q in s['slug'].lower()
+            )]
+        except Exception:
+            return []
 
     # -----------------------------------------------------------------------
     # Detalles

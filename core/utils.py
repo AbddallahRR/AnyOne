@@ -1,11 +1,10 @@
 import os
 import re
 import json
-import sqlite3
 import unicodedata
 from pathlib import Path
 from urllib.parse import quote
-from config import ANIME_DOWNLOAD_DIR, MANGA_DOWNLOAD_DIR, DB_PATH
+from config import ANIME_DOWNLOAD_DIR, MANGA_DOWNLOAD_DIR
 
 def normalize_title(raw_title):
     """Limpia títulos para usarlos como nombre de carpeta."""
@@ -124,23 +123,33 @@ def scan_downloaded_series():
                 'progress': '0'
             })
     
-    # Enriquecer con BD (progreso y portada)
-        with sqlite3.connect(DB_PATH) as conn:
-            for s in series:
-                ref = f"local:{s['id']}"
-                # Progreso del usuario
-                cur = conn.execute('SELECT chapter, progress FROM user_progress WHERE content_id = ?', (ref,))
-                row = cur.fetchone()
-                if row and row[0]:
-                    s['last_chapter'] = row[0]
-                    s['progress'] = row[1]
-                else:
-                    # No hay progreso: usar capítulo 1 (no el último descargado)
-                    s['last_chapter'] = '1'
-                    s['progress'] = '0'
-                # Portada desde BD (si existe y no se encontró local)
-                cur2 = conn.execute('SELECT cover FROM content WHERE id = ?', (ref,))
-                row2 = cur2.fetchone()
-                if row2 and row2[0] and not s['cover']:
-                    s['cover'] = row2[0]
+    # Enriquecer con BD (progreso y portada) — batch queries
+    from core.database import get_conn
+    conn = get_conn()
+    refs = [f"local:{s['id']}" for s in series]
+    if refs:
+        placeholders = ','.join('?' * len(refs))
+        progress_rows = conn.execute(
+            f'SELECT content_id, chapter, progress FROM user_progress WHERE content_id IN ({placeholders})',
+            refs
+        ).fetchall()
+        progress_map = {r[0]: (r[1], r[2]) for r in progress_rows}
+        cover_rows = conn.execute(
+            f'SELECT id, cover FROM content WHERE id IN ({placeholders})',
+            refs
+        ).fetchall()
+        cover_map = {r[0]: r[1] for r in cover_rows}
+
+        for s in series:
+            ref = f"local:{s['id']}"
+            prog = progress_map.get(ref)
+            if prog and prog[0]:
+                s['last_chapter'] = prog[0]
+                s['progress'] = prog[1]
+            else:
+                s['last_chapter'] = '1'
+                s['progress'] = '0'
+            cov = cover_map.get(ref)
+            if cov and not s['cover']:
+                s['cover'] = cov
     return series
