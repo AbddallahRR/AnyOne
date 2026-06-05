@@ -1,7 +1,7 @@
 services:
-  comic-web:
+  anyone:
     build: .
-    container_name: comic-web
+    container_name: anyone
     ports:
       - "5000:5000"
     volumes:

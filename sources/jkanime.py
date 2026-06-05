@@ -7,16 +7,16 @@ import logging
 import os
 import re
 import subprocess
-import time
+from urllib.parse import quote as _url_quote
 
-import requests
-import cloudscraper
 from bs4 import BeautifulSoup
 
-from . import BaseSource
 from core.disk_cache import search_cache
+from core.http_pool import HttpPool
 from core.models import Chapter, EpisodeLink, EpisodeLinks, SearchResult, SeriesDetails
 from core.throttle import rate_limiter
+
+from . import BaseSource
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ class JkanimeSource(BaseSource):
     UA       = "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0"
 
     def __init__(self):
-        self.scraper = cloudscraper.create_scraper()
+        self.scraper = HttpPool.get_scraper()
 
     # -----------------------------------------------------------------------
     # HTTP helpers
@@ -201,7 +201,7 @@ class JkanimeSource(BaseSource):
         if referer:
             headers['Referer'] = referer
 
-        with requests.get(url, headers=headers, stream=True, timeout=60) as r:
+        with HttpPool.get_session().get(url, headers=headers, stream=True, timeout=60) as r:
             r.raise_for_status()
             total = int(r.headers.get('content-length', 0))
             downloaded = 0
@@ -322,16 +322,16 @@ class JkanimeSource(BaseSource):
         raise Exception(f"No se pudo extraer enlace directo para slug {slug!r}")
 
     # -----------------------------------------------------------------------
-    # API pública
+    # API pública (sync — llamada por BaseSource.search vía asyncio.to_thread)
     # -----------------------------------------------------------------------
 
-    def search(self, query: str) -> list[SearchResult]:
+    def search_sync(self, query: str) -> list[SearchResult]:
         """
         Busca animes por query.
         Ahora parsea título real, cover, estado y tipo desde .anime__item
         en lugar de generar datos a partir del slug.
         """
-        encoded = requests.utils.quote(query)
+        encoded = _url_quote(query)
         url     = f"{self.BASE_URL}/buscar/{encoded}"
         try:
             html = self._get(url).text
@@ -367,7 +367,6 @@ class JkanimeSource(BaseSource):
 
             # Estado y tipo desde los <li> de la card
             li_items = card.select('.anime__item__text ul li')
-            status   = li_items[0].get_text(strip=True) if li_items else None
             type_    = li_items[-1].get_text(strip=True) if len(li_items) > 1 else None
 
             # Fallback de cover via CDN de jkdesa
@@ -403,7 +402,7 @@ class JkanimeSource(BaseSource):
 
         return results
 
-    def get_details(self, content_id: str) -> SeriesDetails:
+    def get_details_sync(self, content_id: str) -> SeriesDetails:
         """
         Devuelve detalles completos de una serie:
         title, titleAlt, cover, synopsis, status, type,
@@ -419,11 +418,9 @@ class JkanimeSource(BaseSource):
         soup = BeautifulSoup(html, 'html.parser')
         info = soup.select_one('.anime_info') or soup
 
-        # Título principal y alternativo
-        title_elem   = info.select_one('h3') or soup.select_one('h1.title, h1')
-        title_alt_el = info.select_one('span')
-        title        = title_elem.get_text(strip=True) if title_elem else content_id
-        title_alt    = title_alt_el.get_text(strip=True) if title_alt_el else None
+        # Título principal
+        title_elem = info.select_one('h3') or soup.select_one('h1.title, h1')
+        title      = title_elem.get_text(strip=True) if title_elem else content_id
 
         # Sinopsis
         synopsis_elem = soup.select_one('p.scroll') or soup.select_one('.synopsis p')
@@ -434,19 +431,11 @@ class JkanimeSource(BaseSource):
         cover = (
             (cover_elem.get('src') or cover_elem.get('data-setbg'))
             if cover_elem else None
-        ) or fallback['cover']
-
-        # anime_id desde data-anime
-        anime_id = None
-        guardar  = soup.select_one('#guardar-anime')
-        if guardar and guardar.get('data-anime'):
-            anime_id = guardar['data-anime']
+        ) or cover_fallback
 
         # Campos de la lista de info (<li>)
-        status         = None
         type_          = None
         total_episodes = None
-        start_date     = None
         genres         = []
 
         for li in soup.select('li'):
@@ -459,19 +448,12 @@ class JkanimeSource(BaseSource):
             if label == 'tipo':
                 type_ = full.replace('Tipo:', '').strip()
 
-            elif label == 'estado':
-                em = li.select_one('.enemision')
-                status = em.get_text(strip=True) if em else full.replace('Estado:', '').strip()
-
             elif label == 'episodios':
                 raw = full.replace('Episodios:', '').strip()
                 try:
                     total_episodes = int(raw)
                 except ValueError:
                     pass
-
-            elif label == 'emitido':
-                start_date = full.replace('Emitido:', '').strip()
 
             elif label == 'generos':
                 for a in li.select('a'):
@@ -491,7 +473,7 @@ class JkanimeSource(BaseSource):
             genres=genres,
         )
 
-    def get_chapters(self, content_id: str) -> list[Chapter]:
+    def get_chapters_sync(self, content_id: str) -> list[Chapter]:
         cache_key = f"jkanime:chapters:{content_id}"
         cached    = search_cache.get(cache_key)
         if cached is not None:
@@ -600,7 +582,7 @@ class JkanimeSource(BaseSource):
         search_cache.set(cache_key, [c.model_dump() for c in chapters])
         return chapters
 
-    def download_chapter(self, content_id: str, chapter_id: str, dest_folder: str) -> str:
+    def download_chapter_sync(self, content_id: str, chapter_id: str, dest_folder: str) -> str:
         cap_url = f"{self.BASE_URL}/{content_id}/{chapter_id}/"
         html    = self._get(cap_url).text
         soup    = BeautifulSoup(html, 'html.parser')
@@ -660,7 +642,7 @@ class JkanimeSource(BaseSource):
 
         raise Exception(f"No se pudo descargar el capítulo {chapter_id} desde ningún servidor")
 
-    def get_stream_url(self, content_id: str, chapter_id: str) -> str | None:
+    def get_stream_url_sync(self, content_id: str, chapter_id: str) -> str | None:
         """
         Devuelve la mejor URL de streaming disponible para el episodio.
 

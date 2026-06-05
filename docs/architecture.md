@@ -1,6 +1,10 @@
 # AnyOne — Arquitectura
 
-Aplicación web Flask para buscar, descargar y leer/ver anime y manga desde múltiples fuentes (scrapers).
+Aplicación web FastAPI para buscar, descargar y leer/ver anime y manga desde múltiples fuentes (scrapers).
+
+La aplicación usa un modelo **híbrido sync/async**: la API FastAPI es completamente async,
+los scrapers exponen métodos sync (para los workers de descarga en hilos) y async (para la API).
+El puente entre ambos mundos es `asyncio.to_thread()`.
 
 ---
 
@@ -8,16 +12,17 @@ Aplicación web Flask para buscar, descargar y leer/ver anime y manga desde múl
 
 ```
 AnyOne/
-├── app.py                    → Factory de la app Flask
+├── app.py                    → Factory de la app FastAPI
 ├── config.py                 → Variables de entorno y rutas
 ├── requirements.txt          → Dependencias Python
+├── pyproject.toml            → Configuración del proyecto (ruff, mypy)
 ├── Dockerfile                → Imagen Docker (python:3.12-slim)
 ├── docker-compose.yml        → Orquestación local
 │
-├── blueprints/               → Flask blueprints (rutas)
-│   ├── main.py               →   Rutas HTML (/, /serie, /reader)
-│   └── api/                  →   API REST empaquetada (/api/*)
-│       ├── __init__.py       →   Crea el blueprint y exporta _check_all_updates_core
+├── routers/                  → FastAPI routers
+│   ├── pages.py              →   Rutas HTML (/, /serie, /reader)
+│   └── api/                  →   API REST (/api/*)
+│       ├── __init__.py       →   Crea el APIRouter y exporta _check_all_updates_core
 │       ├── common.py         →   Helpers compartidos (índice en memoria, cola, fs)
 │       ├── search.py         →   Búsqueda en fuentes (/api/search*)
 │       ├── content.py        →   Detalle, capítulos y reproducción (/api/content, /api/play)
@@ -29,6 +34,7 @@ AnyOne/
 │   ├── database.py           →   SQLite (migraciones, progreso, cola, etiquetas)
 │   ├── disk_cache.py         →   Caché JSON en disco con TTL
 │   ├── download_worker.py    →   Workers en hilos para descarga
+│   ├── http_pool.py          →   Pool HTTP compartido (Session + Scraper)
 │   ├── models.py             →   Modelos Pydantic (validación, serialización)
 │   ├── settings.py           →   Config tipada con pydantic-settings
 │   ├── sources.py            →   Registro de fuentes disponibles
@@ -56,7 +62,15 @@ AnyOne/
     │   ├── layout.css        →   Nav, page-content, responsive breakpoints
     │   ├── index.css         →   Filtros de biblioteca
     │   ├── serie.css         →   Cover parallax, hero, synopsis
-    │   └── reader.css        →   Lector full-screen, controles
+    │   ├── reader.css        →   Lector full-screen, controles
+    │   ├── inter.css         →   Face-font de Inter (local, sin CDN)
+    │   └── fontawesome.min.css → Iconos Font Awesome (local, sin CDN)
+    ├── fonts/
+    │   └── Inter-{300,400,500,600,700,800}.ttf  → Pesos de Inter
+    ├── webfonts/
+    │   ├── fa-regular-400.woff2
+    │   ├── fa-solid-900.woff2
+    │   └── fa-brands-400.woff2
     └── js/
         ├── app.js            →   Lógica de index.html
         ├── serie.js          →   Lógica de serie.html
@@ -123,22 +137,24 @@ ante datos inválidos. El error handler global en `app.py` lo captura y retorna
 
 ---
 
-### `app.py` — Application factory
+### `app.py` — Application entry point
 
-Punto de entrada. `create_app()`:
+Punto de entrada. Usa `lifespan` de FastAPI:
 
-1. Crea la app Flask, carga `config.py`, activa CORS
-2. Registra el handler global de `ValidationError` (Pydantic) → 400 JSON
-3. Ejecuta migraciones de BD (`init_db`)
-4. Limpia la cola de descargas interrumpidas (`cleanup_download_queue`)
-5. Inicia 3 workers de descarga en hilos daemon
-6. Arranca el scheduler de actualizaciones (cada 24 h)
-7. Registra los blueprints (`main`, `api`)
-8. Lanza precarga en background de todas las fuentes (`warm_cache`)
+1. Crea la app FastAPI, activa CORS
+2. Ejecuta migraciones de BD (`init_db`)
+3. Limpia la cola de descargas interrumpidas (`cleanup_download_queue`)
+4. Inicia 3 workers de descarga en hilos daemon
+5. Arranca el scheduler de actualizaciones (cada 24 h)
+6. Monta `StaticFiles` y registra los routers (`pages`, `api`)
+7. Lanza precarga en background de todas las fuentes (`asyncio.run(_warm_all_sources())`)
+
+La precarga de catálogos (`_warm_all_sources`) ejecuta todos los `warm_cache()` en paralelo
+con `asyncio.gather()` y timeout de 30 s por fuente, en vez de secuencialmente.
 
 ---
 
-### `blueprints/main.py` — Rutas HTML
+### `routers/pages.py` — Rutas HTML
 
 Tres rutas que renderizan templates Jinja2:
 
@@ -152,9 +168,9 @@ Sin lógica propia — todo el peso está en el frontend (JS) y la API.
 
 ---
 
-### `blueprints/api/` — API REST (paquete)
+### `routers/api/` — API REST (paquete)
 
-Antes un solo archivo de ~1180 líneas, ahora modularizado en 6 submódulos. Corazón del backend.
+Antes un solo archivo de ~1180 líneas (Flask), ahora modularizado en 6 submódulos con FastAPI. Corazón del backend.
 
 ---
 
@@ -163,22 +179,23 @@ Antes un solo archivo de ~1180 líneas, ahora modularizado en 6 submódulos. Cor
 Funciones y estado global reutilizados por todos los submódulos:
 
 - `_safe_path(base, untrusted)` — previene path traversal
-- `_build_series_index` / `_get_series_index` / `_invalidate_series_index` — índice en memoria de series locales (content_id → Path)
+- `_build_series_index` / `_get_series_index` / `_invalidate_series_index` — índice en memoria de series locales (content_id → Path). `_build_series_index` usa `ThreadPoolExecutor(8)` para leer los `series_info.json` en paralelo.
 - `_find_local_serie_dir` — busca carpeta por content_id (índice O(1) + fallback por normalización)
 - `_local_chapters_anime` / `_local_chapters_manga` — lista capítulos locales
 - `_delete_chapter_files` — elimina archivos de un capítulo en disco
 - `_resolve_series_title` — resuelve título desde BD o disco
 - `_queue_find_active` / `_queue_insert` / `_queue_get_status` — acceso a la cola de descarga
 - `_base_folder` / `_get_json` / `_require_local` / `_content_title_by_ref` — utilidades menores
-- `_parse_json_body(model_class)` — parsea el body JSON con un modelo Pydantic, lanza `ValidationError` si los datos no son válidos
 
 ---
 
 #### `api/search.py` — Búsqueda
 
-- `GET /api/search?type=...&source=...&q=...` — busca en una fuente (con caché + progreso enriquecido)
-- `GET /api/search-all?type=...&q=...` — busca en todas las fuentes del tipo (ThreadPoolExecutor + dedup)
-- `GET /api/search-all-stream?type=...&q=...` — SSE con resultados progresivos (timeout 90s, cachea para visitas posteriores)
+Todos los endpoints son `async def` y hacen `await` a los métodos async de las fuentes:
+
+- `GET /api/search?type=...&source=...&q=...` — busca en una fuente (con caché + progreso enriquecido). La llamada a `source.search()` se ejecuta via `asyncio.to_thread()` para no bloquear el event loop.
+- `GET /api/search-all?type=...&q=...` — busca en todas las fuentes del tipo concurrentemente con `asyncio.gather` + dedup.
+- `GET /api/search-all-stream?type=...&q=...` — SSE con resultados progresivos (timeout 90s, cachea para visitas posteriores). Cada fuente se busca con `asyncio.wait_for()`.
 
 ---
 
@@ -189,11 +206,11 @@ Funciones y estado global reutilizados por todos los submódulos:
 - `GET /api/chapters/with-local/<type>/<source>/<id>` — remotos marcando descargados
 - `GET /api/content/local/<type>/<id>` — detalle de contenido local
 - `GET /api/chapters/local/<type>/<id>` — capítulos locales en disco
-- `GET /api/local-cover/<type>/<path:filename>` — sirve portada local
+- `GET /api/local-cover/<type>/<path:filename>` — sirve portada local (soporta `?thumb=1` para thumbnail WebP, con `Cache-Control` y `ETag` para caché HTTP)
 - `GET /api/play/<type>/<source>/<id>/<chapter>` — sirve video local
 - `GET /api/play/local/<type>/<id>/<chapter>` — reproducción local (path traversal safe)
-- `GET /api/manga/images/<path:subpath>` — imágenes de manga
-- `GET /api/video-duration/anime/<id>/<chapter>` — duración del video con ffprobe
+- `GET /api/manga/images/<path:subpath>` — imágenes de manga (con `Cache-Control: max-age=86400` y `ETag` para 304 Not Modified)
+- `GET /api/video-duration/anime/<id>/<chapter>` — duración del video con ffprobe (cached 24 h)
 
 ---
 
@@ -218,6 +235,8 @@ Funciones y estado global reutilizados por todos los submódulos:
 - `POST /api/download` — encola serie completa (soporta `exclude_watched`)
 - `POST /api/download/chapter` — encola un capítulo individual
 - `POST /api/download/chapters` — encola múltiples capítulos en batch
+
+**Backpressure:** la cola tiene `maxsize=50`. Si está llena, los endpoints responden `503 Service Unavailable`.
 
 ---
 
@@ -268,9 +287,9 @@ Instancia global `search_cache` usada por todas las fuentes para cachear catálo
 
 ### `core/download_worker.py` — Workers de descarga
 
-Arquitectura productor-consumidor con `Queue`:
+Arquitectura productor-consumidor con `Queue(maxsize=50)`:
 
-- `download_queue`: cola threadsafe de jobs
+- `download_queue`: cola threadsafe de jobs (con backpressure, `maxsize=50`)
 - `_active_jobs`: dict con lock para jobs en curso
 - `start_workers(n)`: inicia N hilos daemon (default 3)
 
@@ -278,10 +297,24 @@ Cada worker:
 1. Toma un job de la cola
 2. Resuelve capítulos a descargar (`_resolve_chapters` — UNA llamada HTTP)
 3. Crea carpeta de destino (`normalize_title`)
-4. Descarga portada y guarda `series_info.json` (`_save_series_metadata`)
-5. Itera capítulos llamando a `source.download_chapter()`
-6. Actualiza progreso cada 5 capítulos
+4. Descarga portada, genera thumbnail WebP (`thumb.webp` a 200px via ffmpeg) y guarda `series_info.json` (`_save_series_metadata`)
+5. Itera capítulos llamando a `source.download_chapter_sync()` (los workers se ejecutan en hilos, por lo que usan los métodos `_sync` directamente en vez de los wrappers async)
+6. Actualiza progreso en BD con frecuencia regulada (flush cada 30 s, en vez de cada N capítulos)
 7. Marca completado e invalida el índice de series
+
+**Nota:** el worker usa siempre los métodos `_sync` (`get_details_sync`, `get_chapters_sync`, `download_chapter_sync`) para evitar el overhead de `asyncio.to_thread()` dentro de un hilo que ya es síncrono.
+
+---
+
+### `core/http_pool.py` — Pool HTTP compartido
+
+Singleton que gestiona una `requests.Session()` y un `cloudscraper.CloudScraper`
+compartidos por todas las fuentes, en vez de que cada scraper cree su propia instancia:
+
+- `HttpPool.get_session()` → `requests.Session` con `pool_connections=20`, `pool_maxsize=40`
+- `HttpPool.get_scraper()` → `cloudscraper.CloudScraper` montado sobre el mismo pool
+
+Reduce conexiones abiertas, reutiliza TCP y evita crear 4+ scrapers al arrancar.
 
 ---
 
@@ -300,7 +333,13 @@ Función `get_source(type, name)` → instancia o `None`.
 
 ### `core/throttle.py` — Rate limiter
 
-Per-domain rate limiter con lock. Espera un mínimo de 2 segundos entre requests al mismo dominio. Usa `urlparse` para extraer el netloc.
+Per-domain rate limiter con algoritmo **token bucket**. Espera un mínimo de 2 segundos entre requests al mismo dominio.
+
+- `wait(url)` — versión sync con `threading.Event.wait()` (sin busy-wait) y `threading.Lock`
+- `async_wait(url)` — versión async con `asyncio.Lock` y `asyncio.sleep()`
+- `_get_remaining(domain)` — devuelve segundos restantes hasta la próxima llamada permitida
+
+Usa `urlparse` para extraer el netloc. Instancia global `rate_limiter` con `min_interval=2.0`.
 
 ---
 
@@ -309,22 +348,28 @@ Per-domain rate limiter con lock. Espera un mínimo de 2 segundos entre requests
 - `normalize_title(raw)` — limpia títulos para nombres de carpeta (ASCII, sin acentos, sin caracteres especiales, max 100 chars)
 - `_normalize_path_name(text)` — normalización para comparación de rutas
 - `normalize_for_comparison(text)` — solo alfanuméricos, minúsculas, sin tildes
-- `scan_downloaded_series()` — escanea `ANIME_DOWNLOAD_DIR` y `MANGA_DOWNLOAD_DIR` y devuelve lista de series enriquecida con progreso desde BD
+- `scan_downloaded_series()` — escanea `ANIME_DOWNLOAD_DIR` y `MANGA_DOWNLOAD_DIR` y devuelve lista de series enriquecida con progreso desde BD. Usa `ThreadPoolExecutor(8)` para paralelizar la lectura de `series_info.json` y una sola query SQL (LEFT JOIN) en vez de N+1 contra BD. La caché del resultado dura 60s en vez de 15s.
 
 ---
 
 ### `sources/__init__.py` — BaseSource
 
-Clase abstracta que define el contrato de todas las fuentes usando modelos Pydantic (`core/models.py`):
+Clase abstracta que define el contrato de todas las fuentes usando modelos Pydantic (`core/models.py`).
 
-| Método | Retorno | Descripción |
-|--------|---------|-------------|
-| `search(query)` | `list[SearchResult]` | Busca por título |
-| `get_details(id)` | `SeriesDetails` | Portada, sinopsis, tipo, género |
-| `get_chapters(id)` | `list[Chapter]` | Capítulos con `{number, id}` |
-| `download_chapter(id, chapter_id, dest)` | `str` | Descarga un capítulo, devuelve ruta |
-| `get_stream_url(id, chapter_id)` | `str\|None` | URL directa para streaming (solo anime) |
-| `warm_cache()` | `None` | Precarga catálogo en background (opcional) |
+Cada método tiene una versión **sync** (`*_sync`) y una **async** (el mismo nombre sin sufijo). Por defecto, la versión async delega a la sync mediante `asyncio.to_thread()`. Las subclases pueden sobreescribir la versión async para implementaciones nativamente async.
+
+| Método sync | Método async | Retorno | Descripción |
+|-------------|--------------|---------|-------------|
+| `search_sync(query)` | `search(query)` | `list[SearchResult]` | Busca por título |
+| `get_details_sync(id)` | `get_details(id)` | `SeriesDetails` | Portada, sinopsis, tipo, género |
+| `get_chapters_sync(id)` | `get_chapters(id)` | `list[Chapter]` | Capítulos con `{number, id}` |
+| `download_chapter_sync(id, chapter_id, dest)` | `download_chapter(id, chapter_id, dest)` | `str` | Descarga un capítulo, devuelve ruta |
+| `get_stream_url_sync(id, chapter_id)` | `get_stream_url(id, chapter_id)` | `str\|None` | URL directa para streaming (solo anime) |
+| `warm_cache_sync()` | `warm_cache()` | `None` | Precarga catálogo en background (opcional) |
+
+**Uso:**
+- La API FastAPI (async) llama a los métodos async (`await source.search(...)`)
+- Los download workers (hilos) llaman a los métodos sync (`source.search_sync(...)`)
 
 ---
 
@@ -385,7 +430,7 @@ Scraper de `ikigai.yomod.xyz`:
 
 Herencia: `base.html` → `{index, serie, reader}.html`
 
-- **`base.html`**: layout raíz. Carga Google Fonts (Inter), Font Awesome, `base.css`, `layout.css`, JS global (`queue-indicator.js`), helpers de modal y animación de cards
+- **`base.html`**: layout raíz. Carga Inter y Font Awesome desde archivos locales (`static/css/inter.css`, `static/css/fontawesome.min.css`) en vez de CDN; `base.css`, `layout.css`, JS global (`queue-indicator.js`), helpers de modal y animación de cards
 - **`index.html`**: dos paneles (Anime / Manga) con pestañas, búsqueda por fuente, biblioteca local con filtros por estado
 - **`serie.html`**: portada con parallax, sinopsis expandible, lista de capítulos con botones de play/download/watched, badge de actualizaciones
 - **`reader.html`**: reproductor de video o visor de manga a pantalla completa
@@ -402,7 +447,7 @@ Herencia: `base.html` → `{index, serie, reader}.html`
 
 - **`app.js`**: tabs (Anime/Manga), búsqueda, biblioteca con filtros por estado, notificaciones toast, popup de estado
 - **`serie.js`**: carga de capítulos, progreso, descarga individual/completa, marcado como visto, detección de actualizaciones
-- **`reader.js`**: reproductor de video con guardado de progreso cada 5s, visor de manga con scroll virtual, atajos de teclado
+- **`reader.js`**: reproductor de video con guardado de progreso cada 5s, visor de manga con scroll virtual, atajos de teclado, precarga proactiva de imágenes (`_prefetchNextBatch`) — carga hasta 3 imágenes más allá de la ventana actual con `new Image()` y delay progresivo de 200ms
 - **`queue-indicator.js`**: indicador flotante de descargas activas con popup de progreso
 
 ---
@@ -412,8 +457,9 @@ Herencia: `base.html` → `{index, serie, reader}.html`
 ### Búsqueda
 ```
 Usuario escribe "naruto" → JS llama GET /api/search/anime/jkanime?q=naruto
-  → api/search.py llama source.search(query)
-    → scraper hace HTTP a jkanime.net, parsea HTML
+  → api/search.py (async def) await source.search(query)
+    → BaseSource.search() ejecuta search_sync() via asyncio.to_thread()
+      → scraper hace HTTP a jkanime.net, parsea HTML (sin bloquear event loop)
   → api/search.py enriquece resultados con estado de BD (descargado, progreso)
 → JS renderiza grid de resultados
 ```
@@ -423,13 +469,13 @@ Usuario escribe "naruto" → JS llama GET /api/search/anime/jkanime?q=naruto
 Usuario hace clic en "Descargar serie completa"
   → JS POST /api/download {type, source, content_id, title}
     → api/downloads.py encola job en download_queue (SQLite)
-  → Worker toma el job:
-      1. get_chapters() → lista remota
-      2. Crea carpeta: /Descargas/Manga/naruto/
-      3. Descarga portada + series_info.json
-      4. Por cada capítulo: download_chapter() → imágenes
-      5. Actualiza progreso en BD
-  → JS polling a GET /api/queue para mostrar progreso
+  → Worker (hilo) toma el job:
+       1. get_chapters_sync() → lista remota (llamada sync directa)
+       2. Crea carpeta: /Descargas/Manga/naruto/
+       3. Descarga portada + series_info.json
+       4. Por cada capítulo: download_chapter_sync() → imágenes
+       5. Actualiza progreso en BD
+   → JS polling a GET /api/queue para mostrar progreso
 ```
 
 ### Actualizaciones automáticas

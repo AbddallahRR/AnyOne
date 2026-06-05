@@ -6,16 +6,17 @@ import os
 import re
 import time
 from pathlib import Path
+from urllib.parse import quote as _url_quote
 from urllib.parse import urlparse
 
-import cloudscraper
-import requests
 from bs4 import BeautifulSoup
 
-from . import BaseSource
 from core.disk_cache import search_cache
+from core.http_pool import HttpPool
 from core.models import Chapter, SearchResult, SeriesDetails
 from core.throttle import rate_limiter
+
+from . import BaseSource
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ class NartagSource(BaseSource):
     UA         = "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0"
 
     def __init__(self):
-        self.scraper = cloudscraper.create_scraper()
+        self.scraper = HttpPool.get_scraper()
 
     # -----------------------------------------------------------------------
     # HTTP helpers
@@ -230,13 +231,13 @@ class NartagSource(BaseSource):
     # Búsqueda
     # -----------------------------------------------------------------------
 
-    def search(self, query: str) -> list[SearchResult]:
+    def search_sync(self, query: str) -> list[SearchResult]:
         cache_key = f"nartag:search:{query}"
         cached    = search_cache.get(cache_key)
         if cached is not None:
             return [SearchResult(**r) if isinstance(r, dict) else r for r in cached]
 
-        encoded = requests.utils.quote(query)
+        encoded = _url_quote(query)
         url     = f"{self.BASE_URL}/?s={encoded}&post_type=wp-manga"
         try:
             html = self._get(url).text
@@ -276,7 +277,7 @@ class NartagSource(BaseSource):
     # Detalles
     # -----------------------------------------------------------------------
 
-    def get_details(self, content_id: str) -> SeriesDetails:
+    def get_details_sync(self, content_id: str) -> SeriesDetails:
         cache_key = f"nartag:details:{content_id}"
         cached    = search_cache.get(cache_key)
         if cached is not None:
@@ -320,7 +321,7 @@ class NartagSource(BaseSource):
     # Capítulos — via AJAX POST
     # -----------------------------------------------------------------------
 
-    def get_chapters(self, content_id: str) -> list[Chapter]:
+    def get_chapters_sync(self, content_id: str) -> list[Chapter]:
         cache_key = f"nartag:chapters:{content_id}"
         cached    = search_cache.get(cache_key)
         if cached is not None:
@@ -374,7 +375,7 @@ class NartagSource(BaseSource):
     # Descarga de capítulo
     # -----------------------------------------------------------------------
 
-    def download_chapter(self, content_id: str, chapter_id: str,
+    def download_chapter_sync(self, content_id: str, chapter_id: str,
                          dest_folder: str) -> str:
         m       = re.search(r'capitulo-(\d+(?:\.\d+)?)', chapter_id)
         cap_num = m.group(1) if m else chapter_id

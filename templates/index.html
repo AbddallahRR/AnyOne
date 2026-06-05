@@ -4,7 +4,7 @@
 {% block title %}Comic Web — Anime & Manga{% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/index.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', path='css/index.css') }}">
 {% endblock %}
 
 {% block content %}
@@ -154,7 +154,7 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script src="{{ url_for('static', path='js/app.js') }}"></script>
 <script>
   document.getElementById('modal').addEventListener('click', e => {
     if (e.target === e.currentTarget) closeModal();

@@ -22,8 +22,7 @@ RUN mkdir -p /data/descargas/Anime /data/descargas/Manga /data/config
 # Variables de entorno para sobreescribir config.py
 ENV BASE_DOWNLOAD_DIR=/data/descargas
 ENV DB_DIR=/data/config
-ENV FLASK_ENV=production
 
 EXPOSE 5000
 
-CMD ["python", "app.py"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000"]

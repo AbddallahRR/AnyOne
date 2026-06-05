@@ -1,13 +1,9 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 import concurrent.futures
 import logging
 from pathlib import Path
 
-from flask import jsonify
+from fastapi import HTTPException
 
-from ..api import api_bp
 from config import ANIME_DOWNLOAD_DIR, MANGA_DOWNLOAD_DIR
 from core.database import (
     get_series_to_check,
@@ -15,6 +11,8 @@ from core.database import (
     set_series_updates,
 )
 from core.sources import get_source
+
+from . import api_router
 from .common import (
     _find_local_serie_dir,
     _local_chapters_anime,
@@ -23,10 +21,6 @@ from .common import (
 
 logger = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# Comprobación de actualizaciones
-# ---------------------------------------------------------------------------
 
 def _check_series_for_new_chapters(content_ref: str) -> dict:
     try:
@@ -41,7 +35,7 @@ def _check_series_for_new_chapters(content_ref: str) -> dict:
             serie_dir = _find_local_serie_dir(base_path, content_id)
             if serie_dir:
                 content_type = ct
-                local_dir    = serie_dir
+                local_dir = serie_dir
                 break
 
         if not content_type:
@@ -51,8 +45,8 @@ def _check_series_for_new_chapters(content_ref: str) -> dict:
         if not src:
             return {'content_ref': content_ref, 'new_chapters': [], 'error': f"Fuente '{source_name}' no disponible"}
 
-        remote_chapters = src.get_chapters(content_id)
-        remote_nums     = {int(float(ch.number)) for ch in remote_chapters}
+        remote_chapters = src.get_chapters_sync(content_id)
+        remote_nums = {int(float(ch.number)) for ch in remote_chapters}
 
         if content_type == 'anime':
             local_list = _local_chapters_anime(local_dir)
@@ -69,12 +63,12 @@ def _check_series_for_new_chapters(content_ref: str) -> dict:
         set_series_updates(content_ref, new_nums)
 
         return {
-            'content_ref':     content_ref,
-            'new_chapters':    new_nums,
+            'content_ref': content_ref,
+            'new_chapters': new_nums,
             'new_chapter_ids': new_chapter_ids,
-            'total_remote':    len(remote_nums),
-            'total_local':     len(local_nums),
-            'error':           None,
+            'total_remote': len(remote_nums),
+            'total_local': len(local_nums),
+            'error': None,
         }
 
     except Exception as exc:
@@ -82,12 +76,12 @@ def _check_series_for_new_chapters(content_ref: str) -> dict:
         return {'content_ref': content_ref, 'new_chapters': [], 'error': str(exc)}
 
 
-@api_bp.route('/library/check-updates/<path:content_ref>', methods=['POST'])
-def api_check_updates(content_ref):
+@api_router.post('/library/check-updates/{content_ref:path}')
+def api_check_updates(content_ref: str):
     result = _check_series_for_new_chapters(content_ref)
     if result.get('error'):
-        return jsonify(result), 500
-    return jsonify(result)
+        raise HTTPException(status_code=500, detail=result)
+    return result
 
 
 def _check_all_updates_core() -> dict:
@@ -111,12 +105,12 @@ def _check_all_updates_core() -> dict:
         f"{len(series_with_updates)} con capítulos nuevos"
     )
     return {
-        'checked':             len(results),
-        'with_updates':        len(series_with_updates),
-        'results':             results,
+        'checked': len(results),
+        'with_updates': len(series_with_updates),
+        'results': results,
     }
 
 
-@api_bp.route('/library/check-all-updates', methods=['POST'])
+@api_router.post('/library/check-all-updates')
 def api_check_all_updates():
-    return jsonify(_check_all_updates_core())
+    return _check_all_updates_core()

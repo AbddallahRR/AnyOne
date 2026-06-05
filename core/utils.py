@@ -1,12 +1,14 @@
-import os
-import re
 import json
+import re
 import threading
 import time
 import unicodedata
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import quote
+
 from config import ANIME_DOWNLOAD_DIR, MANGA_DOWNLOAD_DIR
+
 
 def normalize_title(raw_title):
     """Limpia títulos para usarlos como nombre de carpeta."""
@@ -34,11 +36,69 @@ def normalize_for_comparison(text):
 _scan_cache: list | None = None
 _scan_cache_time: float = 0.0
 _scan_cache_lock = threading.Lock()
-_SCAN_CACHE_TTL = 15.0
+_SCAN_CACHE_TTL = 60.0
 
 def _invalidate_scan_cache() -> None:
     global _scan_cache
     _scan_cache = None
+
+def _scan_series_dir(serie_dir: Path, content_type: str) -> dict | None:
+    """Escanea un directorio de serie y devuelve sus metadatos, o None si no es válido."""
+    if content_type == 'anime':
+        mp4_files = list(serie_dir.glob("*.mp4"))
+        if not mp4_files:
+            return None
+        chapters = []
+        for f in mp4_files:
+            match = re.search(r'_(\d+)\.mp4$', f.name)
+            if match:
+                chapters.append(int(match.group(1)))
+        last_chapter = max(chapters) if chapters else 0
+    else:
+        cap_dirs = [d for d in serie_dir.iterdir() if d.is_dir() and d.name.startswith('cap_')]
+        if not cap_dirs:
+            return None
+        chapters = []
+        for d in cap_dirs:
+            match = re.search(r'cap_(\d+)', d.name)
+            if match:
+                chapters.append(int(match.group(1)))
+        last_chapter = max(chapters) if chapters else 0
+
+    cover_url = ''
+    info_path = serie_dir / 'series_info.json'
+    if info_path.exists():
+        try:
+            with open(info_path, 'r') as f:
+                info = json.load(f)
+                cover_filename = info.get('cover', '')
+                if cover_filename:
+                    encoded_name = quote(serie_dir.name)
+                    cover_url = f"/api/local-cover/{content_type}/{encoded_name}/{cover_filename}"
+        except Exception:
+            pass
+    if not cover_url:
+        for ext in ['jpg', 'jpeg', 'png', 'webp']:
+            cover_file = serie_dir / f'cover.{ext}'
+            if cover_file.exists():
+                encoded_name = quote(serie_dir.name)
+                cover_url = f"/api/local-cover/{content_type}/{encoded_name}/cover.{ext}"
+                break
+
+    # Preferir thumbnail WebP si existe
+    if cover_url and (serie_dir / 'thumb.webp').exists():
+        encoded_name = quote(serie_dir.name)
+        cover_url = f"/api/local-cover/{content_type}/{encoded_name}/thumb.webp?thumb=1"
+
+    return {
+        'type': content_type,
+        'id': serie_dir.name,
+        'title': serie_dir.name.replace('_', ' ').title(),
+        'cover': cover_url,
+        'last_chapter': str(last_chapter),
+        'progress': '0'
+    }
+
 
 def scan_downloaded_series():
     global _scan_cache, _scan_cache_time
@@ -48,127 +108,54 @@ def scan_downloaded_series():
             return _scan_cache
 
     series = []
-    
-    # Escanear Anime
-    anime_dir = Path(ANIME_DOWNLOAD_DIR)
-    if anime_dir.exists():
-        for serie_dir in anime_dir.iterdir():
-            if not serie_dir.is_dir():
+    futures = []
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        for content_type, base_path in [('anime', ANIME_DOWNLOAD_DIR), ('manga', MANGA_DOWNLOAD_DIR)]:
+            base = Path(base_path)
+            if not base.exists():
                 continue
-            mp4_files = list(serie_dir.glob("*.mp4"))
-            if not mp4_files:
-                continue  # Si no hay videos, no añadir la serie
-            chapters = []
-            for f in mp4_files:
-                match = re.search(r'_(\d+)\.mp4$', f.name)
-                if match:
-                    chapters.append(int(match.group(1)))
-            last_chapter = max(chapters) if chapters else 0
-            
-            # Portada
-            cover_url = ''
-            info_path = serie_dir / 'series_info.json'
-            if info_path.exists():
-                try:
-                    with open(info_path, 'r') as f:
-                        info = json.load(f)
-                        cover_filename = info.get('cover', '')
-                        if cover_filename:
-                            encoded_name = quote(serie_dir.name)
-                            cover_url = f"/api/local-cover/anime/{encoded_name}/{cover_filename}"
-                except Exception as e:
-                    print(f"Error leyendo {info_path}: {e}")
-            if not cover_url:
-                for ext in ['jpg', 'jpeg', 'png', 'webp']:
-                    cover_file = serie_dir / f'cover.{ext}'
-                    if cover_file.exists():
-                        encoded_name = quote(serie_dir.name)
-                        cover_url = f"/api/local-cover/anime/{encoded_name}/cover.{ext}"
-                        break
-            
-            series.append({
-                'type': 'anime',
-                'id': serie_dir.name,
-                'title': serie_dir.name.replace('_', ' ').title(),
-                'cover': cover_url,
-                'last_chapter': str(last_chapter),
-                'progress': '0'
-            })
-    
-    # Escanear Manga
-    manga_dir = Path(MANGA_DOWNLOAD_DIR)
-    if manga_dir.exists():
-        for serie_dir in manga_dir.iterdir():
-            if not serie_dir.is_dir():
-                continue
-            cap_dirs = [d for d in serie_dir.iterdir() if d.is_dir() and d.name.startswith('cap_')]
-            if not cap_dirs:
-                continue  # Si no hay capítulos, no añadir
-            chapters = []
-            for d in cap_dirs:
-                match = re.search(r'cap_(\d+)', d.name)
-                if match:
-                    chapters.append(int(match.group(1)))
-            last_chapter = max(chapters) if chapters else 0
-            
-            cover_url = ''
-            info_path = serie_dir / 'series_info.json'
-            if info_path.exists():
-                try:
-                    with open(info_path, 'r') as f:
-                        info = json.load(f)
-                        cover_filename = info.get('cover', '')
-                        if cover_filename:
-                            encoded_name = quote(serie_dir.name)
-                            cover_url = f"/api/local-cover/manga/{encoded_name}/{cover_filename}"
-                except Exception as e:
-                    print(f"Error leyendo {info_path}: {e}")
-            if not cover_url:
-                for ext in ['jpg', 'jpeg', 'png', 'webp']:
-                    cover_file = serie_dir / f'cover.{ext}'
-                    if cover_file.exists():
-                        encoded_name = quote(serie_dir.name)
-                        cover_url = f"/api/local-cover/manga/{encoded_name}/cover.{ext}"
-                        break
-            
-            series.append({
-                'type': 'manga',
-                'id': serie_dir.name,
-                'title': serie_dir.name.replace('_', ' ').title(),
-                'cover': cover_url,
-                'last_chapter': str(last_chapter),
-                'progress': '0'
-            })
-    
-    # Enriquecer con BD (progreso y portada) — batch queries
+            for serie_dir in base.iterdir():
+                if not serie_dir.is_dir():
+                    continue
+                futures.append(executor.submit(_scan_series_dir, serie_dir, content_type))
+
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+                if result is not None:
+                    series.append(result)
+            except Exception:
+                pass
+
+    # Enriquecer con BD (progreso + portada) — batch query única con LEFT JOIN
     from core.database import get_conn
     conn = get_conn()
     refs = [f"local:{s['id']}" for s in series]
     if refs:
         placeholders = ','.join('?' * len(refs))
-        progress_rows = conn.execute(
-            f'SELECT content_id, chapter, progress FROM user_progress WHERE content_id IN ({placeholders})',
+        rows = conn.execute(
+            f'''SELECT c.id, c.cover, p.chapter, p.progress
+                FROM content c
+                LEFT JOIN user_progress p ON p.content_id = c.id
+                WHERE c.id IN ({placeholders})''',
             refs
         ).fetchall()
-        progress_map = {r[0]: (r[1], r[2]) for r in progress_rows}
-        cover_rows = conn.execute(
-            f'SELECT id, cover FROM content WHERE id IN ({placeholders})',
-            refs
-        ).fetchall()
-        cover_map = {r[0]: r[1] for r in cover_rows}
+        enrichment = {r[0]: (r[1], r[2], r[3]) for r in rows}
 
         for s in series:
             ref = f"local:{s['id']}"
-            prog = progress_map.get(ref)
-            if prog and prog[0]:
-                s['last_chapter'] = prog[0]
-                s['progress'] = prog[1]
-            else:
+            entry = enrichment.get(ref)
+            if entry:
+                cover, chapter, progress = entry
+                if chapter:
+                    s['last_chapter'] = chapter
+                    s['progress'] = progress or '0'
+                if cover and not s['cover']:
+                    s['cover'] = cover
+            if s['last_chapter'] == '0':
                 s['last_chapter'] = '1'
-                s['progress'] = '0'
-            cov = cover_map.get(ref)
-            if cov and not s['cover']:
-                s['cover'] = cov
+
     with _scan_cache_lock:
         _scan_cache = series
         _scan_cache_time = time.time()

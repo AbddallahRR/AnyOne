@@ -5,7 +5,7 @@
 
 {% block extra_head %}
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/reader.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', path='css/reader.css') }}">
 {% endblock %}
 
 {% block content %}
@@ -145,5 +145,5 @@
     if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleFullscreen(); }
   });
 </script>
-<script src="{{ url_for('static', filename='js/reader.js') }}"></script>
+<script src="{{ url_for('static', path='js/reader.js') }}"></script>
 {% endblock %}

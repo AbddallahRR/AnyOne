@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+# Actualmente sin funcionar, el sitio cambió mucho y no pude actualizar el código a tiempo.
+# --- IGNORE ---
 import logging
 import os
 import re
@@ -11,12 +13,12 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import cloudscraper
-from bs4 import BeautifulSoup
 
-from . import BaseSource
 from core.disk_cache import search_cache
 from core.models import Chapter, SearchResult, SeriesDetails
 from core.throttle import rate_limiter
+
+from . import BaseSource
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +127,7 @@ class OlympusSource(BaseSource):
     # Background cache
     # -----------------------------------------------------------------------
 
-    def warm_cache(self) -> None:
+    def warm_cache_sync(self) -> None:
         """Precarga el catálogo en background al arrancar la app."""
         if search_cache.get("olympus:catalog") is not None:
             logger.debug("Olympus: catálogo ya en caché, sin precarga necesaria")
@@ -245,18 +247,22 @@ class OlympusSource(BaseSource):
         logger.info(f"Olympus: catálogo descargado con {len(results)} series")
         return results
 
-    def search(self, query: str) -> list[SearchResult]:
+    def search_sync(self, query: str) -> list[SearchResult]:
         cache_key = "olympus:catalog"
         catalog   = search_cache.get(cache_key)
         if catalog is not None:
             self._refresh_catalog_background()
             q = query.lower()
-            return [SearchResult(id=r['id'], title=r['title'], cover=r.get('cover', '')) for r in catalog if q in r['title'].lower() or q in r['id'].lower()]
+            return [
+                SearchResult(id=r['id'], title=r['title'], cover=r.get('cover', ''))
+                for r in catalog
+                if q in r['title'].lower() or q in r['id'].lower()
+            ]
 
         # Sin catálogo: lo precargamos en background y mientras tanto
         # devolvemos la primera página filtrada por query si la API lo soporta
         logger.info("Olympus: sin catálogo, precargando en background")
-        self.warm_cache()
+        self.warm_cache_sync()
 
         # Intentar búsqueda directa en API
         try:
@@ -279,7 +285,7 @@ class OlympusSource(BaseSource):
     # Detalles
     # -----------------------------------------------------------------------
 
-    def get_details(self, content_id: str) -> SeriesDetails:
+    def get_details_sync(self, content_id: str) -> SeriesDetails:
         cache_key = f"olympus:details:{content_id}"
         cached    = search_cache.get(cache_key)
         if cached is not None:
@@ -303,7 +309,7 @@ class OlympusSource(BaseSource):
     # Capítulos
     # -----------------------------------------------------------------------
 
-    def get_chapters(self, content_id: str) -> list[Chapter]:
+    def get_chapters_sync(self, content_id: str) -> list[Chapter]:
         cache_key = f"olympus:chapters:{content_id}"
         cached    = search_cache.get(cache_key)
         if cached is not None:
@@ -350,7 +356,7 @@ class OlympusSource(BaseSource):
     # Descarga de capítulo
     # -----------------------------------------------------------------------
 
-    def download_chapter(self, content_id: str, chapter_id: str,
+    def download_chapter_sync(self, content_id: str, chapter_id: str,
                          dest_folder: str) -> str:
         full_slug = self._full_slug(content_id)
         cap_url   = f"{self.BASE_URL}/capitulo/{chapter_id}/{full_slug}"

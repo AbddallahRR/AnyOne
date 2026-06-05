@@ -1,56 +1,58 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 import json
 import logging
-import os
 import re
 import shutil
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from flask import abort, jsonify, request
-from pydantic import BaseModel, ValidationError
-from typing import TypeVar
+from fastapi import HTTPException
 
 from config import ANIME_DOWNLOAD_DIR, MANGA_DOWNLOAD_DIR
-
-M = TypeVar('M', bound=BaseModel)
-from core.database import (
-    get_conn,
-    get_progress,
-    get_watched_chapters,
-)
-from core.utils import _normalize_path_name, normalize_title
+from core.database import get_conn
+from core.utils import _normalize_path_name
 
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Índice en memoria: content_id → Path de carpeta local
-# ---------------------------------------------------------------------------
-
 _series_index: dict[str, dict[str, Path]] = {}
 _series_index_lock = threading.Lock()
+
+
+def _read_series_info(cand_dir: Path) -> tuple[str | None, Path | None]:
+    """Lee series_info.json de un directorio y devuelve (content_id, dir_path) o (None, None)."""
+    info_path = cand_dir / 'series_info.json'
+    if not info_path.exists():
+        return None, None
+    try:
+        with open(info_path, 'r', encoding='utf-8') as f:
+            info = json.load(f)
+        cid = info.get('content_id')
+        if cid:
+            return cid, cand_dir
+    except Exception as exc:
+        logger.warning("Error leyendo %s: %s", info_path, exc)
+    return None, None
 
 
 def _build_series_index(base_dir: Path) -> dict[str, Path]:
     index: dict[str, Path] = {}
     if not base_dir.exists():
         return index
-    for cand_dir in base_dir.iterdir():
-        if not cand_dir.is_dir():
-            continue
-        info_path = cand_dir / 'series_info.json'
-        if info_path.exists():
+
+    dirs = [d for d in base_dir.iterdir() if d.is_dir()]
+    if not dirs:
+        return index
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {executor.submit(_read_series_info, d): d for d in dirs}
+        for future in as_completed(futures):
             try:
-                with open(info_path, 'r', encoding='utf-8') as f:
-                    info = json.load(f)
-                cid = info.get('content_id')
-                if cid:
+                cid, cand_dir = future.result()
+                if cid and cand_dir:
                     index[cid] = cand_dir
-            except Exception as exc:
-                logger.warning("Error leyendo %s: %s", info_path, exc)
+            except Exception:
+                pass
     return index
 
 
@@ -70,10 +72,6 @@ def _invalidate_series_index(base_dir: Path | None = None) -> None:
             _series_index.pop(str(base_dir), None)
 
 
-# ---------------------------------------------------------------------------
-# Helpers generales
-# ---------------------------------------------------------------------------
-
 def _safe_path(base: str, untrusted: str) -> Path | None:
     try:
         resolved = Path(base, untrusted).resolve()
@@ -88,23 +86,10 @@ def _base_folder(content_type: str) -> str:
     return ANIME_DOWNLOAD_DIR if content_type == 'anime' else MANGA_DOWNLOAD_DIR
 
 
-def _get_json() -> dict:
-    return request.get_json(silent=True) or {}
-
-
-def _parse_json_body(model_class: type[M]) -> M:
-    data = _get_json()
-    return model_class(**data)
-
-
 def _require_local(content_ref: str):
     if not content_ref.startswith('local:'):
-        abort(jsonify({'error': 'Solo funciona con contenido local'}), 400)
+        raise HTTPException(status_code=400, detail='Solo funciona con contenido local')
 
-
-# ---------------------------------------------------------------------------
-# Queries de cola
-# ---------------------------------------------------------------------------
 
 def _queue_find_active(content_ref: str, chapter_id: str | None = None) -> tuple | None:
     conn = get_conn()
@@ -153,10 +138,6 @@ def _content_title_by_ref(ref: str) -> str | None:
     row = conn.execute('SELECT title FROM content WHERE id = ?', (ref,)).fetchone()
     return row[0] if row else None
 
-
-# ---------------------------------------------------------------------------
-# Helpers de sistema de archivos
-# ---------------------------------------------------------------------------
 
 def _find_local_serie_dir(base_dir: Path, content_id: str) -> Path | None:
     index = _get_series_index(base_dir)

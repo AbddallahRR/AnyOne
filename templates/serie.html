@@ -3,7 +3,7 @@
 {% block title %}Detalle — Comic Web{% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/serie.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', path='css/serie.css') }}">
 {% endblock %}
 
 {% block content %}
@@ -112,7 +112,7 @@
 <script>
   window.serieData = { type: "{{ type }}", source: "{{ source }}", id: "{{ id }}" };
 </script>
-<script src="{{ url_for('static', filename='js/serie.js') }}" defer></script>
+<script src="{{ url_for('static', path='js/serie.js') }}" defer></script>
 <script>
   // ── Breadcrumb sync ──────────────────────────────────────────────────
   const titleEl = document.getElementById('serie-title');

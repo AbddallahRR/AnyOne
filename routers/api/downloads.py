@@ -1,15 +1,12 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 import logging
+from queue import Full
 
-from flask import jsonify
+from fastapi import HTTPException
 
-from ..api import api_bp
 from core.database import (
-    save_content_to_db,
     get_content_ref,
     get_watched_chapters,
+    save_content_to_db,
 )
 from core.download_worker import download_queue
 from core.models import (
@@ -20,33 +17,28 @@ from core.models import (
 )
 from core.sources import get_source
 from core.utils import normalize_title
+
+from . import api_router
 from .common import (
-    _parse_json_body,
     _queue_find_active,
-    _queue_insert,
     _queue_get_status,
+    _queue_insert,
 )
 
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Cola de descarga
-# ---------------------------------------------------------------------------
-
-@api_bp.route('/queue/status')
+@api_router.get('/queue/status')
 def api_queue_status():
     active, pending = _queue_get_status()
-    return jsonify({'active': active, 'queue': pending})
+    return {'active': active, 'queue': pending}
 
 
-@api_bp.route('/download', methods=['POST'])
-def api_download():
-    data = _parse_json_body(DownloadRequest)
-
+@api_router.post('/download')
+def api_download(data: DownloadRequest):
     src = get_source(data.type, data.source)
     if not src:
-        return jsonify({'error': 'Fuente no encontrada'}), 404
+        raise HTTPException(status_code=404, detail='Fuente no encontrada')
 
     try:
         save_content_to_db(data.type, data.source, data.content_id, data.title, '')
@@ -58,33 +50,34 @@ def api_download():
     excluded_chapters: list[int] = []
     if data.exclude_watched:
         safe_title = normalize_title(data.title)
-        watched    = get_watched_chapters(f"local:{safe_title}")
+        watched = get_watched_chapters(f"local:{safe_title}")
         excluded_chapters = list(watched)
         if excluded_chapters:
             logger.debug(f"Excluyendo {len(excluded_chapters)} capítulos vistos para '{data.title}'")
 
     existing = _queue_find_active(ref)
     if existing:
-        return jsonify({'error': f"Ya está en cola (estado: {existing['status']})"}), 409
+        raise HTTPException(status_code=409, detail=f"Ya está en cola (estado: {existing['status']})")
 
     job_id = _queue_insert(ref, data.type, data.title)
-    download_queue.put(DownloadJob(
-        id=job_id,
-        content_ref=ref,
-        type=data.type,
-        title=data.title,
-        excluded_chapters=excluded_chapters,
-    ))
-    return jsonify({'job_id': job_id, 'message': 'Descarga encolada'})
+    try:
+        download_queue.put(DownloadJob(
+            id=job_id,
+            content_ref=ref,
+            type=data.type,
+            title=data.title,
+            excluded_chapters=excluded_chapters,
+        ), timeout=5)
+    except Full:
+        raise HTTPException(status_code=503, detail='Cola de descarga llena, intente más tarde')
+    return {'job_id': job_id, 'message': 'Descarga encolada'}
 
 
-@api_bp.route('/download/chapter', methods=['POST'])
-def api_download_chapter():
-    data = _parse_json_body(DownloadChapterRequest)
-
+@api_router.post('/download/chapter')
+def api_download_chapter(data: DownloadChapterRequest):
     src = get_source(data.type, data.source)
     if not src:
-        return jsonify({'error': 'Fuente no encontrada'}), 404
+        raise HTTPException(status_code=404, detail='Fuente no encontrada')
 
     try:
         save_content_to_db(data.type, data.source, data.content_id, data.title, '')
@@ -95,26 +88,27 @@ def api_download_chapter():
 
     existing = _queue_find_active(ref, data.chapter_id)
     if existing:
-        return jsonify({'error': f"Ya está en cola (estado: {existing['status']})"}), 409
+        raise HTTPException(status_code=409, detail=f"Ya está en cola (estado: {existing['status']})")
 
     job_id = _queue_insert(ref, data.type, data.title, data.chapter_id)
-    download_queue.put(DownloadJob(
-        id=job_id,
-        content_ref=ref,
-        type=data.type,
-        title=data.title,
-        chapter_id=data.chapter_id,
-    ))
-    return jsonify({'job_id': job_id, 'message': 'Capítulo encolado para descarga'})
+    try:
+        download_queue.put(DownloadJob(
+            id=job_id,
+            content_ref=ref,
+            type=data.type,
+            title=data.title,
+            chapter_id=data.chapter_id,
+        ), timeout=5)
+    except Full:
+        raise HTTPException(status_code=503, detail='Cola de descarga llena, intente más tarde')
+    return {'job_id': job_id, 'message': 'Capítulo encolado para descarga'}
 
 
-@api_bp.route('/download/chapters', methods=['POST'])
-def api_download_chapters():
-    data = _parse_json_body(DownloadChaptersRequest)
-
+@api_router.post('/download/chapters')
+def api_download_chapters(data: DownloadChaptersRequest):
     src = get_source(data.type, data.source)
     if not src:
-        return jsonify({'error': 'Fuente no encontrada'}), 404
+        raise HTTPException(status_code=404, detail='Fuente no encontrada')
 
     try:
         save_content_to_db(data.type, data.source, data.content_id, data.title, '')
@@ -129,17 +123,20 @@ def api_download_chapters():
         if existing:
             continue
         job_id = _queue_insert(ref, data.type, data.title, ch_id)
-        download_queue.put(DownloadJob(
-            id=job_id,
-            content_ref=ref,
-            type=data.type,
-            title=data.title,
-            chapter_id=ch_id,
-        ))
+        try:
+            download_queue.put(DownloadJob(
+                id=job_id,
+                content_ref=ref,
+                type=data.type,
+                title=data.title,
+                chapter_id=ch_id,
+            ), timeout=5)
+        except Full:
+            raise HTTPException(status_code=503, detail='Cola de descarga llena, intente más tarde')
         job_ids.append(job_id)
 
-    return jsonify({
+    return {
         'job_ids': job_ids,
-        'count':   len(job_ids),
+        'count': len(job_ids),
         'message': f'{len(job_ids)} de {len(data.chapter_ids)} capítulos encolados',
-    })
+    }

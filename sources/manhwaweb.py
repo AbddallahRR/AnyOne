@@ -7,17 +7,18 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import requests
 from pathlib import Path
+from urllib.parse import quote as _url_quote
 from urllib.parse import urljoin, urlparse
 
-import cloudscraper
 from bs4 import BeautifulSoup
 
-from . import BaseSource
 from core.disk_cache import search_cache
+from core.http_pool import HttpPool
 from core.models import Chapter, SearchResult, SeriesDetails
 from core.throttle import rate_limiter
+
+from . import BaseSource
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ class ManhwawebSource(BaseSource):
     _last_refresh_ts = 0.0
 
     def __init__(self):
-        self.scraper = cloudscraper.create_scraper()
+        self.scraper = HttpPool.get_scraper()
 
     # -----------------------------------------------------------------------
     # HTTP helpers
@@ -186,7 +187,7 @@ class ManhwawebSource(BaseSource):
     # Background cache
     # -----------------------------------------------------------------------
 
-    def warm_cache(self) -> None:
+    def warm_cache_sync(self) -> None:
         """Precarga el catálogo en background al arrancar la app."""
         if search_cache.get("manhwaweb:catalog") is not None:
             logger.debug("ManhwaWeb: catálogo ya en caché, sin precarga necesaria")
@@ -310,7 +311,7 @@ class ManhwawebSource(BaseSource):
         logger.info(f"ManhwaWeb: catálogo descargado con {len(results)} series")
         return results
 
-    def search(self, query: str) -> list[SearchResult]:
+    def search_sync(self, query: str) -> list[SearchResult]:
         """
         Busca en el catálogo cacheados si está disponible.
         Si no hay catálogo en caché, hace una búsqueda por scraping directa
@@ -322,16 +323,20 @@ class ManhwawebSource(BaseSource):
         if catalog is not None:
             self._refresh_catalog_background()
             q = query.lower()
-            return [SearchResult(id=r['id'], title=r['title'], cover=r.get('cover', '')) for r in catalog if q in r['title'].lower() or q in r['id'].lower()]
+            return [
+                SearchResult(id=r['id'], title=r['title'], cover=r.get('cover', ''))
+                for r in catalog
+                if q in r['title'].lower() or q in r['id'].lower()
+            ]
 
         # Sin catálogo en caché: búsqueda rápida por scraping + precarga en background
         logger.info("ManhwaWeb: sin catálogo en caché, usando búsqueda directa")
-        self.warm_cache()
+        self.warm_cache_sync()
         return self._search_scrape(query)
-    
+
     def _search_scrape(self, query: str) -> list[SearchResult]:
         """Búsqueda mediante scraping de la página web (fallback cuando API falla)."""
-        url = f"{self.BASE_URL}/?s={requests.utils.quote(query)}"
+        url = f"{self.BASE_URL}/?s={_url_quote(query)}"
         try:
             soup = BeautifulSoup(self._get(url).text, 'html.parser')
         except Exception as e:
@@ -363,7 +368,7 @@ class ManhwawebSource(BaseSource):
     # Detalles
     # -----------------------------------------------------------------------
 
-    def get_details(self, content_id: str) -> SeriesDetails:
+    def get_details_sync(self, content_id: str) -> SeriesDetails:
         cache_key = f"manhwaweb:details:{content_id}"
         cached    = search_cache.get(cache_key)
         if cached is not None:
@@ -420,7 +425,7 @@ class ManhwawebSource(BaseSource):
     # Capítulos
     # -----------------------------------------------------------------------
 
-    def get_chapters(self, content_id: str) -> list[Chapter]:
+    def get_chapters_sync(self, content_id: str) -> list[Chapter]:
         cache_key = f"manhwaweb:chapters:{content_id}"
         cached    = search_cache.get(cache_key)
         if cached is not None:
@@ -488,7 +493,7 @@ class ManhwawebSource(BaseSource):
     # Descarga de capítulo
     # -----------------------------------------------------------------------
 
-    def download_chapter(self, content_id: str, chapter_id: str,
+    def download_chapter_sync(self, content_id: str, chapter_id: str,
                          dest_folder: str) -> str:
         num         = self._chapter_num_from_id(chapter_id)
         dir_name    = (f"cap_{int(float(num)):04d}"

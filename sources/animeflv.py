@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+# Actualmente sin funcionar, el sitio cambió mucho y no pude actualizar el código a tiempo.
+# --- IGNORE ---
 import json
 import logging
 import re
 
-import requests
 import cloudscraper
+import requests
 from bs4 import BeautifulSoup
 
-from . import BaseSource
 from core.disk_cache import search_cache
 from core.models import Chapter, EpisodeLink, EpisodeLinks, SearchResult, SeriesDetails
 from core.throttle import rate_limiter
+
+from . import BaseSource
 
 logger = logging.getLogger(__name__)
 
@@ -422,7 +425,7 @@ class AnimeflvSource(BaseSource):
     # API pública
     # -----------------------------------------------------------------------
 
-    def search(self, query: str) -> list[SearchResult]:
+    def search_sync(self, query: str) -> list[SearchResult]:
         encoded = requests.utils.quote(query)
         url     = f"{self.BASE_URL}/browse?q={encoded}"
         try:
@@ -438,7 +441,7 @@ class AnimeflvSource(BaseSource):
 
         return results
 
-    def get_details(self, content_id: str) -> SeriesDetails:
+    def get_details_sync(self, content_id: str) -> SeriesDetails:
         url = f"{self.BASE_URL}/anime/{content_id}"
         try:
             html = self._get(url).text
@@ -455,7 +458,7 @@ class AnimeflvSource(BaseSource):
         info.title = info.title or content_id
         return info
 
-    def get_chapters(self, content_id: str) -> list[Chapter]:
+    def get_chapters_sync(self, content_id: str) -> list[Chapter]:
         cache_key = f"animeflv:chapters:{content_id}"
         cached    = search_cache.get(cache_key)
         if cached is not None:
@@ -487,7 +490,7 @@ class AnimeflvSource(BaseSource):
         search_cache.set(cache_key, [c.model_dump() for c in chapters])
         return chapters
 
-    def download_chapter(self, content_id: str, chapter_id: str, dest_folder: str) -> str:
+    def download_chapter_sync(self, content_id: str, chapter_id: str, dest_folder: str) -> str:
         """
         AnimeFLV no ofrece descarga directa confiable; los links van a hosts externos.
         Intenta con yt-dlp sobre los sources embebidos.
@@ -533,7 +536,7 @@ class AnimeflvSource(BaseSource):
 
         return filepath
 
-    def get_stream_url(self, content_id: str, chapter_id: str) -> str | None:
+    def get_stream_url_sync(self, content_id: str, chapter_id: str) -> str | None:
         """
         Devuelve la mejor URL de streaming disponible para el episodio.
 

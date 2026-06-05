@@ -5,15 +5,15 @@ import json
 import logging
 import os
 import threading
+import time
 from queue import Queue
-
-import requests
 
 from config import ANIME_DOWNLOAD_DIR, MANGA_DOWNLOAD_DIR
 from core.database import update_queue_status
+from core.http_pool import HttpPool
 from core.models import DownloadJob
 from core.sources import get_source
-from core.utils import normalize_title, _invalidate_scan_cache
+from core.utils import _invalidate_scan_cache, normalize_title
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # Estado compartido
 # ---------------------------------------------------------------------------
 
-download_queue: Queue = Queue()
+download_queue: Queue = Queue(maxsize=50)
 
 _active_jobs: dict[int, DownloadJob] = {}
 _active_jobs_lock = threading.Lock()
@@ -45,14 +45,14 @@ def _save_series_metadata(series_folder: str, title: str, source_name: str,
     (los que antes se obtenían en api_download, que ahora encola sin bloquear).
     Llamar ANTES del bucle de capítulos; los errores son no-fatales.
     """
-    from core.database import save_content_to_db   # import local para evitar ciclo
+    from core.database import save_content_to_db  # import local para evitar ciclo
 
     info_path    = os.path.join(series_folder, 'series_info.json')
     cover_filename = ''
     final_title  = title   # puede mejorarse con get_details
 
     try:
-        details   = source.get_details(content_id)
+        details   = source.get_details_sync(content_id)
         final_title = details.title or title
         cover_url = details.cover or ''
 
@@ -68,10 +68,21 @@ def _save_series_metadata(series_folder: str, title: str, source_name: str,
                 if hasattr(source, 'scraper'):
                     img_data = source.scraper.get(cover_url, headers=headers).content
                 else:
-                    img_data = requests.get(cover_url, headers=headers, timeout=30).content
+                    img_data = HttpPool.get_session().get(cover_url, headers=headers, timeout=30).content
                 with open(cover_path, 'wb') as f:
                     f.write(img_data)
                 logger.info(f"Portada guardada: {cover_path}")
+
+                # Generar thumbnail WebP (200px de ancho) vía ffmpeg
+                thumb_path = os.path.join(series_folder, 'thumb.webp')
+                if not os.path.exists(thumb_path):
+                    import subprocess
+                    subprocess.run(
+                        ['ffmpeg', '-y', '-i', cover_path,
+                         '-vf', 'scale=200:-1:force_original_aspect_ratio=decrease',
+                         '-q:v', '75', thumb_path],
+                        capture_output=True, timeout=15
+                    )
 
         # Actualizar BD con datos definitivos (título real + portada)
         try:
@@ -101,7 +112,7 @@ def _save_series_metadata(series_folder: str, title: str, source_name: str,
 
 def _resolve_chapters(source, content_id: str, chapter_id: str | None,
                        excluded: list[int] | None = None) -> tuple[list, int]:
-    all_chapters = source.get_chapters(content_id)
+    all_chapters = source.get_chapters_sync(content_id)
 
     if chapter_id is not None:
         target = next((ch for ch in all_chapters if ch.id == chapter_id), None)
@@ -168,24 +179,26 @@ def _download_worker(worker_id: int) -> None:
                                   content_id, content_type, source)
 
             # ── 4. Bucle de descarga ─────────────────────────────────────────
-            _PROGRESS_EVERY = 5
+            _LAST_DB_FLUSH = [time.time()]
+            _FLUSH_INTERVAL = 30.0
             for idx, chapter in enumerate(chapters, start=1):
                 chap_num = chapter.number
                 chap_id  = chapter.id
 
                 try:
-                    source.download_chapter(content_id, chap_id, series_folder)
+                    source.download_chapter_sync(content_id, chap_id, series_folder)
                 except Exception as exc:
                     raise Exception(f"Error en capítulo {chap_num}: {exc}") from exc
 
                 percent = int((idx / total) * 100)
                 if chapter_id:
-                    # Capítulo individual: marcar completado al terminar el único capítulo
                     update_queue_status(job_id, status='completed', current_progress=100)
                 else:
-                    # Throttle: actualizar solo cada N caps o en el último
-                    if idx % _PROGRESS_EVERY == 0 or idx == total:
+                    # Batch: escribir a DB cada 30s o al final
+                    now = time.time()
+                    if idx == total or now - _LAST_DB_FLUSH[0] >= _FLUSH_INTERVAL:
                         update_queue_status(job_id, current_chapter=idx, current_progress=percent)
+                        _LAST_DB_FLUSH[0] = now
                         logger.debug(f"Job {job_id}: progreso {percent}% ({idx}/{total})")
 
             # ── 5. Finalizar ─────────────────────────────────────────────────
@@ -194,8 +207,9 @@ def _download_worker(worker_id: int) -> None:
 
             # Invalidar índices en memoria para que la nueva serie aparezca
             try:
-                from blueprints.api import _invalidate_series_index
                 from pathlib import Path as _Path
+
+                from routers.api.common import _invalidate_series_index
                 base = _Path(ANIME_DOWNLOAD_DIR if content_type == 'anime' else MANGA_DOWNLOAD_DIR)
                 _invalidate_series_index(base)
             except Exception:

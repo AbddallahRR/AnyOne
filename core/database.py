@@ -2,13 +2,13 @@
 # -*- coding: utf-8 -*-
 
 import json
+import logging
 import os
 import shutil
 import sqlite3
-import logging
 import threading
 
-from config import DB_PATH, ANIME_DOWNLOAD_DIR, MANGA_DOWNLOAD_DIR
+from config import ANIME_DOWNLOAD_DIR, DB_PATH, MANGA_DOWNLOAD_DIR
 from core.utils import normalize_title
 
 logger = logging.getLogger(__name__)
@@ -119,7 +119,7 @@ def _run_migrations(conn: sqlite3.Connection, current: int) -> None:
             conn.execute(
                 "ALTER TABLE series_status ADD COLUMN last_checked_at TIMESTAMP"
             )
-    
+
     if current < 5:
         logger.info("Migracion 5: columna new_chapters_found en series_status")
         existing = [r[1] for r in conn.execute("PRAGMA table_info(series_status)")]
@@ -127,7 +127,7 @@ def _run_migrations(conn: sqlite3.Connection, current: int) -> None:
             conn.execute(
                 "ALTER TABLE series_status ADD COLUMN new_chapters_found TEXT DEFAULT ''"
             )
-    
+
 
 
 # ---------------------------------------------------------------------------
@@ -321,8 +321,8 @@ def get_series_to_check(min_interval_seconds: int = 86400) -> list[dict]:
         (min_interval_seconds,)
     ).fetchall()
     return [{'content_ref': r[0], 'status': r[1]} for r in rows]
- 
- 
+
+
 def mark_series_checked(content_ref: str) -> None:
     """Actualiza last_checked_at de una serie a la hora actual."""
     conn = get_conn()
@@ -332,8 +332,8 @@ def mark_series_checked(content_ref: str) -> None:
             "WHERE content_ref = ?",
             (content_ref,)
         )
- 
- 
+
+
 def get_last_checked(content_ref: str) -> str | None:
     """Devuelve el timestamp ISO de la última comprobación, o None."""
     conn = get_conn()

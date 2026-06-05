@@ -92,6 +92,7 @@ class WatchedToggleRequest(BaseModel):
 class ProgressRequest(BaseModel):
     chapter: str = '1'
     progress: str = '0'
+    model_config = {'coerce_numbers_to_str': True}
 
 
 class DeleteWatchedRequest(BaseModel):

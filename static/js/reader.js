@@ -371,6 +371,25 @@
 
       // [OPT-5] Rango previo — solo procesar deltas
       let prevLo = -1, prevHi = -1;
+      let _prefetchTimers = [];
+
+      function _clearPrefetch() {
+        _prefetchTimers.forEach(t => clearTimeout(t));
+        _prefetchTimers = [];
+      }
+
+      function _prefetchNextBatch(centerIdx, count = 3) {
+        _clearPrefetch();
+        const start = Math.min(centerIdx + WINDOW + 1, total);
+        const end   = Math.min(start + count, total);
+        for (let i = start; i < end; i++) {
+          const timer = setTimeout(() => {
+            const img = new Image();
+            img.src = imageUrls[i];
+          }, i * 200);
+          _prefetchTimers.push(timer);
+        }
+      }
 
       function updateWindow(centerIdx) {
         const lo = Math.max(0,       centerIdx - WINDOW);
@@ -392,6 +411,9 @@
 
         prevLo = lo;
         prevHi = hi;
+
+        // Precargar las siguientes imágenes
+        _prefetchNextBatch(centerIdx);
       }
 
       // ── Scroll handler (rAF-throttled) ────────────────────────────────

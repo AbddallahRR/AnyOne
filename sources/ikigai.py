@@ -9,13 +9,14 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse
 
-import cloudscraper
 from bs4 import BeautifulSoup
 
-from . import BaseSource
 from core.disk_cache import search_cache
+from core.http_pool import HttpPool
 from core.models import Chapter, SearchResult, SeriesDetails
 from core.throttle import rate_limiter
+
+from . import BaseSource
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ class IkigaiSource(BaseSource):
     _REFRESH_COOLDOWN = 60 * 60 * 24   # 24 horas entre refrescos en background
 
     def __init__(self):
-        self.scraper = cloudscraper.create_scraper()
+        self.scraper = HttpPool.get_scraper()
 
     # -----------------------------------------------------------------------
     # HTTP helpers
@@ -216,8 +217,7 @@ class IkigaiSource(BaseSource):
                        else f"{self.CATALOGO_BASE}?pagina={pg}")
                 try:
                     rate_limiter.wait(url)
-                    # Scraper propio por hilo para evitar condiciones de carrera
-                    sc   = cloudscraper.create_scraper()
+                    sc   = HttpPool.get_scraper()
                     resp = sc.get(url, headers=self._headers, timeout=_TIMEOUT)
                     resp.raise_for_status()
                     soup       = BeautifulSoup(resp.text, 'html.parser')
@@ -296,7 +296,7 @@ class IkigaiSource(BaseSource):
 
         threading.Thread(target=_do, daemon=True).start()
 
-    def warm_cache(self) -> None:
+    def warm_cache_sync(self) -> None:
         """
         Precarga el catálogo en background al arrancar la app.
         Llamar desde create_app() después de start_workers().
@@ -324,7 +324,7 @@ class IkigaiSource(BaseSource):
     # API pública
     # -----------------------------------------------------------------------
 
-    def search(self, query: str) -> list[SearchResult]:
+    def search_sync(self, query: str) -> list[SearchResult]:
         """
         Búsqueda por substring en título e id.
         El catálogo se sirve desde caché (TTL 3 días).
@@ -347,7 +347,7 @@ class IkigaiSource(BaseSource):
                 for r in (catalog or [])
                 if q in r['title'].lower() or q in r['id'].lower()]
 
-    def get_details(self, content_id: str) -> SeriesDetails:
+    def get_details_sync(self, content_id: str) -> SeriesDetails:
         cache_key = f"ikigai:details:{content_id}"
         cached    = search_cache.get(cache_key)
         if cached is not None:
@@ -378,7 +378,7 @@ class IkigaiSource(BaseSource):
         search_cache.set(cache_key, result.model_dump())
         return result
 
-    def get_chapters(self, content_id: str) -> list[Chapter]:
+    def get_chapters_sync(self, content_id: str) -> list[Chapter]:
         cache_key = f"ikigai:chapters:{content_id}"
         cached    = search_cache.get(cache_key)
         if cached is not None:
@@ -450,7 +450,7 @@ class IkigaiSource(BaseSource):
         search_cache.set(cache_key, chapters)
         return [Chapter(**c) for c in chapters]
 
-    def download_chapter(self, content_id: str, chapter_id: str, dest_folder: str) -> str:
+    def download_chapter_sync(self, content_id: str, chapter_id: str, dest_folder: str) -> str:
         cap_url  = f"{self.BASE_URL}/capitulo/{chapter_id}/"
         html     = self._fetch_url(cap_url)
         soup     = BeautifulSoup(html, 'html.parser')

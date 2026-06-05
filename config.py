@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 
 import os
-from pathlib import Path
 
 from core.settings import settings
 
@@ -20,7 +19,7 @@ DB_DIR = str(settings.db_dir)
 DB_PATH = str(settings.db_path)
 os.makedirs(DB_DIR, exist_ok=True)
 
-# Configuración de Flask
+# Configuración de la aplicación
 SECRET_KEY = settings.secret_key
 DEBUG = settings.debug
 HOST = settings.host

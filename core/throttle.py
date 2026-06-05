@@ -1,27 +1,61 @@
-import time
+import asyncio
 import threading
+import time
 from urllib.parse import urlparse
 
+
 class RateLimiter:
-    """Per-domain rate limiter to avoid getting banned by upstream sources."""
+    """Per-domain rate limiter with token bucket algorithm.
+
+    Uses threading.Event for precise wake-up instead of busy-wait loops.
+    """
 
     def __init__(self, min_interval: float = 2.0):
         self.min_interval = min_interval
         self._last_calls: dict[str, float] = {}
         self._lock = threading.Lock()
+        self._async_lock = asyncio.Lock()
+        self._events: dict[str, threading.Event] = {}
+
+    def _get_remaining(self, domain: str) -> float:
+        """Devuelve segundos restantes hasta la próxima llamada permitida."""
+        now = time.time()
+        elapsed = now - self._last_calls.get(domain, 0.0)
+        return max(0.0, self.min_interval - elapsed)
 
     def wait(self, url: str) -> None:
         domain = urlparse(url).netloc
         if not domain:
             return
-        while True:
-            with self._lock:
-                now = time.time()
-                elapsed = now - self._last_calls.get(domain, 0.0)
-                if elapsed >= self.min_interval:
-                    self._last_calls[domain] = now
-                    return
-                sleep_for = self.min_interval - elapsed
-            time.sleep(sleep_for)
+
+        with self._lock:
+            remaining = self._get_remaining(domain)
+            if remaining <= 0:
+                self._last_calls[domain] = time.time()
+                return
+            event = self._events.setdefault(domain, threading.Event())
+
+        event.wait(timeout=remaining)
+
+        with self._lock:
+            self._last_calls[domain] = time.time()
+            event.clear()
+
+    async def async_wait(self, url: str) -> None:
+        domain = urlparse(url).netloc
+        if not domain:
+            return
+
+        async with self._async_lock:
+            remaining = self._get_remaining(domain)
+            if remaining <= 0:
+                self._last_calls[domain] = time.time()
+                return
+
+        await asyncio.sleep(remaining)
+
+        async with self._async_lock:
+            self._last_calls[domain] = time.time()
+
 
 rate_limiter = RateLimiter(min_interval=2.0)
