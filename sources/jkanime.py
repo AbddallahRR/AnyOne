@@ -15,6 +15,7 @@ from bs4 import BeautifulSoup
 
 from . import BaseSource
 from core.disk_cache import search_cache
+from core.models import Chapter, EpisodeLink, EpisodeLinks, SearchResult, SeriesDetails
 from core.throttle import rate_limiter
 
 logger = logging.getLogger(__name__)
@@ -324,7 +325,7 @@ class JkanimeSource(BaseSource):
     # API pública
     # -----------------------------------------------------------------------
 
-    def search(self, query: str) -> list:
+    def search(self, query: str) -> list[SearchResult]:
         """
         Busca animes por query.
         Ahora parsea título real, cover, estado y tipo desde .anime__item
@@ -378,13 +379,12 @@ class JkanimeSource(BaseSource):
             if not slug:
                 continue
 
-            results.append({
-                'id':     slug,
-                'title':  title,
-                'cover':  cover,
-                'status': status,
-                'type':   type_,
-            })
+            results.append(SearchResult(
+                id=slug,
+                title=title,
+                cover=cover,
+                type=type_,
+            ))
 
         # Fallback si el HTML no trae .anime__item (ej. layout alternativo)
         if not results:
@@ -393,41 +393,28 @@ class JkanimeSource(BaseSource):
             pattern = re.compile(r'href="https?://jkanime\.net/([a-z0-9][a-z0-9-]+)/"')
             slugs   = {m.group(1) for m in pattern.finditer(html) if m.group(1) not in skip}
             results = [
-                {
-                    'id':     slug,
-                    'title':  slug.replace('-', ' ').title(),
-                    'cover':  f"https://cdn.jkdesa.com/assets/images/animes/image/{slug}.jpg",
-                    'status': None,
-                    'type':   None,
-                }
+                SearchResult(
+                    id=slug,
+                    title=slug.replace('-', ' ').title(),
+                    cover=f"https://cdn.jkdesa.com/assets/images/animes/image/{slug}.jpg",
+                )
                 for slug in slugs
             ]
 
         return results
 
-    def get_details(self, content_id: str) -> dict:
+    def get_details(self, content_id: str) -> SeriesDetails:
         """
         Devuelve detalles completos de una serie:
         title, titleAlt, cover, synopsis, status, type,
         total_episodes, start_date, genres, anime_id.
         """
-        fallback = {
-            'title':          content_id,
-            'title_alt':      None,
-            'cover':          f"https://cdn.jkdesa.com/assets/images/animes/image/{content_id}.jpg",
-            'synopsis':       '',
-            'status':         None,
-            'type':           None,
-            'total_episodes': None,
-            'start_date':     None,
-            'genres':         [],
-            'anime_id':       None,
-        }
+        cover_fallback = f"https://cdn.jkdesa.com/assets/images/animes/image/{content_id}.jpg"
         try:
             html = self._get(f"{self.BASE_URL}/{content_id}/").text
         except Exception as exc:
             logger.error(f"Jkanime get_details error para '{content_id}': {exc}")
-            return fallback
+            return SeriesDetails(title=content_id, cover=cover_fallback)
 
         soup = BeautifulSoup(html, 'html.parser')
         info = soup.select_one('.anime_info') or soup
@@ -495,24 +482,20 @@ class JkanimeSource(BaseSource):
                             'slug': name.lower().replace(' ', '-'),
                         })
 
-        return {
-            'title':          title,
-            'title_alt':      title_alt,
-            'cover':          cover,
-            'synopsis':       synopsis,
-            'status':         status,
-            'type':           type_,
-            'total_episodes': total_episodes,
-            'start_date':     start_date,
-            'genres':         genres,
-            'anime_id':       anime_id,
-        }
+        return SeriesDetails(
+            title=title,
+            cover=cover,
+            synopsis=synopsis,
+            type=type_,
+            total_episodes=total_episodes,
+            genres=genres,
+        )
 
-    def get_chapters(self, content_id: str) -> list:
+    def get_chapters(self, content_id: str) -> list[Chapter]:
         cache_key = f"jkanime:chapters:{content_id}"
         cached    = search_cache.get(cache_key)
         if cached is not None:
-            return cached
+            return [Chapter(**c) if isinstance(c, dict) else c for c in cached]
 
         main_url = f"{self.BASE_URL}/{content_id}/"
         try:
@@ -570,13 +553,13 @@ class JkanimeSource(BaseSource):
 
         total = data.get('total', 0)
         if total > 0:
-            chapters = [{'number': str(i), 'id': str(i)} for i in range(1, total + 1)]
+            chapters = [Chapter(number=str(i), id=str(i)) for i in range(1, total + 1)]
             logger.info(f"Jkanime: {len(chapters)} capítulos para '{content_id}' (total directo)")
-            search_cache.set(cache_key, chapters)
+            search_cache.set(cache_key, [c.model_dump() for c in chapters])
             return chapters
 
         # Fallback: recorrer páginas
-        chapters: list[dict] = []
+        chapters: list[Chapter] = []
         last_page = data.get('last_page', 1)
 
         for ep in data.get('data', []):
@@ -588,7 +571,7 @@ class JkanimeSource(BaseSource):
                         continue
                 except (ValueError, TypeError):
                     pass
-                chapters.append({'number': str(num), 'id': str(num)})
+                chapters.append(Chapter(number=str(num), id=str(num)))
 
         for page in range(2, last_page + 1):
             try:
@@ -610,11 +593,11 @@ class JkanimeSource(BaseSource):
                             continue
                     except (ValueError, TypeError):
                         pass
-                    chapters.append({'number': str(num), 'id': str(num)})
+                    chapters.append(Chapter(number=str(num), id=str(num)))
 
-        chapters.sort(key=lambda x: int(x['number']))
+        chapters.sort(key=lambda x: int(x.number))
         logger.info(f"Jkanime: {len(chapters)} capítulos para '{content_id}' (paginado)")
-        search_cache.set(cache_key, chapters)
+        search_cache.set(cache_key, [c.model_dump() for c in chapters])
         return chapters
 
     def download_chapter(self, content_id: str, chapter_id: str, dest_folder: str) -> str:
@@ -730,7 +713,7 @@ class JkanimeSource(BaseSource):
         logger.warning(f"Jkanime get_stream_url: sin opciones de stream para {content_id}/{chapter_id}")
         return None
 
-    def get_episode_links(self, content_id: str, chapter_id: str) -> dict:
+    def get_episode_links(self, content_id: str, chapter_id: str) -> EpisodeLinks:
         """
         Devuelve todos los links de stream y descarga del episodio,
         separados por variante (SUB / DUB).
@@ -747,7 +730,7 @@ class JkanimeSource(BaseSource):
             html = self._get(cap_url).text
         except Exception as exc:
             logger.error(f"Jkanime get_episode_links error: {exc}")
-            return {'stream': {'SUB': [], 'DUB': []}, 'download': {'SUB': [], 'DUB': []}}
+            return EpisodeLinks()
 
         soup    = BeautifulSoup(html, 'html.parser')
         servers = self._parse_servers_from_js(html)
@@ -775,7 +758,7 @@ class JkanimeSource(BaseSource):
                     stream_url = self._decode_remote(remote)
                     if stream_url.startswith('http') and stream_url not in seen_stream:
                         seen_stream.add(stream_url)
-                        stream_links[variant].append({'server': name, 'url': stream_url})
+                        stream_links[variant].append(EpisodeLink(server=name, url=stream_url))
                 except Exception:
                     pass
 
@@ -784,15 +767,12 @@ class JkanimeSource(BaseSource):
                 dl_url = f"{remote_base.rstrip('/')}/d/{slug}/"
                 if dl_url not in seen_download:
                     seen_download.add(dl_url)
-                    download_links[variant].append({'server': name, 'url': dl_url})
+                    download_links[variant].append(EpisodeLink(server=name, url=dl_url))
 
         # Iframes JKPlayer siempre como SUB en stream
         for url in self._parse_iframe_urls(html):
             if url not in seen_stream:
                 seen_stream.add(url)
-                stream_links['SUB'].append({'server': 'JKPlayer', 'url': url})
+                stream_links['SUB'].append(EpisodeLink(server='JKPlayer', url=url))
 
-        return {
-            'stream':   stream_links,
-            'download': download_links,
-        }
+        return EpisodeLinks(stream=stream_links, download=download_links)

@@ -29,16 +29,20 @@ AnyOne/
 │   ├── database.py           →   SQLite (migraciones, progreso, cola, etiquetas)
 │   ├── disk_cache.py         →   Caché JSON en disco con TTL
 │   ├── download_worker.py    →   Workers en hilos para descarga
+│   ├── models.py             →   Modelos Pydantic (validación, serialización)
+│   ├── settings.py           →   Config tipada con pydantic-settings
 │   ├── sources.py            →   Registro de fuentes disponibles
 │   ├── throttle.py           →   Rate limiter por dominio
 │   └── utils.py              →   Normalización de títulos, escaneo local
 │
 ├── sources/                  → Scrapers (uno por sitio upstream)
 │   ├── __init__.py           →   Clase base BaseSource
+│   ├── animeflv.py           →   www3.animeflv.net (anime)
 │   ├── jkanime.py            →   jkanime.net (anime)
 │   ├── nartag.py             →   nartag.com (manga)
 │   ├── manhwaweb.py          →   manhwaweb.com (manga)
-│   └── ikigai.py             →   visorikigai (manga)
+│   ├── ikigai.py             →   visorikigai (manga)
+│   └── olympus.py            →   olympusscanlation (manga)
 │
 ├── templates/                → Jinja2 (server-side rendered)
 │   ├── base.html             →   Layout: fonts, icons, CSS, JS globales
@@ -64,17 +68,58 @@ AnyOne/
 
 ## Módulos — descripción y funcionamiento
 
-### `config.py` — Configuración
+### `config.py` — Configuración (legacy bridge)
 
-Variables desde entorno con fallbacks para desarrollo:
+Wrapper delgado que re-exporta las variables de `core/settings.py` para compatibilidad
+con imports existentes (`from config import ANIME_DOWNLOAD_DIR`).
 
-- `SECRET_KEY` — firma de cookies de sesión (obligatorio en producción)
-- `DEBUG` — modo debug (`true`/`false`)
-- `BASE_DOWNLOAD_DIR` — carpeta raíz de descargas
-- `DB_DIR` — carpeta de base de datos SQLite
-- `HOST`, `PORT` — bind del servidor
+Toda la lógica de validación y defaults vive ahora en `core/settings.py`.
 
-Crea automáticamente los directorios si no existen.
+---
+
+### `core/settings.py` — Configuración tipada
+
+Usa `pydantic-settings.BaseSettings` para leer variables de entorno con
+validación automática y type hints:
+
+| Variable | Tipo | Default | Descripción |
+|----------|------|---------|-------------|
+| `BASE_DOWNLOAD_DIR` | `Path` | `~/DescargasComics` | Carpeta raíz de descargas |
+| `DB_DIR` | `Path` | `~/.config/comic_web` | Carpeta de BD SQLite |
+| `SECRET_KEY` | `str` | `insecure-dev-key-...` | Firma de cookies (requerido en prod) |
+| `DEBUG` | `bool` | `False` | Modo debug |
+| `HOST` | `str` | `0.0.0.0` | Bind del servidor |
+| `PORT` | `int` | `5000` | Puerto del servidor |
+| `DOWNLOAD_NUM_WORKERS` | `int` | `3` | Workers de descarga |
+
+Propiedades derivadas: `anime_download_dir`, `manga_download_dir`, `db_path`.
+
+Crea automáticamente los directorios en la instanciación mediante `config.py`.
+
+---
+
+### `core/models.py` — Modelos Pydantic
+
+Define todos los contratos de datos del proyecto usando Pydantic v2:
+
+**Contratos de fuentes:**
+- `SearchResult` — `{id, title, cover, source, type, last_chapter, progress}`
+- `SeriesDetails` — `{title, cover, synopsis, type, total_episodes, genres}`
+- `Chapter` — `{number, id, url, is_downloaded}`
+- `EpisodeLink` / `EpisodeLinks` — links de stream/descarga por variante
+
+**Modelos de API request:**
+- `DownloadRequest`, `DownloadChapterRequest`, `DownloadChaptersRequest`
+- `StatusUpdateRequest` — valida que status sea `watching|completed|pending|none`
+- `WatchedToggleRequest`, `ProgressRequest`, `DeleteWatchedRequest`, `DeleteChapterRequest`
+- `AcknowledgeUpdatesRequest`, `SearchQuery`
+
+**Modelos internos:**
+- `DownloadJob` — job tipado para la cola de descarga
+
+Todos los endpoints usan `_parse_json_body(modelo)` que lanza `ValidationError`
+ante datos inválidos. El error handler global en `app.py` lo captura y retorna
+400 con detalles del error.
 
 ---
 
@@ -83,12 +128,13 @@ Crea automáticamente los directorios si no existen.
 Punto de entrada. `create_app()`:
 
 1. Crea la app Flask, carga `config.py`, activa CORS
-2. Ejecuta migraciones de BD (`init_db`)
-3. Limpia la cola de descargas interrumpidas (`cleanup_download_queue`)
-4. Inicia 3 workers de descarga en hilos daemon
-5. Arranca el scheduler de actualizaciones (cada 24 h)
-6. Registra los blueprints (`main`, `api`)
-7. Lanza precarga en background de todas las fuentes (`warm_cache`)
+2. Registra el handler global de `ValidationError` (Pydantic) → 400 JSON
+3. Ejecuta migraciones de BD (`init_db`)
+4. Limpia la cola de descargas interrumpidas (`cleanup_download_queue`)
+5. Inicia 3 workers de descarga en hilos daemon
+6. Arranca el scheduler de actualizaciones (cada 24 h)
+7. Registra los blueprints (`main`, `api`)
+8. Lanza precarga en background de todas las fuentes (`warm_cache`)
 
 ---
 
@@ -124,6 +170,7 @@ Funciones y estado global reutilizados por todos los submódulos:
 - `_resolve_series_title` — resuelve título desde BD o disco
 - `_queue_find_active` / `_queue_insert` / `_queue_get_status` — acceso a la cola de descarga
 - `_base_folder` / `_get_json` / `_require_local` / `_content_title_by_ref` — utilidades menores
+- `_parse_json_body(model_class)` — parsea el body JSON con un modelo Pydantic, lanza `ValidationError` si los datos no son válidos
 
 ---
 
@@ -268,13 +315,13 @@ Per-domain rate limiter con lock. Espera un mínimo de 2 segundos entre requests
 
 ### `sources/__init__.py` — BaseSource
 
-Clase abstracta que define el contrato de todas las fuentes:
+Clase abstracta que define el contrato de todas las fuentes usando modelos Pydantic (`core/models.py`):
 
 | Método | Retorno | Descripción |
 |--------|---------|-------------|
-| `search(query)` | `list[dict]` | Busca por título → `{id, title, cover}` |
-| `get_details(id)` | `dict` | Portada y sinopsis → `{title, cover, synopsis}` |
-| `get_chapters(id)` | `list[dict]` | Capítulos → `[{number, id}]` |
+| `search(query)` | `list[SearchResult]` | Busca por título |
+| `get_details(id)` | `SeriesDetails` | Portada, sinopsis, tipo, género |
+| `get_chapters(id)` | `list[Chapter]` | Capítulos con `{number, id}` |
 | `download_chapter(id, chapter_id, dest)` | `str` | Descarga un capítulo, devuelve ruta |
 | `get_stream_url(id, chapter_id)` | `str\|None` | URL directa para streaming (solo anime) |
 | `warm_cache()` | `None` | Precarga catálogo en background (opcional) |

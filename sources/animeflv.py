@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 
 from . import BaseSource
 from core.disk_cache import search_cache
+from core.models import Chapter, EpisodeLink, EpisodeLinks, SearchResult, SeriesDetails
 from core.throttle import rate_limiter
 
 logger = logging.getLogger(__name__)
@@ -196,11 +197,7 @@ class AnimeflvSource(BaseSource):
             return 'DUB'
         return 'SUB'
 
-    def _parse_search_results(self, html: str) -> list[dict]:
-        """
-        Parsea resultados de búsqueda desde article.Anime o .ListAnimes li article.
-        Equivalente al parseSearchResultsFromHtml del JS de referencia.
-        """
+    def _parse_search_results(self, html: str) -> list[SearchResult]:
         soup    = BeautifulSoup(html, 'html.parser')
         results = []
 
@@ -225,20 +222,16 @@ class AnimeflvSource(BaseSource):
             slug  = href.rstrip('/').split('/')[-1] or None
             type_ = card.select_one('.Type')
 
-            results.append({
-                'id':    slug,
-                'title': title,
-                'cover': self._resolve_url(image) if image else None,
-                'type':  type_.get_text(strip=True) if type_ else None,
-            })
+            results.append(SearchResult(
+                id=slug,
+                title=title,
+                cover=self._resolve_url(image) if image else None,
+                type=type_.get_text(strip=True) if type_ else None,
+            ))
 
         return results
 
-    def _parse_anime_info(self, html: str) -> dict:
-        """
-        Parsea título, descripción, imagen y géneros de la página de una serie.
-        Equivalente al parseAnimeInfoFromHtml del JS de referencia.
-        """
+    def _parse_anime_info(self, html: str) -> SeriesDetails:
         soup = BeautifulSoup(html, 'html.parser')
 
         title_el = soup.select_one('h1')
@@ -268,13 +261,14 @@ class AnimeflvSource(BaseSource):
         type_el = soup.select_one('.Type')
         type_   = type_el.get_text(strip=True) if type_el else None
 
-        return {
-            'title':    title,
-            'synopsis': synopsis,
-            'image':    image,
-            'genres':   genres,
-            'type':     type_,
-        }
+        return SeriesDetails(
+            title=title or '',
+            synopsis=synopsis,
+            image=image,
+            genres=genres,
+            type=type_,
+            cover=self._resolve_url(image) if image else None,
+        )
 
     def _parse_episodes_from_html(self, html: str, slug: str) -> list[dict]:
         """
@@ -428,11 +422,7 @@ class AnimeflvSource(BaseSource):
     # API pública
     # -----------------------------------------------------------------------
 
-    def search(self, query: str) -> list:
-        """
-        Busca animes por query en /browse?q=...
-        Devuelve lista de { id, title, cover, type }.
-        """
+    def search(self, query: str) -> list[SearchResult]:
         encoded = requests.utils.quote(query)
         url     = f"{self.BASE_URL}/browse?q={encoded}"
         try:
@@ -448,54 +438,28 @@ class AnimeflvSource(BaseSource):
 
         return results
 
-    def get_details(self, content_id: str) -> dict:
-        """
-        Devuelve detalles de una serie: title, cover, synopsis, type,
-        total_episodes, genres.
-        content_id es el slug (ej. 'shingeki-no-kyojin').
-        """
-        fallback = {
-            'title':          content_id,
-            'cover':          None,
-            'synopsis':       '',
-            'type':           None,
-            'total_episodes': None,
-            'genres':         [],
-        }
+    def get_details(self, content_id: str) -> SeriesDetails:
         url = f"{self.BASE_URL}/anime/{content_id}"
         try:
             html = self._get(url).text
         except Exception as exc:
             logger.error(f"Animeflv get_details error para '{content_id}': {exc}")
-            return fallback
+            return SeriesDetails(title=content_id)
 
         info     = self._parse_anime_info(html)
         episodes = self._parse_episodes_from_html(html, content_id)
         if not episodes:
             episodes = self._parse_episodes_from_script(html, content_id)
 
-        cover = self._resolve_url(info['image']) if info.get('image') else None
+        info.total_episodes = len(episodes) if episodes else None
+        info.title = info.title or content_id
+        return info
 
-        return {
-            'title':          info['title'] or content_id,
-            'cover':          cover,
-            'synopsis':       info['synopsis'],
-            'type':           info['type'],
-            'total_episodes': len(episodes) if episodes else None,
-            'genres':         info['genres'],
-        }
-
-    def get_chapters(self, content_id: str) -> list:
-        """
-        Devuelve la lista de capítulos de una serie.
-        Intenta primero parsear links /ver/ en el HTML,
-        luego cae en var episodes del script.
-        Resultado cacheado con disk_cache.
-        """
+    def get_chapters(self, content_id: str) -> list[Chapter]:
         cache_key = f"animeflv:chapters:{content_id}"
         cached    = search_cache.get(cache_key)
         if cached is not None:
-            return cached
+            return [Chapter(**c) if isinstance(c, dict) else c for c in cached]
 
         url = f"{self.BASE_URL}/anime/{content_id}"
         try:
@@ -514,14 +478,13 @@ class AnimeflvSource(BaseSource):
             logger.error(f"Animeflv: no se encontraron episodios para '{content_id}'")
             return []
 
-        # Normalizar al formato { number, id } que espera el resto de la app
         chapters = [
-            {'number': str(ep['number']), 'id': str(ep['id'])}
+            Chapter(number=str(ep['number']), id=str(ep['id']))
             for ep in sorted(episodes, key=lambda e: e['number'])
         ]
 
         logger.info(f"Animeflv: {len(chapters)} capítulos para '{content_id}'")
-        search_cache.set(cache_key, chapters)
+        search_cache.set(cache_key, [c.model_dump() for c in chapters])
         return chapters
 
     def download_chapter(self, content_id: str, chapter_id: str, dest_folder: str) -> str:
@@ -588,31 +551,19 @@ class AnimeflvSource(BaseSource):
 
         return self._best_stream_url(html)
 
-    def get_episode_links(self, content_id: str, chapter_id: str) -> dict:
-        """
-        Devuelve todos los links de stream y descarga del episodio,
-        separados por variante (SUB / DUB).
-
-        Estructura de retorno:
-        {
-            'stream':   { 'SUB': [...], 'DUB': [...] },
-            'download': { 'SUB': [...], 'DUB': [...] },
-        }
-        Cada entry: { 'server': str, 'url': str }
-        """
+    def get_episode_links(self, content_id: str, chapter_id: str) -> EpisodeLinks:
         cap_url = f"{self.BASE_URL}/ver/{content_id}-{chapter_id}"
         try:
             html = self._get(cap_url).text
         except Exception as exc:
             logger.error(f"Animeflv get_episode_links error: {exc}")
-            return {'stream': {'SUB': [], 'DUB': []}, 'download': {'SUB': [], 'DUB': []}}
+            return EpisodeLinks()
 
         stream_links   = {'SUB': [], 'DUB': []}
         download_links = {'SUB': [], 'DUB': []}
         seen_stream    = set()
         seen_download  = set()
 
-        # --- Stream: var videos = { SUB: [...], latino: [...] }
         video_sources = self._parse_video_sources(html)
         if video_sources:
             for key, entries in video_sources.items():
@@ -631,25 +582,21 @@ class AnimeflvSource(BaseSource):
                     server = entry.get('title') or entry.get('server') or 'Unknown'
                     if url and url not in seen_stream:
                         seen_stream.add(url)
-                        stream_links[variant].append({'server': server, 'url': url})
+                        stream_links[variant].append(EpisodeLink(server=server, url=url))
 
-        # --- Download: tabla de descargas en el HTML
         for row in self._parse_download_rows(html):
             variant = self._normalize_variant(row.get('variant'))
             url     = row.get('url')
             server  = row.get('server') or 'Download'
             if url and url not in seen_download:
                 seen_download.add(url)
-                download_links[variant].append({
-                    'server': server,
-                    'url':    url,
-                    'format': row.get('format'),
-                })
+                download_links[variant].append(EpisodeLink(
+                    server=server,
+                    url=url,
+                    format=row.get('format'),
+                ))
 
-        return {
-            'stream':   stream_links,
-            'download': download_links,
-        }
+        return EpisodeLinks(stream=stream_links, download=download_links)
 
     # -----------------------------------------------------------------------
     # Helpers internos

@@ -11,6 +11,7 @@ import requests
 
 from config import ANIME_DOWNLOAD_DIR, MANGA_DOWNLOAD_DIR
 from core.database import update_queue_status
+from core.models import DownloadJob
 from core.sources import get_source
 from core.utils import normalize_title, _invalidate_scan_cache
 
@@ -22,8 +23,7 @@ logger = logging.getLogger(__name__)
 
 download_queue: Queue = Queue()
 
-# dict en lugar de lista: O(1) para agregar/quitar, sin búsqueda lineal
-_active_jobs: dict[int, dict] = {}
+_active_jobs: dict[int, DownloadJob] = {}
 _active_jobs_lock = threading.Lock()
 
 # Leer de config si existe, sino usar 3 por defecto
@@ -53,8 +53,8 @@ def _save_series_metadata(series_folder: str, title: str, source_name: str,
 
     try:
         details   = source.get_details(content_id)
-        final_title = details.get('title', title)
-        cover_url = details.get('cover', '')
+        final_title = details.title or title
+        cover_url = details.cover or ''
 
         if cover_url:
             ext = cover_url.split('.')[-1].split('?')[0].lower()
@@ -101,27 +101,21 @@ def _save_series_metadata(series_folder: str, title: str, source_name: str,
 
 def _resolve_chapters(source, content_id: str, chapter_id: str | None,
                        excluded: list[int] | None = None) -> tuple[list, int]:
-    """
-    Llama a get_chapters UNA sola vez y devuelve (chapters_a_descargar, total).
-    Lanza Exception si no hay capítulos válidos.
-    """
     all_chapters = source.get_chapters(content_id)
 
     if chapter_id is not None:
-        # Capítulo individual
-        target = next((ch for ch in all_chapters if str(ch['id']) == str(chapter_id)), None)
+        target = next((ch for ch in all_chapters if ch.id == chapter_id), None)
         if not target:
             raise Exception(f"Capítulo {chapter_id} no encontrado")
         logger.debug(f"Capítulo individual resuelto: {target}")
         return [target], 1
 
-    # Serie completa
     if not all_chapters:
         raise Exception("No hay capítulos disponibles")
 
     if excluded is not None:
         original = len(all_chapters)
-        all_chapters = [ch for ch in all_chapters if int(ch['number']) not in excluded]
+        all_chapters = [ch for ch in all_chapters if int(ch.number) not in excluded]
         if not all_chapters:
             raise Exception("Todos los capítulos están excluidos (ya vistos localmente)")
         logger.info(f"Excluidos {original - len(all_chapters)} capítulos ya vistos")
@@ -138,17 +132,17 @@ def _download_worker(worker_id: int) -> None:
     logger.info(f"Worker {worker_id} listo")
 
     while True:
-        job = download_queue.get()
+        job: DownloadJob = download_queue.get()
 
         with _active_jobs_lock:
-            _active_jobs[job['id']] = job
+            _active_jobs[job.id] = job
 
-        job_id      = job['id']
-        content_ref = job['content_ref']
-        content_type = job['type']
-        title       = job['title']
-        chapter_id  = job.get('chapter_id')          # None → serie completa
-        excluded    = job.get('excluded_chapters', [])
+        job_id      = job.id
+        content_ref = job.content_ref
+        content_type = job.type
+        title       = job.title
+        chapter_id  = job.chapter_id          # None → serie completa
+        excluded    = job.excluded_chapters
 
         source_name, content_id = content_ref.split(':', 1)
         source = get_source(content_type, source_name)
@@ -174,10 +168,10 @@ def _download_worker(worker_id: int) -> None:
                                   content_id, content_type, source)
 
             # ── 4. Bucle de descarga ─────────────────────────────────────────
-            _PROGRESS_EVERY = 5   # actualizar BD cada N capítulos (reduce I/O ~80%)
+            _PROGRESS_EVERY = 5
             for idx, chapter in enumerate(chapters, start=1):
-                chap_num = chapter['number']
-                chap_id  = chapter['id']
+                chap_num = chapter.number
+                chap_id  = chapter.id
 
                 try:
                     source.download_chapter(content_id, chap_id, series_folder)
@@ -236,6 +230,5 @@ def start_workers(n: int = NUM_WORKERS) -> None:
 
 
 def get_active_jobs() -> list[dict]:
-    """Devuelve una copia de los jobs actualmente en proceso."""
     with _active_jobs_lock:
-        return list(_active_jobs.values())
+        return [j.model_dump() for j in _active_jobs.values()]

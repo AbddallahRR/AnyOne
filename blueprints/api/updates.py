@@ -52,7 +52,7 @@ def _check_series_for_new_chapters(content_ref: str) -> dict:
             return {'content_ref': content_ref, 'new_chapters': [], 'error': f"Fuente '{source_name}' no disponible"}
 
         remote_chapters = src.get_chapters(content_id)
-        remote_nums     = {int(float(ch['number'])) for ch in remote_chapters}
+        remote_nums     = {int(float(ch.number)) for ch in remote_chapters}
 
         if content_type == 'anime':
             local_list = _local_chapters_anime(local_dir)
@@ -62,7 +62,7 @@ def _check_series_for_new_chapters(content_ref: str) -> dict:
 
         new_nums = sorted(remote_nums - local_nums)
 
-        remote_by_num = {int(float(ch['number'])): ch['id'] for ch in remote_chapters}
+        remote_by_num = {int(float(ch.number)): ch.id for ch in remote_chapters}
         new_chapter_ids = [remote_by_num[n] for n in new_nums if n in remote_by_num]
 
         mark_series_checked(content_ref)

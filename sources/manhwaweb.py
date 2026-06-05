@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup
 
 from . import BaseSource
 from core.disk_cache import search_cache
+from core.models import Chapter, SearchResult, SeriesDetails
 from core.throttle import rate_limiter
 
 logger = logging.getLogger(__name__)
@@ -309,7 +310,7 @@ class ManhwawebSource(BaseSource):
         logger.info(f"ManhwaWeb: catálogo descargado con {len(results)} series")
         return results
 
-    def search(self, query: str) -> list:
+    def search(self, query: str) -> list[SearchResult]:
         """
         Busca en el catálogo cacheados si está disponible.
         Si no hay catálogo en caché, hace una búsqueda por scraping directa
@@ -321,14 +322,14 @@ class ManhwawebSource(BaseSource):
         if catalog is not None:
             self._refresh_catalog_background()
             q = query.lower()
-            return [r for r in catalog if q in r['title'].lower() or q in r['id'].lower()]
+            return [SearchResult(id=r['id'], title=r['title'], cover=r.get('cover', '')) for r in catalog if q in r['title'].lower() or q in r['id'].lower()]
 
         # Sin catálogo en caché: búsqueda rápida por scraping + precarga en background
         logger.info("ManhwaWeb: sin catálogo en caché, usando búsqueda directa")
         self.warm_cache()
         return self._search_scrape(query)
     
-    def _search_scrape(self, query: str) -> list:
+    def _search_scrape(self, query: str) -> list[SearchResult]:
         """Búsqueda mediante scraping de la página web (fallback cuando API falla)."""
         url = f"{self.BASE_URL}/?s={requests.utils.quote(query)}"
         try:
@@ -355,18 +356,18 @@ class ManhwawebSource(BaseSource):
                 cover = img['src']
                 if cover.startswith('//'):
                     cover = 'https:' + cover
-            results.append({'id': content_id, 'title': title, 'cover': cover})
+            results.append(SearchResult(id=content_id, title=title, cover=cover))
         return results
 
     # -----------------------------------------------------------------------
     # Detalles
     # -----------------------------------------------------------------------
 
-    def get_details(self, content_id: str) -> dict:
+    def get_details(self, content_id: str) -> SeriesDetails:
         cache_key = f"manhwaweb:details:{content_id}"
         cached    = search_cache.get(cache_key)
         if cached is not None:
-            return cached
+            return SeriesDetails(**cached)
 
         result = None
         try:
@@ -376,24 +377,24 @@ class ManhwawebSource(BaseSource):
             cover    = data.get('_imagen', '')
             if cover and cover.startswith('//'):
                 cover = 'https:' + cover
-            result = {'title': title, 'cover': cover,
-                      'synopsis': data.get('_sinopsis', '')}
+            result = SeriesDetails(title=title, cover=cover,
+                      synopsis=data.get('_sinopsis', ''))
         except Exception as exc:
             logger.warning(f"ManhwaWeb: API get_details falló para '{content_id}': {exc}, "
                            f"usando scraping")
             result = self._get_details_scrape(content_id)
 
         if result:
-            search_cache.set(cache_key, result)
-        return result or {'title': content_id, 'cover': '', 'synopsis': ''}
+            search_cache.set(cache_key, result.model_dump() if isinstance(result, SeriesDetails) else result)
+        return result or SeriesDetails(title=content_id)
 
-    def _get_details_scrape(self, content_id: str) -> dict:
+    def _get_details_scrape(self, content_id: str) -> SeriesDetails:
         url = f"{self.BASE_URL}/manhwa/{content_id}"
         try:
             soup = BeautifulSoup(self._get(url).text, 'html.parser')
         except Exception as exc:
             logger.error(f"ManhwaWeb: error scraping detalles para '{content_id}': {exc}")
-            return {'title': content_id, 'cover': '', 'synopsis': ''}
+            return SeriesDetails(title=content_id)
 
         title = content_id
         h2    = soup.find('h2')
@@ -413,17 +414,17 @@ class ManhwawebSource(BaseSource):
         if desc:
             synopsis = desc.get_text(strip=True)
 
-        return {'title': title, 'cover': cover, 'synopsis': synopsis}
+        return SeriesDetails(title=title, cover=cover, synopsis=synopsis)
 
     # -----------------------------------------------------------------------
     # Capítulos
     # -----------------------------------------------------------------------
 
-    def get_chapters(self, content_id: str) -> list:
+    def get_chapters(self, content_id: str) -> list[Chapter]:
         cache_key = f"manhwaweb:chapters:{content_id}"
         cached    = search_cache.get(cache_key)
         if cached is not None:
-            return cached
+            return [Chapter(**c) for c in cached]
 
         try:
             data     = self._get_json(f"{self.API_BASE}/manhwa/see/{content_id}")
@@ -435,7 +436,7 @@ class ManhwawebSource(BaseSource):
             chapters = self._dedup_sort_chapters(chapters)
             if chapters:
                 search_cache.set(cache_key, chapters)
-            return chapters
+            return [Chapter(**c) for c in chapters]
         except Exception as exc:
             logger.warning(f"ManhwaWeb: API chapters falló para '{content_id}': {exc}, "
                            f"usando scraping")
@@ -443,7 +444,7 @@ class ManhwawebSource(BaseSource):
         chapters = self._get_chapters_scrape(content_id)
         if chapters:
             search_cache.set(cache_key, chapters)
-        return chapters
+        return [Chapter(**c) for c in chapters]
 
     def _get_chapters_scrape(self, content_id: str) -> list:
         url = f"{self.BASE_URL}/manhwa/{content_id}"

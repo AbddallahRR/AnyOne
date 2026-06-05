@@ -3,8 +3,9 @@
 
 import threading
 
-from flask import Flask
+from flask import Flask, jsonify
 from flask_cors import CORS
+from pydantic import ValidationError
 
 import config
 from core.database import init_db, cleanup_download_queue
@@ -69,6 +70,15 @@ def create_app():
     app = Flask(__name__, static_folder='static')
     app.config.from_object(config)
     CORS(app)  # Restringir origins en producción
+
+    @app.errorhandler(ValidationError)
+    def handle_validation_error(exc: ValidationError):
+        details = exc.errors(include_input=False)
+        for d in details:
+            ctx = d.get('ctx')
+            if ctx:
+                d['ctx'] = {k: str(v) if not isinstance(v, (str, int, float, bool, type(None))) else v for k, v in ctx.items()}
+        return jsonify({'error': 'Datos inválidos', 'details': details}), 400
 
     # Inicializar base de datos y limpiar cola
     init_db()

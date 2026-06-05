@@ -1,21 +1,24 @@
+from core.models import Chapter, SearchResult, SeriesDetails
+
+
 class BaseSource:
     """Clase base para todas las fuentes (anime y manga)."""
 
-    def search(self, query: str) -> list:
+    def search(self, query: str) -> list[SearchResult]:
         """Busca contenido por título.
-        Retorna lista de dicts con: {'id': str, 'title': str, 'cover': str}
+        Retorna lista de SearchResult.
         """
         raise NotImplementedError
 
-    def get_details(self, content_id: str) -> dict:
+    def get_details(self, content_id: str) -> SeriesDetails:
         """Obtiene detalles de un contenido.
-        Retorna dict con: {'title': str, 'cover': str, 'synopsis': str}
+        Retorna SeriesDetails.
         """
         raise NotImplementedError
 
-    def get_chapters(self, content_id: str) -> list:
+    def get_chapters(self, content_id: str) -> list[Chapter]:
         """Obtiene lista de capítulos.
-        Retorna lista de dicts: [{'number': str, 'id': str}, ...]
+        Retorna lista de Chapter.
         """
         raise NotImplementedError
 

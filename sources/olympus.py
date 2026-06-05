@@ -15,6 +15,7 @@ from bs4 import BeautifulSoup
 
 from . import BaseSource
 from core.disk_cache import search_cache
+from core.models import Chapter, SearchResult, SeriesDetails
 from core.throttle import rate_limiter
 
 logger = logging.getLogger(__name__)
@@ -244,13 +245,13 @@ class OlympusSource(BaseSource):
         logger.info(f"Olympus: catálogo descargado con {len(results)} series")
         return results
 
-    def search(self, query: str) -> list:
+    def search(self, query: str) -> list[SearchResult]:
         cache_key = "olympus:catalog"
         catalog   = search_cache.get(cache_key)
         if catalog is not None:
             self._refresh_catalog_background()
             q = query.lower()
-            return [r for r in catalog if q in r['title'].lower() or q in r['id'].lower()]
+            return [SearchResult(id=r['id'], title=r['title'], cover=r.get('cover', '')) for r in catalog if q in r['title'].lower() or q in r['id'].lower()]
 
         # Sin catálogo: lo precargamos en background y mientras tanto
         # devolvemos la primera página filtrada por query si la API lo soporta
@@ -264,11 +265,11 @@ class OlympusSource(BaseSource):
             )
             series = data.get('data', {}).get('series', {}).get('data', [])
             q = query.lower()
-            return [{
-                'id': s['slug'],
-                'title': s.get('name', s['slug']),
-                'cover': s.get('cover', ''),
-            } for s in series if s.get('slug') and (
+            return [SearchResult(
+                id=s['slug'],
+                title=s.get('name', s['slug']),
+                cover=s.get('cover', ''),
+            ) for s in series if s.get('slug') and (
                 q in s.get('name', '').lower() or q in s['slug'].lower()
             )]
         except Exception:
@@ -278,35 +279,35 @@ class OlympusSource(BaseSource):
     # Detalles
     # -----------------------------------------------------------------------
 
-    def get_details(self, content_id: str) -> dict:
+    def get_details(self, content_id: str) -> SeriesDetails:
         cache_key = f"olympus:details:{content_id}"
         cached    = search_cache.get(cache_key)
         if cached is not None:
-            return cached
+            return SeriesDetails(**cached)
 
         url = f"{self.API_BASE}/series/{self._api_slug(content_id)}"
         try:
             data     = self._get_json(url).get('data', {})
-            result   = {
-                'title':    data.get('name', content_id),
-                'cover':    data.get('cover', ''),
-                'synopsis': data.get('synopsis', ''),
-            }
-            search_cache.set(cache_key, result)
+            result   = SeriesDetails(
+                title=data.get('name', content_id),
+                cover=data.get('cover', ''),
+                synopsis=data.get('synopsis', ''),
+            )
+            search_cache.set(cache_key, result.model_dump())
             return result
         except Exception as exc:
             logger.error(f"Olympus: error obteniendo detalles de '{content_id}': {exc}")
-            return {'title': content_id, 'cover': '', 'synopsis': ''}
+            return SeriesDetails(title=content_id)
 
     # -----------------------------------------------------------------------
     # Capítulos
     # -----------------------------------------------------------------------
 
-    def get_chapters(self, content_id: str) -> list:
+    def get_chapters(self, content_id: str) -> list[Chapter]:
         cache_key = f"olympus:chapters:{content_id}"
         cached    = search_cache.get(cache_key)
         if cached is not None:
-            return cached
+            return [Chapter(**c) for c in cached]
 
         api_slug = self._api_slug(content_id)
         chapters: list[dict] = []
@@ -343,7 +344,7 @@ class OlympusSource(BaseSource):
         else:
             logger.warning(f"Olympus: sin capítulos para '{content_id}' (¿error de red?)")
 
-        return chapters
+        return [Chapter(**c) for c in chapters]
 
     # -----------------------------------------------------------------------
     # Descarga de capítulo

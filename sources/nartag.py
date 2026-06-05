@@ -14,6 +14,7 @@ from bs4 import BeautifulSoup
 
 from . import BaseSource
 from core.disk_cache import search_cache
+from core.models import Chapter, SearchResult, SeriesDetails
 from core.throttle import rate_limiter
 
 logger = logging.getLogger(__name__)
@@ -229,11 +230,11 @@ class NartagSource(BaseSource):
     # Búsqueda
     # -----------------------------------------------------------------------
 
-    def search(self, query: str) -> list:
+    def search(self, query: str) -> list[SearchResult]:
         cache_key = f"nartag:search:{query}"
         cached    = search_cache.get(cache_key)
         if cached is not None:
-            return cached
+            return [SearchResult(**r) if isinstance(r, dict) else r for r in cached]
 
         encoded = requests.utils.quote(query)
         url     = f"{self.BASE_URL}/?s={encoded}&post_type=wp-manga"
@@ -260,10 +261,10 @@ class NartagSource(BaseSource):
             seen.add(slug)
             title = a.get('title', '') or slug.replace('-', ' ').title()
             cover = self._best_cover_url(thumb.find('img'), self.BASE_URL)
-            results.append({'id': slug, 'title': title, 'cover': cover})
+            results.append(SearchResult(id=slug, title=title, cover=cover))
 
         if results:
-            search_cache.set(cache_key, results)
+            search_cache.set(cache_key, [r.model_dump() for r in results])
         else:
             logger.warning(
                 f"Nartag: búsqueda '{query}' devolvió 0 resultados — no se cachea"
@@ -275,18 +276,18 @@ class NartagSource(BaseSource):
     # Detalles
     # -----------------------------------------------------------------------
 
-    def get_details(self, content_id: str) -> dict:
+    def get_details(self, content_id: str) -> SeriesDetails:
         cache_key = f"nartag:details:{content_id}"
         cached    = search_cache.get(cache_key)
         if cached is not None:
-            return cached
+            return SeriesDetails(**cached)
 
         url = f"{self.BASE_URL}/manga/{content_id}/"
         try:
             soup = BeautifulSoup(self._get(url).text, 'html.parser')
         except Exception as exc:
             logger.error(f"Nartag: error obteniendo detalles para '{content_id}': {exc}")
-            return {'title': content_id, 'cover': '', 'synopsis': ''}
+            return SeriesDetails(title=content_id)
 
         title     = content_id
         title_tag = soup.find('h1')
@@ -311,19 +312,19 @@ class NartagSource(BaseSource):
         if summary_div:
             synopsis = summary_div.get_text(strip=True)
 
-        result = {'title': title, 'cover': cover, 'synopsis': synopsis}
-        search_cache.set(cache_key, result)
+        result = SeriesDetails(title=title, cover=cover, synopsis=synopsis)
+        search_cache.set(cache_key, result.model_dump())
         return result
 
     # -----------------------------------------------------------------------
     # Capítulos — via AJAX POST
     # -----------------------------------------------------------------------
 
-    def get_chapters(self, content_id: str) -> list:
+    def get_chapters(self, content_id: str) -> list[Chapter]:
         cache_key = f"nartag:chapters:{content_id}"
         cached    = search_cache.get(cache_key)
         if cached is not None:
-            return cached
+            return [Chapter(**c) for c in cached]
 
         ajax_url = f"{self.BASE_URL}/manga/{content_id}/ajax/chapters/"
         headers  = {
@@ -367,7 +368,7 @@ class NartagSource(BaseSource):
             chapters.append({'number': number, 'id': slug})
 
         search_cache.set(cache_key, chapters)
-        return chapters
+        return [Chapter(**c) for c in chapters]
 
     # -----------------------------------------------------------------------
     # Descarga de capítulo

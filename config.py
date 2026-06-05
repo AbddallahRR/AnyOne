@@ -4,26 +4,24 @@
 import os
 from pathlib import Path
 
+from core.settings import settings
+
 # Directorio base de descargas
-BASE_DOWNLOAD_DIR = os.environ.get('BASE_DOWNLOAD_DIR', os.path.expanduser('~/DescargasComics'))
-ANIME_DOWNLOAD_DIR = os.path.join(BASE_DOWNLOAD_DIR, 'Anime')
-MANGA_DOWNLOAD_DIR = os.path.join(BASE_DOWNLOAD_DIR, 'Manga')
+BASE_DOWNLOAD_DIR = str(settings.base_download_dir)
+ANIME_DOWNLOAD_DIR = str(settings.anime_download_dir)
+MANGA_DOWNLOAD_DIR = str(settings.manga_download_dir)
 
 # Crear directorios si no existen
 os.makedirs(ANIME_DOWNLOAD_DIR, exist_ok=True)
 os.makedirs(MANGA_DOWNLOAD_DIR, exist_ok=True)
 
 # Base de datos SQLite
-DB_DIR = os.environ.get('DB_DIR', os.path.expanduser('~/.config/comic_web'))
-DB_PATH = os.path.join(DB_DIR, 'history.db')
+DB_DIR = str(settings.db_dir)
+DB_PATH = str(settings.db_path)
 os.makedirs(DB_DIR, exist_ok=True)
 
 # Configuración de Flask
-SECRET_KEY = os.environ.get('SECRET_KEY')
-if not SECRET_KEY:
-    import warnings
-    warnings.warn("SECRET_KEY no configurado. Usando clave insegura para desarrollo. Configura la variable de entorno SECRET_KEY en producción.")
-    SECRET_KEY = 'insecure-dev-key-change-in-production'
-DEBUG = os.environ.get('DEBUG', 'False').lower() in ('true', '1', 'yes')
-HOST = '0.0.0.0'
-PORT = 5000
+SECRET_KEY = settings.secret_key
+DEBUG = settings.debug
+HOST = settings.host
+PORT = settings.port

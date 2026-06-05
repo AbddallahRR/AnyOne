@@ -10,8 +10,12 @@ import threading
 from pathlib import Path
 
 from flask import abort, jsonify, request
+from pydantic import BaseModel, ValidationError
+from typing import TypeVar
 
 from config import ANIME_DOWNLOAD_DIR, MANGA_DOWNLOAD_DIR
+
+M = TypeVar('M', bound=BaseModel)
 from core.database import (
     get_conn,
     get_progress,
@@ -86,6 +90,11 @@ def _base_folder(content_type: str) -> str:
 
 def _get_json() -> dict:
     return request.get_json(silent=True) or {}
+
+
+def _parse_json_body(model_class: type[M]) -> M:
+    data = _get_json()
+    return model_class(**data)
 
 
 def _require_local(content_ref: str):

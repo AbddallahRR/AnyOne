@@ -36,8 +36,8 @@ def api_content_details(content_type, source, content_id):
     try:
         details = src.get_details(content_id)
         save_content_to_db(content_type, source, content_id,
-                           details['title'], details.get('cover', ''))
-        return jsonify(details)
+                           details.title, details.cover or '')
+        return jsonify(details.model_dump())
     except Exception as exc:
         logger.exception("Error en api_content_details:")
         return jsonify({'error': str(exc)}), 500
@@ -49,7 +49,8 @@ def api_chapters(content_type, source, content_id):
     if not src:
         return jsonify({'error': 'Fuente no encontrada'}), 404
     try:
-        return jsonify(src.get_chapters(content_id))
+        chapters = src.get_chapters(content_id)
+        return jsonify([c.model_dump() for c in chapters])
     except Exception as exc:
         logger.exception("Error en api_chapters:")
         return jsonify({'error': str(exc)}), 500
@@ -74,12 +75,12 @@ def api_chapters_with_local(type, source, id):
         result = []
         for ch in remote_chapters:
             try:
-                num = int(float(ch['number']))
+                num = int(float(ch.number))
             except (TypeError, ValueError):
                 num = None
             result.append({
-                'number':        ch['number'],
-                'id':            ch['id'],
+                'number':        ch.number,
+                'id':            ch.id,
                 'is_downloaded': (num in local_chapters) if num is not None else False,
             })
         return jsonify(result)

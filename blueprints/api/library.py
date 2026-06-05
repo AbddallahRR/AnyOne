@@ -22,9 +22,17 @@ from core.database import (
     get_series_with_updates,
     clear_series_updates,
 )
+from core.models import (
+    AcknowledgeUpdatesRequest,
+    DeleteChapterRequest,
+    DeleteWatchedRequest,
+    ProgressRequest,
+    StatusUpdateRequest,
+    WatchedToggleRequest,
+)
 from core.utils import scan_downloaded_series
 from .common import (
-    _get_json,
+    _parse_json_body,
     _require_local,
     _base_folder,
     _delete_chapter_files,
@@ -59,15 +67,9 @@ def api_get_series_status(content_ref):
 
 @api_bp.route('/library/status', methods=['POST'])
 def api_set_series_status():
-    data        = _get_json()
-    content_ref = data.get('content_ref')
-    status      = data.get('status', 'none')
-    if not content_ref:
-        return jsonify({'error': 'Falta content_ref'}), 400
-    if status not in ('watching', 'completed', 'pending', 'none'):
-        return jsonify({'error': f"Estado inválido: {status}"}), 400
-    set_series_status(content_ref, status)
-    return jsonify({'status': status})
+    data = _parse_json_body(StatusUpdateRequest)
+    set_series_status(data.content_ref, data.status)
+    return jsonify({'status': data.status})
 
 
 # ---------------------------------------------------------------------------
@@ -81,10 +83,8 @@ def api_progress(content_type, source, content_id):
         chapter, progress = get_progress(ref)
         return jsonify({'chapter': chapter, 'progress': progress})
 
-    data     = _get_json()
-    chapter  = data.get('chapter', '1')
-    progress = data.get('progress', '0')
-    save_progress(ref, chapter, progress)
+    data = _parse_json_body(ProgressRequest)
+    save_progress(ref, data.chapter, data.progress)
     return jsonify({'status': 'ok'})
 
 
@@ -95,10 +95,8 @@ def api_local_progress(type, id):
         chapter, progress = get_progress(ref)
         return jsonify({'chapter': chapter, 'progress': progress})
 
-    data     = _get_json()
-    chapter  = data.get('chapter', '1')
-    progress = data.get('progress', '0')
-    save_progress(ref, chapter, progress)
+    data = _parse_json_body(ProgressRequest)
+    save_progress(ref, data.chapter, data.progress)
     return jsonify({'status': 'ok'})
 
 
@@ -108,12 +106,8 @@ def api_local_progress(type, id):
 
 @api_bp.route('/watched', methods=['POST'])
 def api_mark_watched():
-    data        = _get_json()
-    content_ref = data.get('content_ref')
-    chapter     = data.get('chapter')
-    if not content_ref or chapter is None:
-        return jsonify({'error': 'Faltan parámetros'}), 400
-    mark_chapter_as_watched(content_ref, chapter)
+    data = _parse_json_body(WatchedToggleRequest)
+    mark_chapter_as_watched(data.content_ref, data.chapter)
     return jsonify({'status': 'ok'})
 
 
@@ -124,37 +118,29 @@ def api_get_watched(content_ref):
 
 @api_bp.route('/watched/toggle', methods=['POST'])
 def api_toggle_watched():
-    data        = _get_json()
-    content_ref = data.get('content_ref')
-    chapter     = data.get('chapter')
-    if not content_ref or chapter is None:
-        return jsonify({'error': 'Faltan parámetros'}), 400
+    data = _parse_json_body(WatchedToggleRequest)
 
-    if is_chapter_watched(content_ref, chapter):
-        delete_watched_chapter(content_ref, chapter)
+    if is_chapter_watched(data.content_ref, data.chapter):
+        delete_watched_chapter(data.content_ref, data.chapter)
         return jsonify({'status': 'unwatched'})
-    mark_chapter_as_watched(content_ref, chapter)
+    mark_chapter_as_watched(data.content_ref, data.chapter)
     return jsonify({'status': 'watched'})
 
 
 @api_bp.route('/delete-watched', methods=['POST'])
 def api_delete_watched():
-    data         = _get_json()
-    content_ref  = data.get('content_ref')
-    content_type = data.get('type')
-    if not content_ref or not content_type:
-        return jsonify({'error': 'Faltan parámetros'}), 400
-    _require_local(content_ref)
+    data = _parse_json_body(DeleteWatchedRequest)
+    _require_local(data.content_ref)
 
-    last_chapter_str, _ = get_progress(content_ref)
+    last_chapter_str, _ = get_progress(data.content_ref)
     last_chapter = int(last_chapter_str) if last_chapter_str else 0
 
-    watched = get_watched_chapters(content_ref)
+    watched = get_watched_chapters(data.content_ref)
     if not watched:
         return jsonify({'message': 'No hay capítulos vistos para borrar'})
 
-    folder_name = content_ref[6:]
-    serie_path  = Path(_base_folder(content_type)) / folder_name
+    folder_name = data.content_ref[6:]
+    serie_path  = Path(_base_folder(data.type)) / folder_name
     if not serie_path.exists():
         return jsonify({'error': 'Carpeta no encontrada'}), 404
 
@@ -163,44 +149,34 @@ def api_delete_watched():
         if chap == last_chapter:
             continue
         try:
-            _delete_chapter_files(serie_path, content_type, chap)
-            delete_watched_chapter(content_ref, chap)
+            _delete_chapter_files(serie_path, data.type, chap)
+            delete_watched_chapter(data.content_ref, chap)
             deleted.append(chap)
         except Exception as exc:
-            logger.error(f"Error borrando capítulo {chap} de '{content_ref}': {exc}")
+            logger.error(f"Error borrando capítulo {chap} de '{data.content_ref}': {exc}")
 
     return jsonify({'deleted': deleted, 'message': f'Se eliminaron {len(deleted)} capítulos vistos'})
 
 
 @api_bp.route('/delete-chapter', methods=['POST'])
 def api_delete_chapter():
-    data         = _get_json()
-    content_ref  = data.get('content_ref')
-    content_type = data.get('type')
-    chapter_str  = data.get('chapter')
+    data = _parse_json_body(DeleteChapterRequest)
+    _require_local(data.content_ref)
 
-    if not content_ref or not content_type or chapter_str is None:
-        return jsonify({'error': 'Faltan parámetros'}), 400
-    try:
-        chapter = int(chapter_str)
-    except (TypeError, ValueError):
-        return jsonify({'error': 'Capítulo inválido'}), 400
-    _require_local(content_ref)
-
-    folder_name = content_ref[6:]
-    serie_path  = Path(_base_folder(content_type)) / folder_name
+    folder_name = data.content_ref[6:]
+    serie_path  = Path(_base_folder(data.type)) / folder_name
     if not serie_path.exists():
         return jsonify({'error': 'Carpeta no encontrada'}), 404
 
     try:
-        _delete_chapter_files(serie_path, content_type, chapter)
+        _delete_chapter_files(serie_path, data.type, data.chapter)
     except Exception as exc:
         return jsonify({'error': f'Error al eliminar archivo: {exc}'}), 500
 
-    last_chapter_str, _ = get_progress(content_ref)
+    last_chapter_str, _ = get_progress(data.content_ref)
     try:
-        if int(last_chapter_str) == chapter:
-            if content_type == 'anime':
+        if int(last_chapter_str) == data.chapter:
+            if data.type == 'anime':
                 remaining = sorted(int(f.stem.split('_')[-1]) for f in serie_path.glob("*.mp4"))
             else:
                 remaining = sorted(
@@ -208,11 +184,11 @@ def api_delete_chapter():
                     if d.is_dir() and d.name.startswith('cap_')
                 )
             new_last = str(max(remaining)) if remaining else '1'
-            save_progress(content_ref, new_last, '0')
+            save_progress(data.content_ref, new_last, '0')
     except Exception as exc:
-        logger.warning(f"No se pudo actualizar progreso tras eliminar capítulo {chapter}: {exc}")
+        logger.warning(f"No se pudo actualizar progreso tras eliminar capítulo {data.chapter}: {exc}")
 
-    return jsonify({'status': 'deleted', 'chapter': chapter})
+    return jsonify({'status': 'deleted', 'chapter': data.chapter})
 
 
 # ---------------------------------------------------------------------------
@@ -243,8 +219,8 @@ def api_library_updates():
 
 @api_bp.route('/library/acknowledge-updates', methods=['POST'])
 def api_acknowledge_updates():
-    data = _get_json()
-    refs = data.get('content_refs') or ([data.get('content_ref')] if data.get('content_ref') else [])
+    data = _parse_json_body(AcknowledgeUpdatesRequest)
+    refs = data.content_refs or ([data.content_ref] if data.content_ref else [])
     if not refs:
         return jsonify({'error': 'Falta content_ref o content_refs'}), 400
     for ref in refs:

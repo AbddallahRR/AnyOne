@@ -14,6 +14,7 @@ from bs4 import BeautifulSoup
 
 from . import BaseSource
 from core.disk_cache import search_cache
+from core.models import Chapter, SearchResult, SeriesDetails
 from core.throttle import rate_limiter
 
 logger = logging.getLogger(__name__)
@@ -323,7 +324,7 @@ class IkigaiSource(BaseSource):
     # API pública
     # -----------------------------------------------------------------------
 
-    def search(self, query: str) -> list:
+    def search(self, query: str) -> list[SearchResult]:
         """
         Búsqueda por substring en título e id.
         El catálogo se sirve desde caché (TTL 3 días).
@@ -342,14 +343,15 @@ class IkigaiSource(BaseSource):
             self._refresh_catalog_background()
 
         q = query.lower()
-        return [r for r in (catalog or [])
+        return [SearchResult(id=r['id'], title=r['title'], cover=r.get('cover', ''))
+                for r in (catalog or [])
                 if q in r['title'].lower() or q in r['id'].lower()]
 
-    def get_details(self, content_id: str) -> dict:
+    def get_details(self, content_id: str) -> SeriesDetails:
         cache_key = f"ikigai:details:{content_id}"
         cached    = search_cache.get(cache_key)
         if cached is not None:
-            return cached
+            return SeriesDetails(**cached)
 
         url  = f"{self.BASE_URL}/series/{content_id}/"
         html = self._fetch_url(url)
@@ -372,15 +374,15 @@ class IkigaiSource(BaseSource):
             if desc_div:
                 synopsis = desc_div.get_text(strip=True)
 
-        result = {'title': title, 'cover': cover, 'synopsis': synopsis}
-        search_cache.set(cache_key, result)
+        result = SeriesDetails(title=title, cover=cover, synopsis=synopsis)
+        search_cache.set(cache_key, result.model_dump())
         return result
 
-    def get_chapters(self, content_id: str) -> list:
+    def get_chapters(self, content_id: str) -> list[Chapter]:
         cache_key = f"ikigai:chapters:{content_id}"
         cached    = search_cache.get(cache_key)
         if cached is not None:
-            return cached
+            return [Chapter(**c) for c in cached]
 
         chapters: list[dict] = []
         page = 1
@@ -446,7 +448,7 @@ class IkigaiSource(BaseSource):
             if x['number'].replace('.', '', 1).isdigit() else 0
         )
         search_cache.set(cache_key, chapters)
-        return chapters
+        return [Chapter(**c) for c in chapters]
 
     def download_chapter(self, content_id: str, chapter_id: str, dest_folder: str) -> str:
         cap_url  = f"{self.BASE_URL}/capitulo/{chapter_id}/"
