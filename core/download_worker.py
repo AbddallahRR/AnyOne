@@ -12,7 +12,7 @@ import requests
 from config import ANIME_DOWNLOAD_DIR, MANGA_DOWNLOAD_DIR
 from core.database import update_queue_status
 from core.sources import get_source
-from core.utils import normalize_title
+from core.utils import normalize_title, _invalidate_scan_cache
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +198,7 @@ def _download_worker(worker_id: int) -> None:
             if not chapter_id:
                 update_queue_status(job_id, status='completed', current_progress=100)
 
-            # Invalidar el índice en memoria para que la nueva serie aparezca
+            # Invalidar índices en memoria para que la nueva serie aparezca
             try:
                 from blueprints.api import _invalidate_series_index
                 from pathlib import Path as _Path
@@ -206,6 +206,7 @@ def _download_worker(worker_id: int) -> None:
                 _invalidate_series_index(base)
             except Exception:
                 pass   # no es crítico
+            _invalidate_scan_cache()
 
             logger.info(f"Job {job_id} completado: '{title}'")
 

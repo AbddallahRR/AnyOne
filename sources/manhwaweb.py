@@ -198,6 +198,11 @@ class ManhwawebSource(BaseSource):
                 catalog = self._fetch_full_catalog()
                 if catalog:
                     search_cache.set("manhwaweb:catalog", catalog, ttl=self._CATALOG_TTL)
+            except RuntimeError as e:
+                if "interpreter shutdown" in str(e):
+                    pass
+                else:
+                    raise
             except Exception as exc:
                 logger.error(f"ManhwaWeb: error en precarga: {exc}")
 
@@ -220,6 +225,10 @@ class ManhwawebSource(BaseSource):
                     search_cache.set("manhwaweb:catalog", catalog, ttl=self._CATALOG_TTL)
                     ManhwawebSource._last_refresh_ts = time.time()
                     logger.info(f"ManhwaWeb: catálogo refrescado ({len(catalog)} series)")
+            except RuntimeError as e:
+                if "interpreter shutdown" in str(e):
+                    return
+                raise
             except Exception as exc:
                 logger.error(f"ManhwaWeb: error en refresco de catálogo: {exc}")
             finally:
@@ -234,7 +243,8 @@ class ManhwawebSource(BaseSource):
     def _fetch_full_catalog(self) -> list[dict]:
         """
         Descarga el catálogo completo paginado desde la API en paralelo.
-        Estrategia: lotes de _PAGE_WORKERS páginas en paralelo.
+        Estrategia: lotes de _PAGE_WORKERS páginas en paralelo,
+        reutilizando un solo ThreadPoolExecutor para todo el ciclo.
         """
         _PAGE_WORKERS = 8
         results:  list[dict] = []
@@ -251,39 +261,47 @@ class ManhwawebSource(BaseSource):
                 return None
 
         page = 0
-        while page < _MAX_PAGES:
-            batch = list(range(page, min(page + _PAGE_WORKERS, _MAX_PAGES)))
-            with ThreadPoolExecutor(max_workers=_PAGE_WORKERS) as pool:
+        pool = ThreadPoolExecutor(max_workers=_PAGE_WORKERS)
+        try:
+            while page < _MAX_PAGES:
+                batch = list(range(page, min(page + _PAGE_WORKERS, _MAX_PAGES)))
                 futures = {pool.submit(_fetch_page, pg): pg for pg in batch}
                 results_map = {}
                 for future in as_completed(futures):
                     pg = futures[future]
-                    results_map[pg] = future.result()
+                    try:
+                        results_map[pg] = future.result()
+                    except RuntimeError as e:
+                        if "interpreter shutdown" in str(e):
+                            return results
+                        raise
 
-            stop = False
-            for pg in sorted(results_map):
-                items = results_map[pg]
-                if items is None:
-                    if not got_first_page:
-                        return []
-                    stop = True
+                stop = False
+                for pg in sorted(results_map):
+                    items = results_map[pg]
+                    if items is None:
+                        if not got_first_page:
+                            return []
+                        stop = True
+                        break
+                    if not items:
+                        stop = True
+                        break
+                    got_first_page = True
+                    for item in items:
+                        _id = item.get('_id')
+                        if not _id or _id in seen_ids:
+                            continue
+                        seen_ids.add(_id)
+                        title = (item.get('the_real_name') or item.get('name_esp')
+                                 or item.get('_name') or _id)
+                        results.append({'id': _id, 'title': title,
+                                        'cover': item.get('_imagen', '')})
+                if stop:
                     break
-                if not items:
-                    stop = True
-                    break
-                got_first_page = True
-                for item in items:
-                    _id = item.get('_id')
-                    if not _id or _id in seen_ids:
-                        continue
-                    seen_ids.add(_id)
-                    title = (item.get('the_real_name') or item.get('name_esp')
-                             or item.get('_name') or _id)
-                    results.append({'id': _id, 'title': title,
-                                    'cover': item.get('_imagen', '')})
-            if stop:
-                break
-            page += _PAGE_WORKERS
+                page += _PAGE_WORKERS
+        finally:
+            pool.shutdown(wait=False)
 
         if page >= _MAX_PAGES:
             logger.warning(f"ManhwaWeb: límite de {_MAX_PAGES} páginas alcanzado en catálogo")

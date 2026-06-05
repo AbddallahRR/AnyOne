@@ -16,7 +16,14 @@ AnyOne/
 │
 ├── blueprints/               → Flask blueprints (rutas)
 │   ├── main.py               →   Rutas HTML (/, /serie, /reader)
-│   └── api.py                →   API REST (/api/*)
+│   └── api/                  →   API REST empaquetada (/api/*)
+│       ├── __init__.py       →   Crea el blueprint y exporta _check_all_updates_core
+│       ├── common.py         →   Helpers compartidos (índice en memoria, cola, fs)
+│       ├── search.py         →   Búsqueda en fuentes (/api/search*)
+│       ├── content.py        →   Detalle, capítulos y reproducción (/api/content, /api/play)
+│       ├── library.py        →   Biblioteca, progreso, etiquetas, vistos
+│       ├── downloads.py      →   Cola de descarga (/api/download, /api/queue)
+│       └── updates.py        →   Comprobación de capítulos nuevos
 │
 ├── core/                     → Lógica compartida
 │   ├── database.py           →   SQLite (migraciones, progreso, cola, etiquetas)
@@ -99,48 +106,80 @@ Sin lógica propia — todo el peso está en el frontend (JS) y la API.
 
 ---
 
-### `blueprints/api.py` — API REST
+### `blueprints/api/` — API REST (paquete)
 
-~1180 líneas. Corazón del backend. Rutas agrupadas por funcionalidad:
+Antes un solo archivo de ~1180 líneas, ahora modularizado en 6 submódulos. Corazón del backend.
 
-**Búsqueda:**
-- `GET /api/search/<type>/<source>?q=...` — busca en una fuente
-- `GET /api/search-all?type=...&q=...` — busca en todas las fuentes del tipo
-- `GET /api/search-all-stream?type=...&q=...` — SSE con resultados progresivos
+---
 
-**Contenido:**
-- `GET /api/details/<type>/<source>/<id>` — portada, sinopsis
-- `GET /api/chapters/<type>/<source>/<id>` — lista de capítulos
-- `GET /api/play/<type>/<source>/<id>/<chapter>` — sirve video local
-- `GET /api/play/local/<type>/<id>/<chapter>` — reproducción local (con protección path traversal)
-- `GET /api/local-chapters/<type>/<id>` — capítulos en disco
-- `GET /api/local-cover/<type>/<filename>` — portada local
-- `GET /api/manga/images/<path>` — imágenes de manga
-- `GET /api/video-duration/anime/<id>/<chapter>` — duración con ffprobe
+#### `api/common.py` — Helpers compartidos
 
-**Descargas:**
-- `POST /api/download` — encola serie completa
-- `POST /api/download/chapter` — encola un capítulo
-- `POST /api/download/chapters` — encola múltiples capítulos
-- `GET /api/queue` — estado de la cola
-- `POST /api/queue/cancel/<id>` — cancela un job
+Funciones y estado global reutilizados por todos los submódulos:
 
-**Progreso y etiquetas:**
-- `GET/POST /api/progress/<type>/<source>/<id>` — progreso de lectura
-- `POST /api/progress/save` — guarda progreso
-- `POST /api/watched/mark` / `/unmark` — marca capítulo visto
-- `GET /api/watched/<ref>` — lista de vistos
-- `POST /api/series-status/<ref>` — cambia etiqueta (watching/completed/pending)
-- `GET /api/library` — biblioteca local con etiquetas
-- `POST /api/library/check-updates/<ref>` — comprueba capítulos nuevos
-- `POST /api/library/check-all-updates` — comprueba todas las series
-
-**Utilidades internas:**
 - `_safe_path(base, untrusted)` — previene path traversal
-- `_build_series_index` / `_get_series_index` / `_invalidate_series_index` — índice en memoria de series locales
-- `_find_local_serie_dir` — busca carpeta por content_id (índice O(1) + fallback)
-- `_content_title_by_ref` — obtiene título desde BD
-- `_check_series_for_new_chapters` — lógica de detección de capítulos nuevos
+- `_build_series_index` / `_get_series_index` / `_invalidate_series_index` — índice en memoria de series locales (content_id → Path)
+- `_find_local_serie_dir` — busca carpeta por content_id (índice O(1) + fallback por normalización)
+- `_local_chapters_anime` / `_local_chapters_manga` — lista capítulos locales
+- `_delete_chapter_files` — elimina archivos de un capítulo en disco
+- `_resolve_series_title` — resuelve título desde BD o disco
+- `_queue_find_active` / `_queue_insert` / `_queue_get_status` — acceso a la cola de descarga
+- `_base_folder` / `_get_json` / `_require_local` / `_content_title_by_ref` — utilidades menores
+
+---
+
+#### `api/search.py` — Búsqueda
+
+- `GET /api/search?type=...&source=...&q=...` — busca en una fuente (con caché + progreso enriquecido)
+- `GET /api/search-all?type=...&q=...` — busca en todas las fuentes del tipo (ThreadPoolExecutor + dedup)
+- `GET /api/search-all-stream?type=...&q=...` — SSE con resultados progresivos (timeout 90s, cachea para visitas posteriores)
+
+---
+
+#### `api/content.py` — Contenido y reproducción
+
+- `GET /api/content/<type>/<source>/<id>` — portada, sinopsis
+- `GET /api/chapters/<type>/<source>/<id>` — lista remota de capítulos
+- `GET /api/chapters/with-local/<type>/<source>/<id>` — remotos marcando descargados
+- `GET /api/content/local/<type>/<id>` — detalle de contenido local
+- `GET /api/chapters/local/<type>/<id>` — capítulos locales en disco
+- `GET /api/local-cover/<type>/<path:filename>` — sirve portada local
+- `GET /api/play/<type>/<source>/<id>/<chapter>` — sirve video local
+- `GET /api/play/local/<type>/<id>/<chapter>` — reproducción local (path traversal safe)
+- `GET /api/manga/images/<path:subpath>` — imágenes de manga
+- `GET /api/video-duration/anime/<id>/<chapter>` — duración del video con ffprobe
+
+---
+
+#### `api/library.py` — Biblioteca, progreso, etiquetas, vistos
+
+- `GET /api/library` — lista de series descargadas
+- `GET/POST /api/library/status` y `GET /api/library/status/<ref>` — etiquetas (watching/completed/pending/none)
+- `GET/POST /api/progress/<type>/<source>/<id>` y `/progress/local/<type>/<id>` — progreso de usuario
+- `POST /api/watched` — marca capítulo visto
+- `GET /api/watched/<ref>` — lista de capítulos vistos
+- `POST /api/watched/toggle` — marca/desmarca
+- `POST /api/delete-watched` — elimina del disco capítulos vistos (excepto el último)
+- `POST /api/delete-chapter` — elimina un capítulo individual, retrocede progreso si era el último
+- `GET /api/library/updates` — series con capítulos nuevos pendientes
+- `POST /api/library/acknowledge-updates` — limpia flag de novedades
+
+---
+
+#### `api/downloads.py` — Cola de descarga
+
+- `GET /api/queue/status` — jobs activos y pendientes
+- `POST /api/download` — encola serie completa (soporta `exclude_watched`)
+- `POST /api/download/chapter` — encola un capítulo individual
+- `POST /api/download/chapters` — encola múltiples capítulos en batch
+
+---
+
+#### `api/updates.py` — Comprobación de actualizaciones
+
+- `POST /api/library/check-updates/<ref>` — comprueba capítulos nuevos para una serie
+- `POST /api/library/check-all-updates` — comprueba todas las series en paralelo (max 4 workers)
+- `_check_series_for_new_chapters(ref)` — lógica central: compara capítulos remotos vs locales
+- `_check_all_updates_core()` — wrapper sin dependencia Flask, reutilizado por el scheduler en `app.py`
 
 ---
 
@@ -326,9 +365,9 @@ Herencia: `base.html` → `{index, serie, reader}.html`
 ### Búsqueda
 ```
 Usuario escribe "naruto" → JS llama GET /api/search/anime/jkanime?q=naruto
-  → api.py llama source.search(query)
+  → api/search.py llama source.search(query)
     → scraper hace HTTP a jkanime.net, parsea HTML
-  → api.py enriquece resultados con estado de BD (descargado, progreso)
+  → api/search.py enriquece resultados con estado de BD (descargado, progreso)
 → JS renderiza grid de resultados
 ```
 
@@ -336,7 +375,7 @@ Usuario escribe "naruto" → JS llama GET /api/search/anime/jkanime?q=naruto
 ```
 Usuario hace clic en "Descargar serie completa"
   → JS POST /api/download {type, source, content_id, title}
-    → api.py encola job en download_queue (SQLite)
+    → api/downloads.py encola job en download_queue (SQLite)
   → Worker toma el job:
       1. get_chapters() → lista remota
       2. Crea carpeta: /Descargas/Manga/naruto/
@@ -350,7 +389,7 @@ Usuario hace clic en "Descargar serie completa"
 ```
 Scheduler (daemon thread, cada 24h):
   → POST /api/library/check-all-updates
-    → api.py consulta series con status 'watching'/'completed'
+    → api/updates.py consulta series con status 'watching'/'completed'
     → Por cada serie: compara capítulos remotos vs locales
     → Si hay nuevos: guarda en series_status.new_chapters_found
     → El frontend muestra badge en la serie

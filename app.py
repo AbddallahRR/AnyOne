@@ -11,8 +11,7 @@ from core.database import init_db, cleanup_download_queue
 from core.sources import SOURCES
 from core.download_worker import start_workers
 from blueprints.main import main_bp
-from blueprints.api import api_bp
-from core.sources import SOURCES
+from blueprints.api import api_bp, _check_all_updates_core
 
 
 def _start_update_scheduler(app):
@@ -34,17 +33,14 @@ def _start_update_scheduler(app):
         last_cache_evict = 0.0
         while True:
             try:
-                with app.app_context():
-                    with app.test_client() as client:
-                        resp = client.post('/api/library/check-all-updates')
-                        data = resp.get_json() or {}
-                        checked      = data.get('checked', 0)
-                        with_updates = data.get('with_updates', 0)
-                        import logging
-                        logging.getLogger(__name__).info(
-                            f"[Scheduler] Comprobación diaria: {checked} series revisadas, "
-                            f"{with_updates} con episodios nuevos"
-                        )
+                data = _check_all_updates_core()
+                checked      = data.get('checked', 0)
+                with_updates = data.get('with_updates', 0)
+                import logging
+                logging.getLogger(__name__).info(
+                    f"[Scheduler] Comprobación diaria: {checked} series revisadas, "
+                    f"{with_updates} con episodios nuevos"
+                )
             except Exception as exc:
                 import logging
                 logging.getLogger(__name__).error(f"[Scheduler] Error en comprobación diaria: {exc}")

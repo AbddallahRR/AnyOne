@@ -1,6 +1,8 @@
 import os
 import re
 import json
+import threading
+import time
 import unicodedata
 from pathlib import Path
 from urllib.parse import quote
@@ -29,7 +31,22 @@ def normalize_for_comparison(text):
     text = re.sub(r'[^a-z0-9]+', ' ', text)
     return re.sub(r'\s+', ' ', text).strip()
 
+_scan_cache: list | None = None
+_scan_cache_time: float = 0.0
+_scan_cache_lock = threading.Lock()
+_SCAN_CACHE_TTL = 15.0
+
+def _invalidate_scan_cache() -> None:
+    global _scan_cache
+    _scan_cache = None
+
 def scan_downloaded_series():
+    global _scan_cache, _scan_cache_time
+    now = time.time()
+    with _scan_cache_lock:
+        if _scan_cache is not None and now - _scan_cache_time < _SCAN_CACHE_TTL:
+            return _scan_cache
+
     series = []
     
     # Escanear Anime
@@ -152,4 +169,7 @@ def scan_downloaded_series():
             cov = cover_map.get(ref)
             if cov and not s['cover']:
                 s['cover'] = cov
+    with _scan_cache_lock:
+        _scan_cache = series
+        _scan_cache_time = time.time()
     return series
