@@ -1,9 +1,28 @@
+import json
+from pathlib import Path
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 router = APIRouter(tags=['pages'])
 templates = Jinja2Templates(directory='templates')
+
+# Load bundle manifest for cache-busted asset paths
+_manifest = None
+_manifest_path = Path(__file__).resolve().parent.parent / 'static' / 'dist' / 'build.json'
+if _manifest_path.exists():
+    try:
+        _manifest = json.loads(_manifest_path.read_text())
+    except Exception:
+        _manifest = None
+
+if _manifest:
+    bundles = {}
+    for key, filename in _manifest.get('bundles', {}).items():
+        bundles[key.replace(':', '_')] = f"dist/{filename}"
+    templates.env.globals['bundles'] = bundles
+else:
+    templates.env.globals['bundles'] = {}
 
 
 @router.get('/', response_class=HTMLResponse)

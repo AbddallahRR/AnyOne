@@ -9,10 +9,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
+from starlette.types import Scope, Receive, Send
 
 import config
 from core.database import cleanup_download_queue, init_db
-from core.download_worker import start_workers
+from core.download_worker import start_workers, stop_workers
 from core.settings import settings
 from core.sources import SOURCES
 from routers.api import _check_all_updates_core, api_router
@@ -65,25 +66,23 @@ def _start_update_scheduler():
     t.start()
 
 
-def _warm_all_sources():
-    async def _warm():
-        tasks = []
-        names = []
-        for content_type, sources_dict in SOURCES.items():
-            for name, source in sources_dict.items():
-                if hasattr(source, 'warm_cache'):
-                    logger.info(f"Precargando catálogo de {name}...")
-                    tasks.append(asyncio.wait_for(source.warm_cache(), timeout=30))
-                    names.append(name)
+async def _warm_all_sources():
+    tasks = []
+    names = []
+    for content_type, sources_dict in SOURCES.items():
+        for name, source in sources_dict.items():
+            if hasattr(source, 'warm_cache'):
+                logger.info(f"Precargando catálogo de {name}...")
+                tasks.append(asyncio.wait_for(source.warm_cache(), timeout=30))
+                names.append(name)
 
-        if tasks:
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            for name, res in zip(names, results):
-                if isinstance(res, Exception):
-                    logger.warning(f"No se pudo precargar {name}: {res}")
-                else:
-                    logger.info(f"Catálogo de {name} precargado correctamente")
-    asyncio.run(_warm())
+    if tasks:
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for name, res in zip(names, results):
+            if isinstance(res, Exception):
+                logger.warning(f"No se pudo precargar {name}: {res}")
+            else:
+                logger.info(f"Catálogo de {name} precargado correctamente")
 
 
 @asynccontextmanager
@@ -92,8 +91,10 @@ async def lifespan(app: FastAPI):
     cleanup_download_queue()
     start_workers()
     _start_update_scheduler()
-    threading.Thread(target=_warm_all_sources, daemon=True).start()
+    asyncio.create_task(_warm_all_sources())
     yield
+    logger.info("Apagando workers...")
+    stop_workers()
 
 
 app = FastAPI(
@@ -109,9 +110,44 @@ app.add_middleware(
     allow_headers=['*'],
 )
 
-app.mount('/static', StaticFiles(directory='static'), name='static')
+
+class CachedStaticFiles(StaticFiles):
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] != "http":
+            await super().__call__(scope, receive, send)
+            return
+
+        original_send = send
+
+        async def send_with_cache(message):
+            if message["type"] == "http.response.start":
+                headers = message.get("headers", [])
+                path = scope.get("path", "")
+                if "/dist/" in path:
+                    cache_age = 31536000
+                    cache_control = b"public, max-age=31536000, immutable"
+                elif path.endswith((".woff2", ".ttf", ".woff")):
+                    cache_age = 2592000
+                    cache_control = b"public, max-age=2592000"
+                else:
+                    cache_age = 86400
+                    cache_control = b"public, max-age=86400"
+                headers = list(headers)
+                headers.append((b"cache-control", cache_control))
+                message["headers"] = headers
+            await original_send(message)
+
+        await super().__call__(scope, receive, send_with_cache)
+
+
+app.mount('/static', CachedStaticFiles(directory='static'), name='static')
 app.include_router(pages_router)
 app.include_router(api_router)
+
+
+@app.get('/health')
+def health():
+    return {'status': 'ok'}
 
 
 if __name__ == '__main__':

@@ -3,6 +3,21 @@
    Estilos exclusivos de la página de detalle de serie (serie.html).
    ============================================================ */
 
+/* ── Back link ── */
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  text-decoration: none;
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+.back-link:hover {
+  color: var(--text);
+  transform: translateX(-2px);
+}
+
 /* ── Cover hover parallax ── */
 #cover-wrapper {
   border-radius: 10px;

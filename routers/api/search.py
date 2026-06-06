@@ -23,7 +23,7 @@ async def api_search(qs: SearchQuery = Depends()):
     cache_key = f"search:{qs.type}:{qs.source}:{qs.q}"
 
     if not qs.refresh:
-        cached = search_cache.get(cache_key)
+        cached = await search_cache.aget(cache_key)
         if cached is not None:
             return cached
 
@@ -54,7 +54,7 @@ async def api_search(qs: SearchQuery = Depends()):
             r.last_chapter = chapter
             r.progress = progress
 
-        search_cache.set(cache_key, [r.model_dump() for r in results])
+        await search_cache.aset(cache_key, [r.model_dump() for r in results])
         return [r.model_dump() for r in results]
     except Exception as exc:
         logger.exception("Error en api_search:")
@@ -66,7 +66,7 @@ async def api_search_all(qs: SearchQuery = Depends()):
     cache_key = f"search_all:{qs.type}:{qs.q}"
 
     if not qs.refresh:
-        cached = search_cache.get(cache_key)
+        cached = await search_cache.aget(cache_key)
         if cached is not None:
             return cached
 
@@ -91,7 +91,7 @@ async def api_search_all(qs: SearchQuery = Depends()):
     unique = {f"{r.source}:{r.id}": r for r in results}
     results = sorted(unique.values(), key=lambda x: x.title or '')
 
-    search_cache.set(cache_key, [r.model_dump() for r in results])
+    await search_cache.aset(cache_key, [r.model_dump() for r in results])
     return [r.model_dump() for r in results]
 
 
@@ -108,7 +108,7 @@ async def api_search_all_stream(qs: SearchQuery = Depends()):
         raise HTTPException(status_code=400, detail='Tipo no soportado')
 
     cache_key = f"search_all_stream:{qs.type}:{qs.q}"
-    cached = search_cache.get(cache_key)
+    cached = await search_cache.aget(cache_key)
     if cached is not None:
         async def _from_cache():
             for src_name, items in cached.items():
@@ -144,7 +144,7 @@ async def api_search_all_stream(qs: SearchQuery = Depends()):
                 continue
 
         if all_results:
-            search_cache.set(cache_key, all_results)
+            await search_cache.aset(cache_key, all_results)
         yield "event: done\ndata: {}\n\n"
 
     return StreamingResponse(generate(), media_type='text/event-stream',

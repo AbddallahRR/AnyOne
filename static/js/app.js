@@ -262,17 +262,9 @@
                      <span class="chip chip-source" style="font-size:10px; height:22px; padding:0 8px;">${item.source}</span>
                    </div>
                    <div class="card-actions">
-                     <button class="download-btn" style="
-                       width:100%;
-                       background:rgba(124,92,252,0.15);
-                       border:1px solid rgba(124,92,252,0.28);
-                       color:var(--accent-lt);
-                       border-radius:8px; padding:6px 8px;
-                       font-size:11px; font-weight:600; cursor:pointer;
-                       display:flex; align-items:center; justify-content:center; gap:5px;
-                       transition:background .15s;">
-                     <i class="fas fa-download"></i> Descargar todo
-                     </button>
+                      <button class="download-btn card-dl-btn">
+                      <i class="fas fa-download"></i> Descargar todo
+                      </button>
                    </div>`,
         })
       ).join('');
@@ -317,19 +309,11 @@
         extra:  `<div class="card-chips">
                    <span class="chip chip-source" style="font-size:10px; height:22px; padding:0 8px;">${itemSource}</span>
                  </div>
-                 <div class="card-actions">
-                   <button class="download-btn" style="
-                     width:100%;
-                     background:rgba(124,92,252,0.15);
-                     border:1px solid rgba(124,92,252,0.28);
-                     color:var(--accent-lt);
-                     border-radius:8px; padding:6px 8px;
-                     font-size:11px; font-weight:600; cursor:pointer;
-                     display:flex; align-items:center; justify-content:center; gap:5px;
-                     transition:background .15s;">
-                   <i class="fas fa-download"></i> Descargar todo
-                   </button>
-                 </div>`,
+                  <div class="card-actions">
+                    <button class="download-btn card-dl-btn">
+                    <i class="fas fa-download"></i> Descargar todo
+                    </button>
+                  </div>`,
       });
     }).join('');
 
@@ -595,13 +579,7 @@
 
     const statusBtn = `
       <button class="status-tag-btn" data-ref="${ref}" title="Cambiar etiqueta"
-        style="
-          width:30px; height:30px; border-radius:8px; flex-shrink:0;
-          background:${meta.bg || 'rgba(255,255,255,0.05)'};
-          border:1px solid ${meta.border || 'var(--border)'};
-          color:${meta.color || 'var(--muted)'};
-          cursor:pointer; display:flex; align-items:center; justify-content:center;
-          font-size:10px; transition:background .15s, transform .12s;">
+        style="background:${meta.bg || 'rgba(255,255,255,0.05)'}; border-color:${meta.border || 'var(--border)'}; color:${meta.color || 'var(--muted)'};">
         <i class="fas ${meta.icon || 'fa-tag'}"></i>
       </button>`;
 
@@ -612,23 +590,16 @@
       source: 'local',
       type:   item.type || '',
       badge:  { class: `badge-${item.type}`, label: typeLabel },
-      extra:  `<div class="card-chips" style="flex-wrap:nowrap; overflow:hidden;">
-                 <span class="chip ${typeClass}" style="font-size:10px; height:22px; padding:0 8px;">${typeLabel}</span>
-                 ${statusChipHtml}
-               </div>
-               <div class="card-actions" style="display:flex; gap:6px; margin-top:4px;">
-                 <button class="resume-btn" data-last-chapter="${lastChapter}" style="
-                   flex:1;
-                   background:rgba(52,211,153,0.12);
-                   border:1px solid rgba(52,211,153,0.25);
-                   color:#34d399; border-radius:8px; padding:6px 8px;
-                   font-size:11px; font-weight:600; cursor:pointer;
-                   display:flex; align-items:center; justify-content:center; gap:5px;
-                   transition:background .15s;">
-                   <i class="fas fa-play" style="font-size:9px;"></i> Cap. ${lastChapter}
-                 </button>
-                 ${statusBtn}
-               </div>`,
+      extra:  `<div class="card-chips card-chips-nowrap">
+                  <span class="chip ${typeClass} chip-sm">${typeLabel}</span>
+                  ${statusChipHtml}
+                </div>
+                <div class="card-actions-row">
+                  <button class="resume-btn" data-last-chapter="${lastChapter}">
+                    <i class="fas fa-play" style="font-size:9px;"></i> Cap. ${lastChapter}
+                  </button>
+                  ${statusBtn}
+                </div>`,
     });
 
     const div = document.createElement('div');

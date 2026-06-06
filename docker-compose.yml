@@ -1,7 +1,7 @@
 services:
   anyone:
     build: .
-    container_name: anyone
+    container_name: comic-web
     ports:
       - "5000:5000"
     volumes:
@@ -13,3 +13,7 @@ services:
       - DB_DIR=/data/config
       - DEBUG=false
     restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536

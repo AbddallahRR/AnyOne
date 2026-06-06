@@ -8,17 +8,16 @@ class RateLimiter:
     """Per-domain rate limiter with token bucket algorithm.
 
     Uses threading.Event for precise wake-up instead of busy-wait loops.
+    A single lock protects shared state for both sync and async paths.
     """
 
     def __init__(self, min_interval: float = 2.0):
         self.min_interval = min_interval
         self._last_calls: dict[str, float] = {}
         self._lock = threading.Lock()
-        self._async_lock = asyncio.Lock()
         self._events: dict[str, threading.Event] = {}
 
     def _get_remaining(self, domain: str) -> float:
-        """Devuelve segundos restantes hasta la próxima llamada permitida."""
         now = time.time()
         elapsed = now - self._last_calls.get(domain, 0.0)
         return max(0.0, self.min_interval - elapsed)
@@ -46,7 +45,7 @@ class RateLimiter:
         if not domain:
             return
 
-        async with self._async_lock:
+        with self._lock:
             remaining = self._get_remaining(domain)
             if remaining <= 0:
                 self._last_calls[domain] = time.time()
@@ -54,7 +53,7 @@ class RateLimiter:
 
         await asyncio.sleep(remaining)
 
-        async with self._async_lock:
+        with self._lock:
             self._last_calls[domain] = time.time()
 
 

@@ -6,9 +6,10 @@ import logging
 import os
 import threading
 import time
+from pathlib import Path
 from queue import Queue
 
-from config import ANIME_DOWNLOAD_DIR, MANGA_DOWNLOAD_DIR
+from config import ANIME_DOWNLOAD_DIR, DOWNLOAD_NUM_WORKERS, MANGA_DOWNLOAD_DIR
 from core.database import update_queue_status
 from core.http_pool import HttpPool
 from core.models import DownloadJob
@@ -17,39 +18,21 @@ from core.utils import _invalidate_scan_cache, normalize_title
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Estado compartido
-# ---------------------------------------------------------------------------
-
 download_queue: Queue = Queue(maxsize=50)
 
 _active_jobs: dict[int, DownloadJob] = {}
 _active_jobs_lock = threading.Lock()
 
-# Leer de config si existe, sino usar 3 por defecto
-try:
-    from config import DOWNLOAD_NUM_WORKERS as NUM_WORKERS  # type: ignore[attr-defined]
-except ImportError:
-    NUM_WORKERS = 3
+_stop_event = threading.Event()
 
-
-# ---------------------------------------------------------------------------
-# Metadatos de serie
-# ---------------------------------------------------------------------------
 
 def _save_series_metadata(series_folder: str, title: str, source_name: str,
                            content_id: str, content_type: str, source) -> None:
-    """
-    Descarga la portada (si no existe) y escribe series_info.json.
-    Ahora también actualiza la BD con el título/portada definitivos desde la fuente
-    (los que antes se obtenían en api_download, que ahora encola sin bloquear).
-    Llamar ANTES del bucle de capítulos; los errores son no-fatales.
-    """
-    from core.database import save_content_to_db  # import local para evitar ciclo
+    from core.database import save_content_to_db
 
     info_path    = os.path.join(series_folder, 'series_info.json')
     cover_filename = ''
-    final_title  = title   # puede mejorarse con get_details
+    final_title  = title
 
     try:
         details   = source.get_details_sync(content_id)
@@ -73,7 +56,6 @@ def _save_series_metadata(series_folder: str, title: str, source_name: str,
                     f.write(img_data)
                 logger.info(f"Portada guardada: {cover_path}")
 
-                # Generar thumbnail WebP (200px de ancho) vía ffmpeg
                 thumb_path = os.path.join(series_folder, 'thumb.webp')
                 if not os.path.exists(thumb_path):
                     import subprocess
@@ -84,7 +66,6 @@ def _save_series_metadata(series_folder: str, title: str, source_name: str,
                         capture_output=True, timeout=15
                     )
 
-        # Actualizar BD con datos definitivos (título real + portada)
         try:
             save_content_to_db(content_type, source_name, content_id,
                                final_title, cover_filename)
@@ -93,7 +74,7 @@ def _save_series_metadata(series_folder: str, title: str, source_name: str,
 
     except Exception as exc:
         logger.error(f"Error descargando portada/detalles para '{title}': {exc}")
-        cover_filename = ''  # no rompe la descarga
+        cover_filename = ''
 
     info = {
         'title':      final_title,
@@ -105,10 +86,6 @@ def _save_series_metadata(series_folder: str, title: str, source_name: str,
     with open(info_path, 'w', encoding='utf-8') as f:
         json.dump(info, f, ensure_ascii=False)
 
-
-# ---------------------------------------------------------------------------
-# Lógica de preparación del job
-# ---------------------------------------------------------------------------
 
 def _resolve_chapters(source, content_id: str, chapter_id: str | None,
                        excluded: list[int] | None = None) -> tuple[list, int]:
@@ -134,16 +111,14 @@ def _resolve_chapters(source, content_id: str, chapter_id: str | None,
     return all_chapters, len(all_chapters)
 
 
-# ---------------------------------------------------------------------------
-# Worker principal
-# ---------------------------------------------------------------------------
-
 def _download_worker(worker_id: int) -> None:
-    """Función de cada hilo worker. Loop infinito procesando la cola."""
     logger.info(f"Worker {worker_id} listo")
 
-    while True:
-        job: DownloadJob = download_queue.get()
+    while not _stop_event.is_set():
+        try:
+            job: DownloadJob = download_queue.get(timeout=1)
+        except Exception:
+            continue
 
         with _active_jobs_lock:
             _active_jobs[job.id] = job
@@ -152,7 +127,7 @@ def _download_worker(worker_id: int) -> None:
         content_ref = job.content_ref
         content_type = job.type
         title       = job.title
-        chapter_id  = job.chapter_id          # None → serie completa
+        chapter_id  = job.chapter_id
         excluded    = job.excluded_chapters
 
         source_name, content_id = content_ref.split(':', 1)
@@ -162,23 +137,19 @@ def _download_worker(worker_id: int) -> None:
             if not source:
                 raise Exception(f"Fuente '{source_name}' no encontrada")
 
-            # ── 1. Resolver capítulos (UNA sola petición HTTP) ──────────────
             chapters, total = _resolve_chapters(source, content_id, chapter_id, excluded)
 
             update_queue_status(job_id, status='downloading',
                                 total_chapters=total, current_chapter=0, current_progress=0)
 
-            # ── 2. Preparar carpeta de destino ───────────────────────────────
             base_folder   = ANIME_DOWNLOAD_DIR if content_type == 'anime' else MANGA_DOWNLOAD_DIR
             safe_title    = normalize_title(title)
             series_folder = os.path.join(base_folder, safe_title)
             os.makedirs(series_folder, exist_ok=True)
 
-            # ── 3. Metadatos (portada + series_info.json) ────────────────────
             _save_series_metadata(series_folder, title, source_name,
                                   content_id, content_type, source)
 
-            # ── 4. Bucle de descarga ─────────────────────────────────────────
             _LAST_DB_FLUSH = [time.time()]
             _FLUSH_INTERVAL = 30.0
             for idx, chapter in enumerate(chapters, start=1):
@@ -194,26 +165,21 @@ def _download_worker(worker_id: int) -> None:
                 if chapter_id:
                     update_queue_status(job_id, status='completed', current_progress=100)
                 else:
-                    # Batch: escribir a DB cada 30s o al final
                     now = time.time()
                     if idx == total or now - _LAST_DB_FLUSH[0] >= _FLUSH_INTERVAL:
                         update_queue_status(job_id, current_chapter=idx, current_progress=percent)
                         _LAST_DB_FLUSH[0] = now
                         logger.debug(f"Job {job_id}: progreso {percent}% ({idx}/{total})")
 
-            # ── 5. Finalizar ─────────────────────────────────────────────────
             if not chapter_id:
                 update_queue_status(job_id, status='completed', current_progress=100)
 
-            # Invalidar índices en memoria para que la nueva serie aparezca
             try:
-                from pathlib import Path as _Path
-
                 from routers.api.common import _invalidate_series_index
-                base = _Path(ANIME_DOWNLOAD_DIR if content_type == 'anime' else MANGA_DOWNLOAD_DIR)
+                base = Path(ANIME_DOWNLOAD_DIR if content_type == 'anime' else MANGA_DOWNLOAD_DIR)
                 _invalidate_series_index(base)
             except Exception:
-                pass   # no es crítico
+                pass
             _invalidate_scan_cache()
 
             logger.info(f"Job {job_id} completado: '{title}'")
@@ -228,19 +194,15 @@ def _download_worker(worker_id: int) -> None:
             download_queue.task_done()
 
 
-# ---------------------------------------------------------------------------
-# API pública: iniciar workers desde create_app()
-# ---------------------------------------------------------------------------
-
-def start_workers(n: int = NUM_WORKERS) -> None:
-    """
-    Inicia los hilos workers. Llamar una sola vez desde create_app().
-    No se inicia automáticamente al importar el módulo.
-    """
+def start_workers(n: int = DOWNLOAD_NUM_WORKERS) -> None:
     for i in range(n):
         t = threading.Thread(target=_download_worker, args=(i,), daemon=True)
         t.start()
         logger.info(f"Worker {i} iniciado")
+
+
+def stop_workers():
+    _stop_event.set()
 
 
 def get_active_jobs() -> list[dict]:

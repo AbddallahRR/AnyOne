@@ -3,7 +3,7 @@
 {% block title %}Detalle — Comic Web{% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{{ url_for('static', path='css/serie.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', path=bundles.get('css_serie', 'css/serie.css')) }}">
 {% endblock %}
 
 {% block content %}
@@ -11,9 +11,7 @@
 
   <!-- Back nav -->
   <nav class="nav-enter" style="padding:14px 24px; border-bottom:1px solid var(--border); position:sticky; top:0; background:rgba(10,10,15,0.85); backdrop-filter:blur(14px); z-index:10; display:flex; align-items:center; gap:16px;">
-    <a href="/" style="display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:13px; text-decoration:none; transition:color 0.15s ease, transform 0.15s ease;"
-       onmouseover="this.style.color='var(--text)';this.style.transform='translateX(-2px)'"
-       onmouseout="this.style.color='var(--muted)';this.style.transform='translateX(0)'">
+    <a href="/" class="back-link">
       <i class="fas fa-arrow-left" style="font-size:11px;"></i> Inicio
     </a>
     <span style="color:var(--border-hi);">|</span>
@@ -112,7 +110,7 @@
 <script>
   window.serieData = { type: "{{ type }}", source: "{{ source }}", id: "{{ id }}" };
 </script>
-<script src="{{ url_for('static', path='js/serie.js') }}" defer></script>
+<script src="{{ url_for('static', path=bundles.get('js_serie', 'js/serie.js')) }}"></script>
 <script>
   // ── Breadcrumb sync ──────────────────────────────────────────────────
   const titleEl = document.getElementById('serie-title');

@@ -501,6 +501,86 @@ select.input-field {
 .content-panel.hidden { display: none; }
 .relative             { position: relative; }
 
+/* ── Card download button (search results) ── */
+.card-dl-btn {
+  width: 100%;
+  background: rgba(124,92,252,0.15);
+  border: 1px solid rgba(124,92,252,0.28);
+  color: var(--accent-lt);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  transition: background 0.15s;
+}
+.card-dl-btn:hover {
+  background: rgba(124,92,252,0.25);
+}
+
+/* ── Resume button (library) ── */
+.resume-btn {
+  flex: 1;
+  background: rgba(52,211,153,0.12);
+  border: 1px solid rgba(52,211,153,0.25);
+  color: #34d399;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  transition: background 0.15s;
+}
+.resume-btn:hover {
+  background: rgba(52,211,153,0.22);
+}
+
+/* ── Card actions row ── */
+.card-actions-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+/* ── Status tag button (library) ── */
+.status-tag-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  transition: background 0.15s, transform 0.12s;
+}
+.status-tag-btn:active {
+  transform: scale(0.92);
+}
+
+/* ── Card chips nowrap ── */
+.card-chips-nowrap {
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+/* ── Small chip ── */
+.chip-sm {
+  font-size: 10px;
+  height: 22px;
+  padding: 0 8px;
+}
+
 /* ── Animations ── */
 @keyframes fadeIn {
   from { opacity: 0; }

@@ -231,7 +231,7 @@
     indicator = document.createElement('div');
     indicator.id = 'qi-indicator';
     indicator.innerHTML = `
-      <i class="fas fa-arrow-down-to-line"></i>
+      <i class="fas fa-arrow-down"></i>
       <span id="qi-label">Descargando…</span>
       <span id="qi-count" style="display:none;"></span>`;
     document.body.appendChild(indicator);
