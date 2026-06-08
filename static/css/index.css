@@ -115,6 +115,104 @@
   box-shadow: 0 0 0 3px rgba(124,92,252,0.1);
 }
 
+/* ── Settings popup ───────────────────────────────────────── */
+#settings-popup {
+  min-width: 200px;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px 6px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+
+.settings-header span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.settings-source-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  transition: background 0.12s;
+  cursor: default;
+}
+.settings-source-row:hover {
+  background: rgba(255,255,255,0.04);
+}
+
+.settings-source-icon {
+  width: 20px;
+  text-align: center;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.settings-source-label {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Toggle switch ── */
+.settings-toggle {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.settings-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.settings-toggle .toggle-track {
+  position: absolute;
+  inset: 0;
+  background: rgba(255,255,255,0.1);
+  border-radius: 100px;
+  transition: background 0.2s ease;
+}
+
+.settings-toggle .toggle-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: var(--muted);
+  border-radius: 50%;
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.settings-toggle input:checked + .toggle-track {
+  background: rgba(124,92,252,0.35);
+}
+
+.settings-toggle input:checked + .toggle-track::after {
+  transform: translateX(16px);
+  background: var(--accent-lt);
+}
+
 /* ── Scroll horizontal en chips (móvil) ── */
 @media (max-width: 480px) {
   .lib-filter-group {

@@ -27,6 +27,8 @@ _MAX_PAGES = 500
 
 
 class ManhwawebSource(BaseSource):
+    type = 'manga'
+    label = 'ManhwaWeb'
     BASE_URL = "https://www.manhwaweb.com"
     API_BASE = "https://manhwawebbackend-production.up.railway.app"
     UA       = "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0"

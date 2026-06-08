@@ -36,7 +36,7 @@ def get_conn() -> sqlite3.Connection:
 # Migraciones versionadas
 # ---------------------------------------------------------------------------
 
-SCHEMA_VERSION = 5  # incrementar al agregar una migración nueva
+SCHEMA_VERSION = 6  # incrementar al agregar una migración nueva
 
 def _get_schema_version(conn: sqlite3.Connection) -> int:
     conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)")
@@ -128,6 +128,20 @@ def _run_migrations(conn: sqlite3.Connection, current: int) -> None:
                 "ALTER TABLE series_status ADD COLUMN new_chapters_found TEXT DEFAULT ''"
             )
 
+    if current < 6:
+        logger.info("Migracion 6: tabla source_settings")
+        conn.executescript('''
+            CREATE TABLE IF NOT EXISTS source_settings (
+                name    TEXT PRIMARY KEY,
+                type    TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1
+            );
+            INSERT OR IGNORE INTO source_settings (name, type, enabled) VALUES
+                ('jkanime',   'anime', 1),
+                ('nartag',    'manga', 1),
+                ('manhwaweb', 'manga', 1),
+                ('ikigai',    'manga', 1);
+        ''')
 
 
 # ---------------------------------------------------------------------------
@@ -417,6 +431,41 @@ def get_watched_chapters(content_ref: str) -> list[int]:
         (content_ref,)
     ).fetchall()
     return [r[0] for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Configuración de fuentes (activar/desactivar)
+# ---------------------------------------------------------------------------
+
+def get_source_settings() -> dict[str, bool]:
+    """Devuelve {nombre_fuente: enabled} para todas las fuentes."""
+    conn = get_conn()
+    rows = conn.execute('SELECT name, enabled FROM source_settings').fetchall()
+    return {r['name']: bool(r['enabled']) for r in rows}
+
+def update_source_settings(updates: dict[str, bool]) -> None:
+    """Actualiza el estado enabled de una o más fuentes. updates: {name: enabled}."""
+    conn = get_conn()
+    with conn:
+        for name, enabled in updates.items():
+            conn.execute(
+                'UPDATE source_settings SET enabled = ? WHERE name = ?',
+                (1 if enabled else 0, name)
+            )
+
+def get_enabled_source_names() -> list[str]:
+    """Devuelve lista de nombres de fuentes habilitadas."""
+    conn = get_conn()
+    rows = conn.execute('SELECT name FROM source_settings WHERE enabled = 1').fetchall()
+    return [r['name'] for r in rows]
+
+def ensure_source_in_db(name: str, source_type: str) -> None:
+    """Inserta una fuente en source_settings si no existe."""
+    conn = get_conn()
+    conn.execute(
+        'INSERT OR IGNORE INTO source_settings (name, type, enabled) VALUES (?, ?, 1)',
+        (name, source_type)
+    )
 
 
 def delete_watched_chapter(content_ref: str, chapter_number: int) -> None:

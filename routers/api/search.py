@@ -5,10 +5,10 @@ import logging
 from fastapi import Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
-from core.database import get_conn, get_content_ref
+from core.database import get_conn, get_content_ref, get_enabled_source_names
 from core.disk_cache import search_cache
 from core.models import SearchQuery
-from core.sources import SOURCES, get_source
+from core.sources import get_enabled_sources, get_source
 
 from . import api_router
 
@@ -30,6 +30,10 @@ async def api_search(qs: SearchQuery = Depends()):
     source = get_source(qs.type, qs.source)
     if not source:
         raise HTTPException(status_code=404, detail='Fuente no encontrada')
+
+    enabled_names = get_enabled_source_names()
+    if qs.source not in enabled_names:
+        raise HTTPException(status_code=400, detail='Fuente desactivada en configuración')
 
     try:
         results = await source.search(qs.q)
@@ -70,7 +74,7 @@ async def api_search_all(qs: SearchQuery = Depends()):
         if cached is not None:
             return cached
 
-    sources_dict = SOURCES.get(qs.type, {})
+    sources_dict = get_enabled_sources(qs.type)
     if not sources_dict:
         raise HTTPException(status_code=400, detail='Tipo no soportado')
 
@@ -103,7 +107,7 @@ async def api_search_all_stream(qs: SearchQuery = Depends()):
     if not qs.q:
         raise HTTPException(status_code=400, detail='Faltan parámetros type y q')
 
-    sources_dict = SOURCES.get(qs.type, {})
+    sources_dict = get_enabled_sources(qs.type)
     if not sources_dict:
         raise HTTPException(status_code=400, detail='Tipo no soportado')
 

@@ -24,6 +24,7 @@ AnyOne/
 │   └── api/                  →   API REST (/api/*)
 │       ├── __init__.py       →   Crea el APIRouter y exporta _check_all_updates_core
 │       ├── common.py         →   Helpers compartidos (índice en memoria, cola, fs)
+│       ├── settings.py       →   Configuración de fuentes (/api/settings*)
 │       ├── search.py         →   Búsqueda en fuentes (/api/search*)
 │       ├── content.py        →   Detalle, capítulos y reproducción (/api/content, /api/play)
 │       ├── library.py        →   Biblioteca, progreso, etiquetas, vistos
@@ -161,12 +162,13 @@ Punto de entrada. Usa `lifespan` de FastAPI:
 
 1. Crea la app FastAPI, activa CORS
 2. Ejecuta migraciones de BD (`init_db`)
-3. Limpia la cola de descargas interrumpidas (`cleanup_download_queue`)
-4. Inicia `DOWNLOAD_NUM_WORKERS` workers de descarga en hilos daemon
-5. Arranca el scheduler de actualizaciones (cada 24 h)
-6. Monta `StaticFiles` y registra los routers (`pages`, `api`)
-7. Lanza precarga en background de todas las fuentes (`asyncio.create_task(_warm_all_sources())`)
-8. Al shutdown: detiene los workers gracefulmente (`stop_workers()`)
+3. Sincroniza fuentes registradas con la tabla `source_settings` (`sync_source_settings()`)
+4. Limpia la cola de descargas interrumpidas (`cleanup_download_queue`)
+5. Inicia `DOWNLOAD_NUM_WORKERS` workers de descarga en hilos daemon
+6. Arranca el scheduler de actualizaciones (cada 24 h)
+7. Monta `StaticFiles` y registra los routers (`pages`, `api`)
+8. Lanza precarga en background de todas las fuentes (`asyncio.create_task(_warm_all_sources())`)
+9. Al shutdown: detiene los workers gracefulmente (`stop_workers()`)
 
 La precarga de catálogos (`_warm_all_sources`) ejecuta todos los `warm_cache()` en paralelo
 con `asyncio.gather()` y timeout de 30 s por fuente, usando `asyncio.create_task()` en el
@@ -272,12 +274,23 @@ Todos los endpoints son `async def` y hacen `await` a los métodos async de las 
 
 ---
 
+#### `api/settings.py` — Configuración de fuentes
+
+Endpoints CRUD para activar/desactivar fuentes desde el frontend:
+
+- `GET /api/settings/sources` — devuelve todas las fuentes con su estado (activo/inactivo)
+- `POST /api/settings/sources/<name>` — activa/desactiva una fuente por nombre
+
+Usado por el popup de configuración (icono engranaje en `index.html`).
+
+---
+
 ### `core/database.py` — SQLite
 
 Conexión por hilo (`threading.local()`) con WAL mode.
 
-**Migraciones versionadas** (versión actual: 5):
-- Tablas: `content`, `user_progress`, `download_queue`, `watched_chapters`, `series_status`, `schema_version`
+**Migraciones versionadas** (versión actual: 6):
+- Tablas: `content`, `user_progress`, `download_queue`, `watched_chapters`, `series_status`, `schema_version`, `source_settings`
 
 **Operaciones:**
 - `init_db()` — crea esquema y aplica migraciones
@@ -289,6 +302,8 @@ Conexión por hilo (`threading.local()`) con WAL mode.
 - `mark_chapter_as_watched()` / `is_chapter_watched()` — capítulos vistos
 - `get_series_to_check()` / `mark_series_checked()` — para scheduler de actualizaciones
 - `set_series_updates()` / `get_series_with_updates()` — capítulos nuevos detectados
+- `get_source_settings()` / `update_source_setting()` — configuración de fuentes (activo/inactivo)
+- `get_enabled_sources()` — filtra solo fuentes habilitadas
 
 ---
 
@@ -353,16 +368,26 @@ cada hilo obtiene su propia sesión sin bloqueos adicionales.
 
 ---
 
-### `core/sources.py` — Registro de fuentes
+### `core/sources.py` — Registro y auto-descubrimiento de fuentes
+
+`discover_sources()` escanea automáticamente el directorio `sources/` en busca de
+subclases de `BaseSource`. Cada subclase debe definir `type` (categoría) y `label`
+(nombre legible) como atributos de clase. El módulo importa todos los `.py` del
+directorio (excluyendo `__init__.py`) y reúne instancias en un diccionario.
 
 ```python
+# Estructura resultante (generada automáticamente):
 SOURCES = {
     'anime': {'jkanime': JkanimeSource()},
     'manga': {'nartag': NartagSource(), 'manhwaweb': ManhwawebSource(), 'ikigai': IkigaiSource()}
 }
 ```
 
-Función `get_source(type, name)` → instancia o `None`.
+Funciones:
+- `discover_sources()` → escanea y registra fuentes (se llama al importar)
+- `get_source(type, name)` → devuelve instancia o `None`
+- `get_source_list()` → devuelve `list[dict]` con `{type, name, label}` para el frontend
+- `get_enabled_source_list()` → igual pero filtrado por `get_enabled_sources()` en BD
 
 ---
 
@@ -390,6 +415,10 @@ Usa `urlparse` para extraer el netloc. Instancia global `rate_limiter` con `min_
 ### `sources/__init__.py` — BaseSource
 
 Clase abstracta que define el contrato de todas las fuentes usando modelos Pydantic (`core/models.py`).
+
+Cada subclase debe definir atributos de clase `type` (categoría: `"anime"`|`"manga"`)
+y `label` (nombre para mostrar en UI). Estos son usados por `discover_sources()` para
+el registro automático y por el frontend para el menú desplegable de fuentes.
 
 Cada método tiene una versión **sync** (`*_sync`) y una **async** (el mismo nombre sin sufijo). Por defecto, la versión async delega a la sync mediante `loop.run_in_executor()` con un `ThreadPoolExecutor(max_workers=4)` acotado por instancia de fuente. Anteriormente usaba `asyncio.to_thread()` que crea un hilo por llamada sin límite, pudiendo saturar el sistema bajo carga.
 
@@ -473,7 +502,7 @@ El proyecto usa **build en dos modos**:
 - **Desarrollo** (sin build): los templates cargan los archivos individuales como fallback, permitiendo editar CSS/JS sin recompilar.
 
 - **`base.html`**: layout raíz. En producción carga preload hints para Inter y FA subset. En desarrollo carga `inter.css`, `fontawesome.min.css`, `base.css`, `layout.css` y `queue-indicator.js`. Siempre incluye helpers inline de modal y animación de cards.
-- **`index.html`**: dos paneles (Anime / Manga) con pestañas, búsqueda por fuente, biblioteca local con filtros por estado. Carga `bundles.css_index` + `bundles.js_index` (o `index.css` + `app.js` en dev).
+- **`index.html`**: dos paneles (Anime / Manga) con pestañas, búsqueda por fuente (dropdown dinámico que solo muestra fuentes habilitadas), botón de engranaje para abrir popup de configuración de fuentes, biblioteca local con filtros por estado. Carga `bundles.css_index` + `bundles.js_index` (o `index.css` + `app.js` en dev).
 - **`serie.html`**: portada con parallax, sinopsis expandible, lista de capítulos con botones de play/download/watched, badge de actualizaciones. Carga `bundles.css_serie` + `bundles.js_serie`.
 - **`reader.html`**: reproductor de video o visor de manga a pantalla completa. Carga `bundles.css_reader` + `bundles.js_reader`.
 
@@ -489,7 +518,7 @@ El proyecto usa **build en dos modos**:
 
 ### JavaScript
 
-- **`app.js`**: tabs (Anime/Manga), búsqueda, biblioteca con filtros por estado, notificaciones toast, popup de estado
+- **`app.js`**: tabs (Anime/Manga), búsqueda, biblioteca con filtros por estado, notificaciones toast, popup de estado, configuración de fuentes (icono engranaje → popup con checkboxes para activar/desactivar fuentes)
 - **`serie.js`**: carga de capítulos, progreso, descarga individual/completa, marcado como visto, detección de actualizaciones
 - **`reader.js`**: reproductor de video con guardado de progreso cada 5s, visor de manga con scroll virtual, atajos de teclado, precarga proactiva de imágenes (`_prefetchNextBatch`) — carga hasta 3 imágenes más allá de la ventana actual con `new Image()` y delay progresivo de 200ms
 - **`queue-indicator.js`**: indicador flotante de descargas activas con popup de progreso. Usa `fa-arrow-down` en vez de `fa-arrow-down-to-line` (no existente en FA6).

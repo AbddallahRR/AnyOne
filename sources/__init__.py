@@ -14,6 +14,9 @@ class BaseSource:
     sobreescribir la versión async para implementaciones nativamente async.
     """
 
+    type: str = ''
+    label: str = ''
+
     _executor = ThreadPoolExecutor(max_workers=4)
 
     async def _run_in_executor(self, func, *args, **kwargs):

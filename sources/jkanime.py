@@ -35,6 +35,8 @@ _TIMEOUT_CURL = 1800   # 30 min por intento de descarga
 
 
 class JkanimeSource(BaseSource):
+    type = 'anime'
+    label = 'JKanime'
     BASE_URL = "https://jkanime.net"
     UA       = "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0"
 

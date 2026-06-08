@@ -9,13 +9,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
-from starlette.types import Scope, Receive, Send
+from starlette.types import Receive, Scope, Send
 
 import config
 from core.database import cleanup_download_queue, init_db
 from core.download_worker import start_workers, stop_workers
 from core.settings import settings
-from core.sources import SOURCES
+from core.sources import SOURCES, sync_source_settings
 from routers.api import _check_all_updates_core, api_router
 from routers.pages import router as pages_router
 
@@ -88,6 +88,7 @@ async def _warm_all_sources():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    sync_source_settings()
     cleanup_download_queue()
     start_workers()
     _start_update_scheduler()

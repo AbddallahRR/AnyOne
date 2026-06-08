@@ -1,24 +1,88 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-# Importar todas las fuentes
-from sources.ikigai import IkigaiSource
-from sources.jkanime import JkanimeSource
-from sources.manhwaweb import ManhwawebSource
-from sources.nartag import NartagSource
+import importlib
+import inspect
+import logging
+import pkgutil
+from pathlib import Path
 
-# Registro de fuentes
-SOURCES = {
-    'anime': {
-        'jkanime': JkanimeSource()
-    },
-    'manga': {
-        'nartag': NartagSource(),
-        'manhwaweb': ManhwawebSource(),
-        'ikigai': IkigaiSource()
-    }
-}
+from core.database import get_enabled_source_names
+
+logger = logging.getLogger(__name__)
+
+SOURCES: dict[str, dict[str, object]] = {}
+ALL_SOURCES_META: list[dict] = []
+
+
+def _discover_sources():
+    import sources as sources_pkg
+
+    for importer, modname, ispkg in pkgutil.iter_modules(sources_pkg.__path__):
+        if modname == '__init__':
+            continue
+
+        try:
+            module = importlib.import_module(f'sources.{modname}')
+        except Exception as exc:
+            logger.warning(f'Error importando sources.{modname}: {exc}')
+            continue
+
+        source_file = Path(module.__file__) if module.__file__ else None
+        if source_file and source_file.exists():
+            content = source_file.read_text(encoding='utf-8')
+            if '--- IGNORE ---' in content:
+                logger.info(f'Fuente ignorada: sources.{modname} (marcada como IGNORE)')
+                continue
+
+        from sources import BaseSource
+
+        for name, cls in inspect.getmembers(module, inspect.isclass):
+            if issubclass(cls, BaseSource) and cls is not BaseSource:
+                try:
+                    instance = cls()
+                    source_type = instance.type or ''
+                    source_label = instance.label or name
+                    if not source_type:
+                        logger.warning(f'Fuente {name} no tiene atributo type, omitiendo')
+                        continue
+                    src_name = name.lower().replace('source', '')
+                    SOURCES.setdefault(source_type, {})[src_name] = instance
+                    ALL_SOURCES_META.append({
+                        'name': src_name,
+                        'type': source_type,
+                        'label': source_label,
+                    })
+                    logger.info(f'Fuente auto-descubierta: {src_name} ({source_type})')
+                except Exception as exc:
+                    logger.warning(f'Error instanciando {name}: {exc}')
+
+
+_discover_sources()
+
 
 def get_source(content_type, source_name):
     """Devuelve la instancia de la fuente o None si no existe."""
     return SOURCES.get(content_type, {}).get(source_name)
+
+
+def get_enabled_sources(content_type):
+    """Devuelve un dict {nombre: instancia} solo con las fuentes habilitadas."""
+    enabled = set(get_enabled_source_names())
+    return {
+        name: src
+        for name, src in SOURCES.get(content_type, {}).items()
+        if name in enabled
+    }
+
+
+def get_all_sources_meta():
+    """Devuelve la lista de metadatos de todas las fuentes descubiertas."""
+    return list(ALL_SOURCES_META)
+
+
+def sync_source_settings():
+    from core.database import ensure_source_in_db
+
+    for src in ALL_SOURCES_META:
+        ensure_source_in_db(src['name'], src['type'])

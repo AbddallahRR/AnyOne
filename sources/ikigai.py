@@ -28,6 +28,8 @@ _PAGE_WORKERS = 4                   # hilos paralelos para descargar páginas de
 
 
 class IkigaiSource(BaseSource):
+    type = 'manga'
+    label = 'Ikigai'
     BASE_URL      = "https://visorikigai.yomod.xyz"
     CATALOGO_BASE = "https://visorikigai.yomod.xyz/series/"
     UA            = "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0"
