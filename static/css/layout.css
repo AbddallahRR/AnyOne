@@ -29,6 +29,39 @@
 .nav-row--top  { justify-content: space-between; padding: 14px 0 8px; }
 .nav-row--tabs { justify-content: center; padding-bottom: 10px; }
 
+.nav-logo {
+  font-family: var(--ff-head);
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.8px;
+}
+
+.nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  font-size: 16px;
+  border-radius: 8px;
+  line-height: 1;
+  text-decoration: none;
+}
+
+#queue-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.tab-btn i {
+  margin-right: 5px;
+  font-size: 11px;
+}
+
 @media (min-width: 640px) {
   .nav-row--top  { padding: 0; }
   .nav-row--tabs { padding: 0; }
@@ -63,12 +96,4 @@
 @media (max-width: 400px) {
   .btn-label { display: none; }
   .btn-primary { padding: 10px 14px; }
-}
-
-/* ── Padding override en móvil (serie.html) ── */
-@media (max-width: 480px) {
-  .app-nav ~ div > div[style*="max-width"] {
-    padding-left: 14px !important;
-    padding-right: 14px !important;
-  }
 }

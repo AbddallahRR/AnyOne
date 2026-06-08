@@ -4,6 +4,80 @@
    library filter chips y search focus override.
    ============================================================ */
 
+/* ── Search card ── */
+.search-card {
+  padding: 16px;
+  margin-bottom: 24px;
+}
+
+.search-input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Library header ── */
+.lib-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.lib-title {
+  font-family: var(--ff-head);
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  color: var(--text);
+  line-height: 1.1;
+}
+.lib-subtitle {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 3px;
+  font-weight: 400;
+}
+.lib-count {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 500;
+  padding-bottom: 2px;
+}
+
+/* ── Library controls ── */
+.lib-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.lib-search-wrap {
+  position: relative;
+  max-width: 420px;
+}
+.lib-search-icon {
+  position: absolute;
+  left: 13px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: 12px;
+  pointer-events: none;
+}
+.lib-search-input {
+  padding-left: 36px;
+  border-radius: 100px;
+}
+
+/* ── Modal body ── */
+.modal-body {
+  flex: 1;
+  overflow: auto;
+  padding: 22px;
+}
+
 /* ── Filter chip group ── */
 .lib-filter-group {
   display: flex;

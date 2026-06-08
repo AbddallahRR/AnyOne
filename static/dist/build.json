@@ -1,13 +1,13 @@
 {
   "bundles": {
-    "css:index": "index.5267d088da0f.css",
-    "css:serie": "serie.c69c254151b7.css",
-    "css:reader": "reader.7975455d8676.css",
-    "css:settings": "settings.7fbf0ab06c9c.css",
-    "js:index": "index.50f88bdad37e.js",
-    "js:serie": "serie.5004d26c3113.js",
+    "css:index": "index.c04dde591841.css",
+    "css:serie": "serie.69d982959e07.css",
+    "css:reader": "reader.09443edeec21.css",
+    "css:settings": "settings.6d2d0e756cf4.css",
+    "js:index": "index.daea1b37a4fd.js",
+    "js:serie": "serie.608a943d1e23.js",
     "js:reader": "reader.ff4dc393d169.js",
-    "js:settings": "settings.00911a53ef70.js"
+    "js:settings": "settings.174df3c3c5bc.js"
   },
   "version": 1
 }

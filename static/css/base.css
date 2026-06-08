@@ -152,6 +152,29 @@ body::before {
 .btn-ghost:hover  { background: rgba(255,255,255,0.09); color: var(--text); border-color: var(--border-hi); }
 .btn-ghost:active { transform: scale(0.96); }
 
+.btn-secondary {
+  background: rgba(255,255,255,0.04);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: var(--card-r-xs);
+  padding: 8px 14px;
+  font-family: var(--ff-body);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.btn-secondary:hover {
+  background: rgba(255,255,255,0.08);
+  color: var(--text);
+  border-color: var(--border-hi);
+}
+
 /* ── Form inputs ── */
 .input-field {
   background: rgba(255,255,255,0.05);
@@ -282,7 +305,8 @@ select.input-field {
   backface-visibility: hidden;
   image-rendering: auto;
 }
-.media-card .type-chip { position: absolute; top: 8px; right: 8px; z-index: 2; }
+.media-card .type-chip   { position: absolute; top: 8px; right: 8px; z-index: 2; }
+.media-card .status-chip { position: absolute; bottom: 8px; right: 8px; z-index: 2; }
 .media-card .card-image::after {
   content: '';
   position: absolute;
@@ -488,6 +512,53 @@ select.input-field {
 
 .queue-progress-bar { transition: width 0.4s cubic-bezier(0.4,0,0.2,1); }
 
+/* ── Confirm Dialog ── */
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  animation: fadeIn 0.15s ease;
+}
+.confirm-dialog {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  max-width: 400px;
+  width: 90%;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.4);
+}
+.confirm-dialog h3 {
+  font-family: var(--ff-head);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 8px;
+}
+.confirm-dialog p {
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0 0 20px;
+}
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.confirm-actions .danger {
+  background: #f87171;
+}
+.confirm-actions .danger:hover {
+  background: #ef4444;
+  box-shadow: 0 0 24px rgba(248,113,113,0.35);
+}
+
 /* ── Gradient text ── */
 .accent-gradient {
   background: linear-gradient(120deg, var(--accent-lt) 0%, var(--accent2) 100%);
@@ -499,6 +570,7 @@ select.input-field {
 /* ── Utility ── */
 .content-panel        { animation: fadeIn 0.22s ease both; }
 .content-panel.hidden { display: none; }
+.hidden               { display: none !important; }
 .relative             { position: relative; }
 
 /* ── Card download button (search results) ── */

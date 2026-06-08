@@ -31,10 +31,10 @@ CSS_BUNDLES = {
 
 # ── JS bundles ────────────────────────────────────────────────────────────
 JS_BUNDLES = {
-    "index":    ["queue-indicator.js", "app.js"],
-    "serie":    ["queue-indicator.js", "serie.js"],
+    "index":    ["toast.js", "confirm.js", "queue-indicator.js", "app.js"],
+    "serie":    ["toast.js", "confirm.js", "queue-indicator.js", "serie.js"],
     "reader":   ["reader.js"],
-    "settings": ["settings.js"],
+    "settings": ["toast.js", "confirm.js", "settings.js"],
 }
 
 try:

@@ -79,6 +79,7 @@ video,
   backdrop-filter: blur(10px);
   transition: background 0.15s ease, transform 0.15s ease;
 }
+#back-to-serie i { font-size: 11px; }
 #back-to-serie:hover { background: rgba(30,30,40,0.92); transform: translateX(-2px); }
 
 /* ── Fullscreen button ── */

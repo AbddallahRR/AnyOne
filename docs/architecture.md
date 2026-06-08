@@ -59,7 +59,8 @@ AnyOne/
 │   ├── base.html             →   Layout: fonts, icons, CSS, JS globales
 │   ├── index.html            →   Home: búsqueda + biblioteca
 │   ├── serie.html            →   Detalle de serie (capítulos, portada)
-│   └── reader.html           →   Lector de video / manga
+│   ├── reader.html           →   Lector de video / manga
+│   └── settings.html         →   Wizard de 6 pasos para crear scrapers dinámicos
 │
 ├── scripts/
 │   └── build.py              →   Build: bundle + minify + content hash
@@ -71,11 +72,11 @@ AnyOne/
     │   ├── index.css         →   Filtros de biblioteca
     │   ├── serie.css         →   Cover parallax, hero, synopsis
     │   ├── reader.css        →   Lector full-screen, controles
+    │   ├── settings.css      →   Wizard de scrapers dinámicos (detect-section, pasos)
     │   ├── inter.css         →   Face-font de Inter (local, woff2)
-    │   ├── fontawesome.min.css → Iconos Font Awesome (local, sin CDN, ya no se usa en prod)
     │   └── fa-subset.css     →   Subset de FA solo con los 28 iconos usados
     ├── fonts/
-    │   ├── Inter-{300,400,500,600,700,800}.ttf   → Pesos de Inter (TTF, solo dev)
+    │   ├── Inter-{400,500,600,700,800}.ttf   → Pesos de Inter (TTF, solo dev)
     │   └── Inter-{400,500,600,700,800}.woff2     → Pesos de Inter convertidos a woff2
     ├── webfonts/
     │   ├── fa-solid-900.woff2           → Font Awesome completo (solo dev)
@@ -94,7 +95,9 @@ AnyOne/
         ├── serie.{hash}.css  →   CSS empaquetado para serie.html
         ├── serie.{hash}.js   →   JS empaquetado para serie.html
         ├── reader.{hash}.css →   CSS empaquetado para reader.html
-        └── reader.{hash}.js  →   JS empaquetado para reader.html
+        ├── reader.{hash}.js  →   JS empaquetado para reader.html
+        ├── settings.{hash}.css → CSS empaquetado para settings.html
+        └── settings.{hash}.js  → JS empaquetado para settings.html
 ```
 
 ---
@@ -151,6 +154,9 @@ Define todos los contratos de datos del proyecto usando Pydantic v2:
 - `WatchedToggleRequest`, `ProgressRequest`, `DeleteWatchedRequest`, `DeleteChapterRequest`
 - `AcknowledgeUpdatesRequest`, `SearchQuery`
 
+**Modelos de scrapers dinámicos:**
+- `ScraperConfigSchema` — schema de configuración de scrapers dinámicos con campos para búsqueda (`search_url_template`, `search_result_selector`, etc.), detalles, capítulos, contenido (`content_type`, `content_image_selector`, `content_image_attr`, `content_video_selector`) y catálogo (`has_catalog`, `catalog_url_template`, `catalog_item_selector`, `catalog_max_pages`, `catalog_cache_ttl`, etc.)
+
 **Modelos internos:**
 - `DownloadJob` — job tipado para la cola de descarga
 
@@ -193,8 +199,13 @@ Tres rutas que renderizan templates Jinja2:
 | `/` | `index.html` | Página principal (búsqueda + biblioteca local) |
 | `/serie/<type>/<source>/<id>` | `serie.html` | Detalle de serie y lista de capítulos |
 | `/reader/<type>/<source>/<content_id>/<chapter>` | `reader.html` | Lector/reproductor a pantalla completa |
+| `/settings` | `settings.html` | Wizard de scrapers dinámicos |
 
-Sin lógica propia — todo el peso está en el frontend (JS) y la API.
+La ruta `/serie` determina si la fuente soporta streaming (`can_stream`) consultando
+`src.supports_streaming` en el backend. Para fuentes manga siempre retorna `true`;
+para anime depende de que la fuente implemente `get_stream_url()`. El flag se pasa
+al template como `window.serieData.canStream` para que el frontend muestre u oculte
+el botón "Reproducir en streaming".
 
 ---
 
@@ -249,7 +260,7 @@ Todos los endpoints son `async def` y hacen `await` a los métodos async de las 
 
 - `GET /api/library` — lista de series descargadas
 - `GET/POST /api/library/status` y `GET /api/library/status/<ref>` — etiquetas (watching/completed/pending/none)
-- `GET/POST /api/progress/<type>/<source>/<id>` y `/progress/local/<type>/<id>` — progreso de usuario
+- `GET/POST /api/progress/<type>/<source>/<id>` y `/progress/local/<type>/<id>` — progreso de usuario. Funciona para cualquier `content_ref` ("fuente:id"), tanto local como remoto. El progreso se guarda automáticamente desde `reader.js` (cada 15 s para video, al hacer scroll para manga) y se muestra en la página de serie incluso para fuentes no locales.
 - `POST /api/watched` — marca capítulo visto
 - `GET /api/watched/<ref>` — lista de capítulos vistos
 - `POST /api/watched/toggle` — marca/desmarca
@@ -298,8 +309,9 @@ Endpoints para gestionar scrapers definidos por el usuario:
 - `GET /api/scraper-configs` — lista todas las configuraciones guardadas
 - `POST /api/scraper-configs` — crea/actualiza una configuración
 - `DELETE /api/scraper-configs/<name>` — elimina una configuración
-- `POST /api/scraper-configs/test` — prueba una configuración contra una URL real
+- `POST /api/scraper-configs/test` — prueba una configuración contra una URL real (soporta stages `search`, `details`, `chapters`, `content`; para `content` el límite de previsualización de imágenes se eliminó, mostrando todas las encontradas)
 - `POST /api/scraper-configs/auto-detect` — infiere selectores automáticamente desde una URL usando `selector_detector.py`
+- `POST /api/scraper-configs/detect-selectors` — detecta selectores CSS buscando elementos que contengan un texto visible específico (útil para sitios con selectores genéricos). Usa `detect_selector_by_text()` de `selector_detector.py`. Soporta stages `search`, `details`, `chapters`, `content`.
 - `POST /api/scraper-configs/reload` — recarga todas las fuentes dinámicas sin reiniciar el servidor
 
 El auto-detect funciona en 3 etapas (`search`, `details`, `chapters`) y devuelve selectores CSS candidatos que el usuario puede ajustar.
@@ -447,8 +459,11 @@ Analiza HTML de sitios upstream para sugerir selectores CSS automáticamente:
 - **`detect_search_selectors(html, url)`**: dado el HTML de una página de búsqueda/results, encuentra elementos que contienen enlaces, imágenes y títulos. Devuelve selectores candidatos para `card`, `title`, `link`, `image`, etc.
 - **`detect_detail_selectors(html, url)`**: analiza página de detalle de serie para inferir selectores de portada, sinopsis, géneros.
 - **`detect_chapter_selectors(html, url)`**: analiza página de capítulos para inferir selectores de ítem, número y enlace.
+- **`detect_selector_by_text(html, text, stage, base_url)`**: dado un texto visible que el usuario sabe que existe en la página, busca elementos que lo contengan y sugiere selectores para la etapa indicada (`search`, `details`, `chapters`, `content`). Para el stage `content` detecta imágenes lazy-loading: si un `<img>` tiene `src=""` y `data-src` poblado (o clases `page-img-lazy`, `lazy`, `lozad`), sugiere `data-src` como atributo en vez de `src`.
+- **`_find_elements_by_text(soup, text)`**: helper que busca nodos de texto que contengan el texto exacto, rankeando por puntuación de coincidencia exacta.
+- **`_find_parent_card(element, card_tags)`**: helper que asciende en el DOM hasta encontrar un contenedor que coincida con los tags de card típicos.
 
-Usa heurísticas como: elementos `<a>` con href, imágenes con `src` o `data-setsrc`, patrones de clase comunes. Es usado por `POST /api/scraper-configs/auto-detect` para guiar al usuario en la creación de scrapers dinámicos.
+Usa heurísticas como: elementos `<a>` con href, imágenes con `src` o `data-setsrc`, patrones de clase comunes, búsqueda por texto visible. Es usado por `POST /api/scraper-configs/auto-detect` y `POST /api/scraper-configs/detect-selectors` para guiar al usuario en la creación de scrapers dinámicos.
 
 ---
 
@@ -483,6 +498,12 @@ Las subclases pueden sobreescribir la versión async para implementaciones nativ
 | `get_chapter_images_sync(id, chapter_id)` | `get_chapter_images(id, chapter_id)` | `list[str]` | URLs de imágenes para streaming (solo manga) |
 | `warm_cache_sync()` | `warm_cache()` | `None` | Precarga catálogo en background (opcional) |
 
+Además, la propiedad `supports_streaming` (bool) indica si la fuente puede transmitir
+contenido en streaming. Por defecto `False` en `BaseSource`. `JkanimeSource` lo
+sobrescribe a `True`. `DynamicSource` retorna `True` solo si `content_type == 'video'`.
+Usado por `routers/pages.py` para decidir si mostrar el botón "Reproducir" en la
+página de serie para fuentes no locales.
+
 **Uso:**
 - La API FastAPI (async) llama a los métodos async (`await source.search(...)`)
 - Los download workers (hilos) llaman a los métodos sync (`source.search_sync(...)`)
@@ -496,7 +517,7 @@ Scraper de `jkanime.net`:
 - **Búsqueda**: scraping HTML con BeautifulSoup
 - **Detalles**: scraping de página de serie (portada, sinopsis)
 - **Capítulos**: extrae lista de `div.numChapter` con IDs codificados en base64
-- **Streaming**: decodifica base64 para obtener URL embed, usa `yt-dlp` para extraer URL directa
+- **Streaming**: decodifica base64 para obtener URL embed, usa `yt-dlp` para extraer URL directa. Propiedad `supports_streaming = True`.
 - **Descarga**: `yt-dlp` con prioridad de servidores (`_SERVER_PRIORITY`). Soporta: Mediafire, Mp4upload, Mega, Streamwish, VOE, Vidhide, etc.
 - **Cache**: catálogo no, solo detalles y capítulos por serie
 
@@ -549,9 +570,13 @@ Clase `DynamicSource` que hereda de `BaseSource` y ejecuta scrapers definidos po
 
 - **Configuración**: recibe un dict con `search_selector`, `detail_selectors`, `chapter_selectors`, `content_type`, etc.
 - **Búsqueda**: usa `soup.select(config['search_selector'])` para extraer resultados. También inspecciona `<template>` tags para sitios con patrón "load more" (deduplica por `href`).
+- **Catálogo**: si `has_catalog = true`, `search_sync()` construye el catálogo completo desde `catalog_url_template` (paginado con `{page}`, stop cuando una página devuelve 0 items o se alcanza `catalog_max_pages`). El catálogo se cachea con `DiskCache` (TTL configurable vía `catalog_cache_ttl`). La precarga se lanza en `warm_cache_sync()` con un lock por fuente para evitar refrescos concurrentes (cooldown de 24 h entre reconstrucciones, estilo ikigai). La búsqueda por query filtra localmente sobre el catálogo cacheado.
 - **Detalles**: extrae portada, sinopsis y géneros según selectores configurados.
 - **Capítulos**: extrae lista numerada de capítulos desde selectores CSS.
-- **Streaming/descarga**: según `content_type` (`image` o `video`), extrae URLs de imágenes o video URL.
+- **Streaming/descarga**: según `content_type` (`image` o `video`):
+  - `image`: extrae URLs de imágenes con `content_image_selector` + `content_image_attr`. El atributo por defecto es `src`, pero puede configurarse a `data-src` para sitios con lazy loading.
+  - `video`: extrae una URL de video con `content_video_selector` + `content_video_attr`.
+- **Propiedad `supports_streaming`**: retorna `True` solo si `content_type == 'video'`, usado por el frontend para mostrar el botón de reproducción.
 - **Cache**: usa `search_cache` con TTL por defecto.
 
 Las instancias son creadas por `core/scraper_config.py` y registradas automáticamente en `SOURCES['dynamic']`.
@@ -571,9 +596,10 @@ El proyecto usa **build en dos modos**:
 - **Producción** (`python3 scripts/build.py`): genera bundles minificados con content hash en `static/dist/`. `routers/pages.py` carga el manifiesto (`build.json`) y lo pasa al contexto Jinja2 como `{{ bundles }}`. Cada template carga un único CSS + JS por página.
 - **Desarrollo** (sin build): los templates cargan los archivos individuales como fallback, permitiendo editar CSS/JS sin recompilar.
 
-- **`base.html`**: layout raíz. En producción carga preload hints para Inter y FA subset. En desarrollo carga `inter.css`, `fontawesome.min.css`, `base.css`, `layout.css` y `queue-indicator.js`. Siempre incluye helpers inline de modal y animación de cards.
+- **`base.html`**: layout raíz. En producción carga preload hints para Inter y FA subset. En desarrollo carga `inter.css`, `fa-subset.css`, `base.css`, `layout.css`, `toast.js`, `confirm.js` y `queue-indicator.js`. Siempre incluye helpers inline de modal y animación de cards.
 - **`index.html`**: dos paneles (Anime / Manga) con pestañas, búsqueda por fuente (dropdown dinámico que solo muestra fuentes habilitadas), botón de engranaje para abrir popup de configuración de fuentes, biblioteca local con filtros por estado. Carga `bundles.css_index` + `bundles.js_index` (o `index.css` + `app.js` en dev).
-- **`serie.html`**: portada con parallax, sinopsis expandible, lista de capítulos con botones de play/download/watched, badge de actualizaciones. Carga `bundles.css_serie` + `bundles.js_serie`.
+- **`serie.html`**: portada con parallax, sinopsis expandible, lista de capítulos con botones de play/download/watched, badge de actualizaciones. Recibe `canStream` desde el backend vía `window.serieData`. Carga `bundles.css_serie` + `bundles.js_serie`.
+- **`settings.html`**: wizard de 6 pasos para crear scrapers dinámicos. Cada paso corresponde a una etapa del scraper: (1) nombre/tipo/URL base, (2) búsqueda con toggle de catálogo, (3) detalles, (4) capítulos, (5) contenido (imagen o video), (6) resumen. Incluye campos de texto de muestra y botones "Detectar" en cada paso para auto-detección por texto visible. La sección avanzada (selectores CSS) es colapsable y editable para override manual. Carga `bundles.css_settings` + `bundles.js_settings`.
 - **`reader.html`**: reproductor de video o visor de manga a pantalla completa. Carga `bundles.css_reader` + `bundles.js_reader`.
 
 ### CSS — Design system
@@ -583,14 +609,16 @@ El proyecto usa **build en dos modos**:
 - **`index.css`**: filtros de biblioteca tipo chip con scroll horizontal en móvil
 - **`serie.css`**: efecto parallax en cover, hero card, expansión de sinopsis, clase `.back-link`
 - **`reader.css`**: layout full-screen, barra de controles, botones de navegación
+- **`settings.css`**: wizard de scrapers dinámicos: secciones `.detect-section` para entrada de texto de muestra, `.step-indicator` para los 6 pasos, toggles de sección avanzada y catálogo
 - **`inter.css`**: define `@font-face` para Inter en woff2 (pesos 400, 500, 600, 700, 800). El peso 300 fue eliminado por no usarse.
-- **`fa-subset.css`**: subset de Font Awesome Free con solo los 28 iconos realmente usados. Incluye `@font-face` apuntando a `fa-solid-900-subset.woff2`. La versión completa (`fontawesome.min.css`, 84KB) solo se usa en desarrollo como fallback.
+- **`fa-subset.css`**: subset de Font Awesome Free con solo los 28 iconos realmente usados. Incluye `@font-face` apuntando a `fa-solid-900-subset.woff2`. Se usa tanto en desarrollo como en producción.
 
 ### JavaScript
 
 - **`app.js`**: tabs (Anime/Manga), búsqueda, biblioteca con filtros por estado, notificaciones toast, popup de estado, configuración de fuentes (icono engranaje → popup con checkboxes para activar/desactivar fuentes)
-- **`serie.js`**: carga de capítulos, progreso, descarga individual/completa, marcado como visto, detección de actualizaciones
-- **`reader.js`**: reproductor de video con guardado de progreso cada 5s, visor de manga con scroll virtual, atajos de teclado, precarga proactiva de imágenes (`_prefetchNextBatch`) — carga hasta 3 imágenes más allá de la ventana actual con `new Image()` y delay progresivo de 200ms
+- **`serie.js`**: carga de capítulos, descarga individual/completa, marcado como visto (watched), detección de actualizaciones. Progreso visible tanto para contenido local como remoto (ya no se oculta la sección de progreso para `source !== 'local'`). Botón "Continuar" navega a la URL correcta según la fuente. Determina si mostrar botón "Reproducir en streaming" mediante `window.serieData.canStream` (enviado desde `routers/pages.py`), eliminando la whitelist hardcodeada `STREAMABLE_SOURCES`.
+- **`reader.js`**: reproductor de video con guardado de progreso cada 5s, visor de manga con scroll virtual, atajos de teclado, precarga proactiva de imágenes (`_prefetchNextBatch`) — carga hasta 3 imágenes más allá de la ventana actual con `new Image()` y delay progresivo de 200ms. Guarda progreso en BD tanto para contenido local como remoto mediante `POST /api/progress/{type}/{source}/{content_id}`.
+- **`settings.js`**: wizard de 6 pasos para crear/editar scrapers dinámicos. Incluye: campos de texto de muestra + botón "Detectar" por cada paso (usa `detectByText()` que llama a `/api/scraper-configs/detect-selectors`), toggle de catálogo con campos específicos, `getCatalogConfig()`, `toggleCatalogSection()`. Maneja la creación, edición y guardado de configuraciones.
 - **`queue-indicator.js`**: indicador flotante de descargas activas con popup de progreso. Usa `fa-arrow-down` en vez de `fa-arrow-down-to-line` (no existente en FA6).
 
 ---
@@ -692,7 +720,7 @@ En `app.py` (clase `CachedStaticFiles`) se configuran dos niveles de caché:
     --layout-features=''
   # luego convertir TTF → woff2 con google/woff2
   ```
-- El CSS original `fontawesome.min.css` (84KB) se mantiene como fallback en desarrollo.
+- El CSS original `fontawesome.min.css` y las fuentes `Inter-300` se eliminaron por no usarse. Solo se usa `fa-subset.css` en todos los entornos.
 - Se corrigió `queue-indicator.js` para usar `fa-arrow-down` (`f063`) en vez de `fa-arrow-down-to-line` (inexistente en FA6 Free, causaba icono fantasma).
 
 ### Inter — conversión TTF → woff2 (65% de reducción)

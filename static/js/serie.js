@@ -264,10 +264,14 @@
       } else if (btn.classList.contains('watched-toggle-btn')) {
         toggleWatched(chapter);
       } else if (btn.classList.contains('delete-chapter-btn')) {
-        showConfirm(
-          `¿Eliminar el capítulo ${chapter}? Esta acción no se puede deshacer.`,
-          () => deleteChapter(chapter)
-        );
+        (async function () {
+          const confirmed = await window.showConfirm(
+            'Eliminar capítulo',
+            `¿Eliminar el capítulo ${chapter}? Esta acción no se puede deshacer.`,
+            'Eliminar', 'danger'
+          );
+          if (confirmed) deleteChapter(chapter);
+        })();
       }
     });
   }
@@ -291,31 +295,12 @@
 
   // ── Confirm dialog ─────────────────────────────────────────────────────
   function showConfirm(message, onConfirm) {
-    const modalTitle = document.getElementById('modal-title');
-    const modalBody  = document.getElementById('modal-body');
-    if (!modalTitle || !modalBody) {
-      if (window.confirm(message)) onConfirm();
-      return;
-    }
-    modalTitle.textContent = 'Confirmar acción';
-    modalBody.innerHTML = `
-      <div style="display:flex; flex-direction:column; gap:20px;">
-        <p style="color:var(--text); font-size:14px; line-height:1.6;">${message}</p>
-        <div style="display:flex; gap:10px; justify-content:flex-end;">
-          <button id="confirm-cancel" class="btn-ghost">Cancelar</button>
-          <button id="confirm-ok" class="btn-primary" style="background:#f87171;">
-            <i class="fas fa-trash-alt"></i> Eliminar
-          </button>
-        </div>
-      </div>`;
-    if (window.openModal) window.openModal();
-
-    document.getElementById('confirm-cancel').addEventListener('click', () => {
-      if (window.closeModal) window.closeModal();
-    });
-    document.getElementById('confirm-ok').addEventListener('click', () => {
-      if (window.closeModal) window.closeModal();
-      onConfirm();
+    window.showConfirm(
+      'Confirmar acción',
+      message,
+      'Eliminar', 'danger'
+    ).then(function (confirmed) {
+      if (confirmed) onConfirm();
     });
   }
 
@@ -595,7 +580,7 @@
           if (progressPercentSpan) progressPercentSpan.textContent = '?%';
         }
       } else {
-        if (progressPercentSpan) progressPercentSpan.textContent = '—';
+        if (progressPercentSpan) progressPercentSpan.textContent = `Pág. ${savedIndex + 1}`;
       }
     }
   }
@@ -647,16 +632,13 @@
       }
     } else {
       if (downloadAllBtn)   downloadAllBtn.style.display   = 'inline-flex';
-      if (continueBtn)      continueBtn.style.display      = 'none';
-      if (deleteWatchedBtn) deleteWatchedBtn.style.display = 'none';
-      const progressSection = document.getElementById('progress-section');
-      if (progressSection) progressSection.style.display  = 'none';
     }
 
     continueBtn?.addEventListener('click', () => {
       let last = currentChapterSpan?.textContent;
       if (!last || last === '—') last = '1';
-      window.location.href = `/reader/${type}/local/${id}/${last}`;
+      const src = isLocal ? 'local' : source;
+      window.location.href = `/reader/${type}/${src}/${id}/${last}`;
     });
 
     downloadAllBtn?.addEventListener('click', downloadFullSeries);
@@ -666,10 +648,11 @@
         '¿Eliminar todos los capítulos vistos (excepto el último)? Esta acción no se puede deshacer.',
         async () => {
           try {
+            const ref = isLocal ? `local:${id}` : `${source}:${id}`;
             const res  = await fetch('/api/delete-watched', {
               method:  'POST',
               headers: { 'Content-Type': 'application/json' },
-              body:    JSON.stringify({ content_ref: `local:${id}`, type }),
+              body:    JSON.stringify({ content_ref: ref, type }),
             });
             const data = await res.json();
             if (res.ok) {

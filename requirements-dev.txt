@@ -13,5 +13,7 @@ pycryptodome==3.23.0
 python-multipart==0.0.17
 requests==2.33.1
 requests-toolbelt==1.0.0
+rcssmin==1.1.4
+rjsmin==1.2.7
 uvicorn[standard]==0.34.0
 yt-dlp==2026.3.17
