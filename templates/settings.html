@@ -101,80 +101,184 @@
             </div>
           </div>
 
-          <!-- Step 2: Search -->
+          <!-- Step 2: Search / Catalog -->
           <div class="wizard-step hidden" data-step="2">
             <h3>Configuración de búsqueda</h3>
+
+            <!-- Toggle: search vs catalog -->
             <div class="form-group">
-              <label>URL de búsqueda (usa {base} y {query})</label>
-              <input id="wiz-search-url" type="text" class="input-field input-mono" placeholder="{base}/buscar?q={query}">
+              <label class="checkbox-label">
+                <input id="wiz-has-catalog" type="checkbox" class="toggle-input">
+                <span>Esta fuente no tiene búsqueda, usa un catálogo completo (como ikigai)</span>
+              </label>
+              <small>Marca esta opción si el sitio no tiene página de búsqueda pero sí un listado completo de obras que se puede cachear.</small>
             </div>
 
-            <!-- Advanced selectors (collapsible) -->
-            <div class="advanced-section">
-              <div class="advanced-toggle" onclick="this.parentElement.classList.toggle('advanced-open')">
-                <span><i class="fas fa-cog"></i> Configuración avanzada</span>
-                <span class="advanced-arrow"><i class="fas fa-chevron-down"></i></span>
+            <!-- ── Search section (default) ── -->
+            <div id="wiz-search-section">
+              <div class="form-group">
+                <label>URL de búsqueda (usa {base} y {query})</label>
+                <input id="wiz-search-url" type="text" class="input-field input-mono" placeholder="{base}/buscar?q={query}">
               </div>
-              <div class="advanced-body">
-                <div class="form-group">
-                  <label>Selector CSS para cada resultado</label>
-                  <input id="wiz-search-result" type="text" class="input-field input-mono" placeholder="ej: .result-card, .item · CSS que matchea cada tarjeta individual">
+
+              <!-- Sample text + detect -->
+              <div class="detect-section">
+                <label>Texto de un título que ves en los resultados</label>
+                <div class="test-row">
+                  <input id="wiz-search-sample-text" type="text" class="input-field" placeholder="ej: One Piece">
+                  <button id="wiz-search-detect-text-btn" class="btn-accent">Detectar</button>
                 </div>
-                <div class="form-row">
+                <small>Escribe el texto exacto de un título que aparezca en los resultados. El sistema buscará ese texto en el HTML y deducirá los selectores.</small>
+              </div>
+
+              <!-- Advanced selectors (collapsible) -->
+              <div class="advanced-section">
+                <div class="advanced-toggle" onclick="this.parentElement.classList.toggle('advanced-open')">
+                  <span><i class="fas fa-cog"></i> Configuración avanzada (selectores CSS)</span>
+                  <span class="advanced-arrow"><i class="fas fa-chevron-down"></i></span>
+                </div>
+                <div class="advanced-body">
                   <div class="form-group">
-                    <label>Selector del título</label>
-                    <input id="wiz-search-title" type="text" class="input-field input-mono" placeholder="h3 a, .title">
+                    <label>Selector CSS para cada resultado</label>
+                    <input id="wiz-search-result" type="text" class="input-field input-mono" placeholder="ej: .result-card, .item · CSS que matchea cada tarjeta individual">
                   </div>
-                  <div class="form-group">
-                    <label>Atributo</label>
-                    <select id="wiz-search-title-attr" class="input-field">
-                      <option value="text">texto</option>
-                      <option value="href">href</option>
-                      <option value="src">src</option>
-                      <option value="data-src">data-src</option>
-                      <option value="title">title</option>
-                      <option value="alt">alt</option>
-                    </select>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label>Selector del título</label>
+                      <input id="wiz-search-title" type="text" class="input-field input-mono" placeholder="h3 a, .title">
+                    </div>
+                    <div class="form-group">
+                      <label>Atributo</label>
+                      <select id="wiz-search-title-attr" class="input-field">
+                        <option value="text">texto</option>
+                        <option value="href">href</option>
+                        <option value="src">src</option>
+                        <option value="data-src">data-src</option>
+                        <option value="title">title</option>
+                        <option value="alt">alt</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label>Selector del enlace</label>
+                      <input id="wiz-search-url-sel" type="text" class="input-field input-mono" placeholder="a[href*='serie']">
+                    </div>
+                    <div class="form-group">
+                      <label>Atributo</label>
+                      <select id="wiz-search-url-attr" class="input-field">
+                        <option value="href">href</option>
+                        <option value="src">src</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label>Selector de portada</label>
+                      <input id="wiz-search-cover" type="text" class="input-field input-mono" placeholder="img.cover, .poster img">
+                    </div>
+                    <div class="form-group">
+                      <label>Atributo</label>
+                      <select id="wiz-search-cover-attr" class="input-field">
+                        <option value="src">src</option>
+                        <option value="data-src">data-src</option>
+                        <option value="data-lazy">data-lazy</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
-                <div class="form-row">
-                  <div class="form-group">
-                    <label>Selector del enlace</label>
-                    <input id="wiz-search-url-sel" type="text" class="input-field input-mono" placeholder="a[href*='serie']">
-                  </div>
-                  <div class="form-group">
-                    <label>Atributo</label>
-                    <select id="wiz-search-url-attr" class="input-field">
-                      <option value="href">href</option>
-                      <option value="src">src</option>
-                    </select>
-                  </div>
+              </div>
+
+              <div class="test-panel">
+                <div class="test-row">
+                  <input id="wiz-search-test-query" type="text" class="input-field" placeholder="Query de prueba (ej: one piece)">
+                  <button id="wiz-search-detect-btn" class="btn-accent" title="Auto-detectar selectores (sin texto de muestra)"><i class="fas fa-wand-magic-sparkles"></i></button>
+                  <button id="wiz-search-test-btn" class="btn-secondary">Probar</button>
                 </div>
-                <div class="form-row">
+                <div id="wiz-search-test-results" class="test-results"></div>
+              </div>
+            </div>
+
+            <!-- ── Catalog section (shown when has_catalog is checked) ── -->
+            <div id="wiz-catalog-section" class="hidden">
+              <div class="form-group">
+                <label>URL del catálogo (usa {base} y {page})</label>
+                <input id="wiz-catalog-url" type="text" class="input-field input-mono" placeholder="{base}/series/page/{page}/">
+              </div>
+
+              <div class="detect-section">
+                <label>Texto de un título que ves en el catálogo</label>
+                <div class="test-row">
+                  <input id="wiz-catalog-sample-text" type="text" class="input-field" placeholder="ej: One Piece">
+                  <button id="wiz-catalog-detect-text-btn" class="btn-accent">Detectar</button>
+                </div>
+                <small>Escribe el texto exacto de un título visible en la página del catálogo.</small>
+              </div>
+
+              <div class="advanced-section">
+                <div class="advanced-toggle" onclick="this.parentElement.classList.toggle('advanced-open')">
+                  <span><i class="fas fa-cog"></i> Configuración avanzada (selectores CSS)</span>
+                  <span class="advanced-arrow"><i class="fas fa-chevron-down"></i></span>
+                </div>
+                <div class="advanced-body">
                   <div class="form-group">
-                    <label>Selector de portada</label>
-                    <input id="wiz-search-cover" type="text" class="input-field input-mono" placeholder="img.cover, .poster img">
+                    <label>Selector para cada ítem del catálogo</label>
+                    <input id="wiz-catalog-item" type="text" class="input-field input-mono" placeholder="ej: .series-card, .item">
                   </div>
-                  <div class="form-group">
-                    <label>Atributo</label>
-                    <select id="wiz-search-cover-attr" class="input-field">
-                      <option value="src">src</option>
-                      <option value="data-src">data-src</option>
-                      <option value="data-lazy">data-lazy</option>
-                    </select>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label>Selector del título</label>
+                      <input id="wiz-catalog-title" type="text" class="input-field input-mono" placeholder="h3 a, .title">
+                    </div>
+                    <div class="form-group">
+                      <label>Atributo</label>
+                      <select id="wiz-catalog-title-attr" class="input-field">
+                        <option value="text">texto</option>
+                        <option value="title">title</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label>Selector del enlace</label>
+                      <input id="wiz-catalog-url-sel" type="text" class="input-field input-mono" placeholder="a[href*='serie']">
+                    </div>
+                    <div class="form-group">
+                      <label>Atributo</label>
+                      <select id="wiz-catalog-url-attr" class="input-field">
+                        <option value="href">href</option>
+                        <option value="src">src</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label>Selector de portada</label>
+                      <input id="wiz-catalog-cover" type="text" class="input-field input-mono" placeholder="img.cover, .poster img">
+                    </div>
+                    <div class="form-group">
+                      <label>Atributo</label>
+                      <select id="wiz-catalog-cover-attr" class="input-field">
+                        <option value="src">src</option>
+                        <option value="data-src">data-src</option>
+                        <option value="data-lazy">data-lazy</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label>Máx. páginas a cachear</label>
+                      <input id="wiz-catalog-max-pages" type="number" class="input-field" value="100" min="1" max="1000">
+                    </div>
+                    <div class="form-group">
+                      <label>TTL del caché (segundos)</label>
+                      <input id="wiz-catalog-ttl" type="number" class="input-field" value="259200" min="3600">
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div class="test-panel">
-              <div class="test-row">
-                <input id="wiz-search-test-query" type="text" class="input-field" placeholder="Query de prueba (ej: one piece)">
-                <button id="wiz-search-detect-btn" class="btn-accent" title="Auto-detectar selectores"><i class="fas fa-wand-magic-sparkles"></i></button>
-                <button id="wiz-search-test-btn" class="btn-secondary">Probar</button>
-              </div>
-              <div id="wiz-search-test-results" class="test-results"></div>
-            </div>
             <div class="wizard-nav">
               <button class="wiz-prev btn-ghost" data-prev="1">Anterior</button>
               <button class="wiz-next btn-primary" data-next="3">Siguiente</button>
@@ -189,10 +293,20 @@
               <input id="wiz-details-url" type="text" class="input-field input-mono" placeholder="{base}/{content_id}/">
             </div>
 
+            <!-- Sample text + detect -->
+            <div class="detect-section">
+              <label>Texto del título que ves en la página de detalles</label>
+              <div class="test-row">
+                <input id="wiz-details-sample-text" type="text" class="input-field" placeholder="ej: One Piece">
+                <button id="wiz-details-detect-text-btn" class="btn-accent">Detectar</button>
+              </div>
+              <small>Escribe el título exacto de la serie tal como aparece en la página.</small>
+            </div>
+
             <!-- Advanced selectors (collapsible) -->
             <div class="advanced-section">
               <div class="advanced-toggle" onclick="this.parentElement.classList.toggle('advanced-open')">
-                <span><i class="fas fa-cog"></i> Configuración avanzada</span>
+                <span><i class="fas fa-cog"></i> Configuración avanzada (selectores CSS)</span>
                 <span class="advanced-arrow"><i class="fas fa-chevron-down"></i></span>
               </div>
               <div class="advanced-body">
@@ -250,10 +364,20 @@
               <input id="wiz-chapters-url" type="text" class="input-field input-mono" placeholder="{base}/{content_id}/">
             </div>
 
+            <!-- Sample text + detect -->
+            <div class="detect-section">
+              <label>Texto de un número de capítulo que ves en la lista</label>
+              <div class="test-row">
+                <input id="wiz-chapters-sample-text" type="text" class="input-field" placeholder="ej: Capítulo 1">
+                <button id="wiz-chapters-detect-text-btn" class="btn-accent">Detectar</button>
+              </div>
+              <small>Escribe el texto exacto de un capítulo (ej: "1", "Capítulo 1", "Chapter 1").</small>
+            </div>
+
             <!-- Advanced selectors (collapsible) -->
             <div class="advanced-section">
               <div class="advanced-toggle" onclick="this.parentElement.classList.toggle('advanced-open')">
-                <span><i class="fas fa-cog"></i> Configuración avanzada</span>
+                <span><i class="fas fa-cog"></i> Configuración avanzada (selectores CSS)</span>
                 <span class="advanced-arrow"><i class="fas fa-chevron-down"></i></span>
               </div>
               <div class="advanced-body">
@@ -319,10 +443,20 @@
               <input id="wiz-content-url" type="text" class="input-field input-mono" placeholder="{base}/leer/{content_id}/{chapter_id}/">
             </div>
 
+            <!-- Sample text + detect (images) -->
+            <div class="detect-section" id="wiz-content-detect-section">
+              <label>Texto alternativo (alt) de una imagen del capítulo</label>
+              <div class="test-row">
+                <input id="wiz-content-sample-text" type="text" class="input-field" placeholder="ej: página 1">
+                <button id="wiz-content-detect-text-btn" class="btn-accent">Detectar</button>
+              </div>
+              <small>Opcional: si las imágenes tienen texto alt, escríbelo aquí para detectar el selector.</small>
+            </div>
+
             <!-- Advanced selectors (collapsible) -->
             <div class="advanced-section">
               <div class="advanced-toggle" onclick="this.parentElement.classList.toggle('advanced-open')">
-                <span><i class="fas fa-cog"></i> Configuración avanzada</span>
+                <span><i class="fas fa-cog"></i> Configuración avanzada (selectores CSS)</span>
                 <span class="advanced-arrow"><i class="fas fa-chevron-down"></i></span>
               </div>
               <div class="advanced-body">

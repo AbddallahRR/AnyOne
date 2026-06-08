@@ -46,6 +46,10 @@ class BaseSource:
     async def download_chapter(self, content_id: str, chapter_id: str, dest_folder: str, chapter_number: str | None = None) -> str:
         return await self._run_in_executor(self.download_chapter_sync, content_id, chapter_id, dest_folder, chapter_number)
 
+    @property
+    def supports_streaming(self) -> bool:
+        return False
+
     def get_stream_url_sync(self, content_id: str, chapter_id: str) -> str | None:
         return None
 

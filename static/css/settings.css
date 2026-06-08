@@ -359,6 +359,28 @@
   line-height: 1.5;
 }
 
+/* ── Detect section (text-based selector detection) ── */
+.detect-section {
+  margin: 16px 0;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px dashed rgba(196,107,255,0.3);
+  background: rgba(196,107,255,0.04);
+}
+.detect-section label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+.detect-section small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
 /* ── Test panel ── */
 .test-panel {
   margin: 20px 0;

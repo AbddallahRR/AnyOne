@@ -2,12 +2,15 @@ import json
 import logging
 import os
 import re
+import threading
+import time
 import urllib.parse
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
 from core.database import get_conn
+from core.disk_cache import search_cache
 from core.http_pool import HttpPool
 from core.models import Chapter, SearchResult, SeriesDetails
 from core.throttle import rate_limiter
@@ -17,6 +20,10 @@ from . import BaseSource
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = 30
+
+_REFRESH_COOLDOWN = 86400  # 24 h
+_refresh_locks: dict[str, threading.Lock] = {}
+_last_refresh_ts: dict[str, float] = {}
 
 
 # --- IGNORE --- (base class for generated scrapers, not standalone)
@@ -129,8 +136,121 @@ class DynamicSource(BaseSource):
             url = url.replace(f'{{{key}}}', str(value))
         return url
 
+    # ── Catalog / warm cache ────────────────────────────────────────────
+
+    def warm_cache_sync(self) -> None:
+        cfg = self._load_config().get('config', {})
+        if not cfg.get('has_catalog'):
+            return
+        cache_key = f"{self.CONFIG_NAME}:catalog"
+        if search_cache.get(cache_key) is not None:
+            return
+        t = threading.Thread(target=self._build_catalog, daemon=True)
+        t.start()
+
+    def _build_catalog(self) -> None:
+        cfg = self._load_config().get('config', {})
+        if not cfg.get('has_catalog'):
+            return
+
+        url_template = cfg.get('catalog_url_template', '')
+        if not url_template:
+            return
+
+        item_sel = cfg.get('catalog_item_selector', '')
+        title_sel = cfg.get('catalog_title_selector', '')
+        title_attr = cfg.get('catalog_title_attr', 'text')
+        url_sel = cfg.get('catalog_url_selector', '')
+        url_attr = cfg.get('catalog_url_attr', 'href')
+        cover_sel = cfg.get('catalog_cover_selector', '')
+        cover_attr = cfg.get('catalog_cover_attr', 'src')
+        pagination_param = cfg.get('catalog_pagination_param', 'page')
+        max_pages = int(cfg.get('catalog_max_pages', 100))
+        cache_ttl = int(cfg.get('catalog_cache_ttl', 259200))
+
+        all_items: list[dict] = []
+        page = 1
+        while page <= max_pages:
+            url = self._build_url(url_template, page=str(page))
+            if pagination_param and '{page}' not in url_template:
+                parsed = list(urllib.parse.urlparse(url))
+                qs = dict(urllib.parse.parse_qsl(parsed[4]))
+                qs[pagination_param] = str(page)
+                parsed[4] = urllib.parse.urlencode(qs)
+                url = urllib.parse.urlunparse(parsed)
+            try:
+                html = self._get(url).text
+            except Exception as exc:
+                logger.warning(f"{self.CONFIG_NAME}: catalog page {page} error: {exc}")
+                break
+
+            soup = BeautifulSoup(html, 'html.parser')
+            items = soup.select(item_sel) if item_sel else [soup]
+            page_items = 0
+            for item in items:
+                title = self._extract_attr(item, title_sel, title_attr) if title_sel else ''
+                href = self._extract_attr(item, url_sel, url_attr) if url_sel else ''
+                if not href and item.name == 'a':
+                    href = item.get('href', '')
+                cover = self._extract_attr(item, cover_sel, cover_attr) if cover_sel else ''
+                if not title:
+                    continue
+                content_id = href.rstrip('/').split('/')[-1] if href else title
+                if cover and cover.startswith('//'):
+                    cover = 'https:' + cover
+                elif cover and cover.startswith('/'):
+                    cover = urljoin(self.BASE_URL, cover)
+                all_items.append({'id': content_id, 'title': title, 'cover': cover})
+                page_items += 1
+
+            if page_items == 0:
+                break
+            page += 1
+
+        if all_items:
+            search_cache.set(f"{self.CONFIG_NAME}:catalog", all_items, ttl=cache_ttl)
+            logger.info(f"{self.CONFIG_NAME}: catalog built with {len(all_items)} items")
+
+    def _refresh_catalog_background(self) -> None:
+        name = self.CONFIG_NAME
+        now = time.time()
+        if now - _last_refresh_ts.get(name, 0) < _REFRESH_COOLDOWN:
+            return
+        lock = _refresh_locks.setdefault(name, threading.Lock())
+        if not lock.acquire(blocking=False):
+            return
+        try:
+            cache_key = f"{name}:catalog"
+            search_cache.delete(cache_key)
+            self._build_catalog()
+            _last_refresh_ts[name] = time.time()
+        finally:
+            lock.release()
+
     def search_sync(self, query: str) -> list[SearchResult]:
         cfg = self._load_config().get('config', {})
+
+        # If has_catalog, search from cached catalog instead of live HTTP
+        if cfg.get('has_catalog'):
+            cache_key = f"{self.CONFIG_NAME}:catalog"
+            catalog = search_cache.get(cache_key)
+            if catalog is None:
+                self._build_catalog()
+                catalog = search_cache.get(cache_key) or []
+            else:
+                self._refresh_catalog_background()
+
+            query_lower = query.lower().strip()
+            results = []
+            for item in catalog:
+                if query_lower in item.get('title', '').lower():
+                    results.append(SearchResult(
+                        id=item['id'],
+                        title=item['title'],
+                        cover=item.get('cover', ''),
+                    ))
+            return results
+
         url_template = cfg.get('search_url_template', '')
         if not url_template:
             return []
@@ -311,6 +431,11 @@ class DynamicSource(BaseSource):
                     seen.add(norm)
                     urls.append(norm)
         return urls
+
+    @property
+    def supports_streaming(self) -> bool:
+        cfg = self._load_config().get('config', {})
+        return cfg.get('content_type') == 'video'
 
     def get_stream_url_sync(self, content_id: str, chapter_id: str) -> str | None:
         cfg = self._load_config().get('config', {})

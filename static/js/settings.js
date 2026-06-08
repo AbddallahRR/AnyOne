@@ -221,6 +221,20 @@
     setVal('wiz-search-cover', data.search_cover_selector || '');
     setVal('wiz-search-cover-attr', data.search_cover_attr || 'src');
 
+    // Catalog fields
+    $('wiz-has-catalog').checked = data.has_catalog || false;
+    toggleCatalogSection();
+    setVal('wiz-catalog-url', data.catalog_url_template || '');
+    setVal('wiz-catalog-item', data.catalog_item_selector || '');
+    setVal('wiz-catalog-title', data.catalog_title_selector || '');
+    setVal('wiz-catalog-title-attr', data.catalog_title_attr || 'text');
+    setVal('wiz-catalog-url-sel', data.catalog_url_selector || '');
+    setVal('wiz-catalog-url-attr', data.catalog_url_attr || 'href');
+    setVal('wiz-catalog-cover', data.catalog_cover_selector || '');
+    setVal('wiz-catalog-cover-attr', data.catalog_cover_attr || 'src');
+    setVal('wiz-catalog-max-pages', data.catalog_max_pages || 100);
+    setVal('wiz-catalog-ttl', data.catalog_cache_ttl || 259200);
+
     setVal('wiz-details-url', data.details_url_template || '');
     setVal('wiz-details-title', data.details_title_selector || '');
     setVal('wiz-details-title-attr', data.details_title_attr || 'text');
@@ -255,6 +269,8 @@
     });
     $('wiz-name').readOnly = false;
     $('wiz-type').value = 'manga';
+    $('wiz-has-catalog').checked = false;
+    toggleCatalogSection();
     toggleContentConfig();
   }
 
@@ -303,6 +319,14 @@
     $('wiz-video-config').classList.toggle('hidden', !isVideo);
   }
 
+  // ── Catalog toggle ──
+  $('wiz-has-catalog').addEventListener('change', toggleCatalogSection);
+  function toggleCatalogSection() {
+    const isCatalog = $('wiz-has-catalog').checked;
+    $('wiz-search-section').classList.toggle('hidden', isCatalog);
+    $('wiz-catalog-section').classList.toggle('hidden', !isCatalog);
+  }
+
   function collectStepData(step) {
     switch (step) {
       case 1:
@@ -312,14 +336,28 @@
         if (!_editingName) _wizardData.name = getVal('wiz-name');
         break;
       case 2:
-        _wizardData.search_url_template = getVal('wiz-search-url');
-        _wizardData.search_result_selector = getVal('wiz-search-result');
-        _wizardData.search_title_selector = getVal('wiz-search-title');
-        _wizardData.search_title_attr = getVal('wiz-search-title-attr');
-        _wizardData.search_url_selector = getVal('wiz-search-url-sel');
-        _wizardData.search_url_attr = getVal('wiz-search-url-attr');
-        _wizardData.search_cover_selector = getVal('wiz-search-cover');
-        _wizardData.search_cover_attr = getVal('wiz-search-cover-attr');
+        _wizardData.has_catalog = $('wiz-has-catalog').checked;
+        if (_wizardData.has_catalog) {
+          _wizardData.catalog_url_template = getVal('wiz-catalog-url');
+          _wizardData.catalog_item_selector = getVal('wiz-catalog-item');
+          _wizardData.catalog_title_selector = getVal('wiz-catalog-title');
+          _wizardData.catalog_title_attr = getVal('wiz-catalog-title-attr');
+          _wizardData.catalog_url_selector = getVal('wiz-catalog-url-sel');
+          _wizardData.catalog_url_attr = getVal('wiz-catalog-url-attr');
+          _wizardData.catalog_cover_selector = getVal('wiz-catalog-cover');
+          _wizardData.catalog_cover_attr = getVal('wiz-catalog-cover-attr');
+          _wizardData.catalog_max_pages = parseInt(getVal('wiz-catalog-max-pages')) || 100;
+          _wizardData.catalog_cache_ttl = parseInt(getVal('wiz-catalog-ttl')) || 259200;
+        } else {
+          _wizardData.search_url_template = getVal('wiz-search-url');
+          _wizardData.search_result_selector = getVal('wiz-search-result');
+          _wizardData.search_title_selector = getVal('wiz-search-title');
+          _wizardData.search_title_attr = getVal('wiz-search-title-attr');
+          _wizardData.search_url_selector = getVal('wiz-search-url-sel');
+          _wizardData.search_url_attr = getVal('wiz-search-url-attr');
+          _wizardData.search_cover_selector = getVal('wiz-search-cover');
+          _wizardData.search_cover_attr = getVal('wiz-search-cover-attr');
+        }
         break;
       case 3:
         _wizardData.details_url_template = getVal('wiz-details-url');
@@ -507,6 +545,55 @@
     }
   });
 
+  // ── Helper: fill URL templates ──
+  function fillUrl(template, vars) {
+    let url = template;
+    for (const [k, v] of Object.entries(vars)) {
+      url = url.replace(`{${k}}`, v);
+    }
+    return url;
+  }
+
+  // ── Text-based detect helpers ──
+  async function detectByText(url, stage, text, baseUrl, resultsEl) {
+    if (!url || !text) {
+      showToast('Completa la URL y el texto de muestra', 'error');
+      return;
+    }
+    resultsEl.innerHTML = '<div class="loading-spinner"></div>';
+    try {
+      const res = await fetch('/api/scraper-configs/detect-selectors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, stage, text, base_url: baseUrl }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || 'HTTP error');
+      const data = await res.json();
+      if (!data.detected || !Object.keys(data.detected).length) {
+        resultsEl.innerHTML = `<p style="color:var(--warning);">${escHtml(data.warning || 'No se pudieron detectar selectores con ese texto.')}</p>`;
+        return;
+      }
+      const d = data.detected;
+      let html = '<div class="detect-success"><strong>Selectores detectados:</strong><div class="detect-grid">';
+      for (const [key, val] of Object.entries(d)) {
+        if (key === 'confidence' || key === 'matched_text') continue;
+        html += `<span>${key.replace(/_/g,' ')}:</span><code>${escHtml(String(val))}</code>`;
+      }
+      if (d.confidence !== undefined) {
+        html += `<span>Confianza:</span><code>${d.confidence}</code>`;
+      }
+      if (d.matched_text) {
+        html += `<span>Texto encontrado:</span><code>${escHtml(d.matched_text)}</code>`;
+      }
+      html += '</div></div>';
+      resultsEl.innerHTML = html;
+      return d;
+    } catch (err) {
+      resultsEl.innerHTML = `<p style="color:var(--danger);">Error: ${err.message}</p>`;
+      return null;
+    }
+  }
+
   // ── Auto-detect search (magic wand in step 2) ──
   $('wiz-search-detect-btn').addEventListener('click', async () => {
     const query = getVal('wiz-search-test-query');
@@ -557,6 +644,139 @@
       resultsEl.innerHTML = `<p style="color:var(--danger);">Error: ${err.message}</p>`;
     }
   });
+
+  // ── Detect by text: Search (step 2) ──
+  $('wiz-search-detect-text-btn').addEventListener('click', async () => {
+    const sampleText = getVal('wiz-search-sample-text');
+    const baseUrl = getVal('wiz-base-url');
+    const urlTemplate = getVal('wiz-search-url');
+    const query = getVal('wiz-search-test-query');
+    if (!baseUrl || !urlTemplate || !query) {
+      showToast('Completa URL base, URL de búsqueda y query de prueba', 'error');
+      return;
+    }
+    const url = fillUrl(urlTemplate, { base: baseUrl, query: encodeURIComponent(query) });
+    const resultsEl = $('wiz-search-test-results');
+    const d = await detectByText(url, 'search', sampleText, baseUrl, resultsEl);
+    if (d) {
+      if (d.result_selector) setVal('wiz-search-result', d.result_selector);
+      if (d.title_selector) setVal('wiz-search-title', d.title_selector);
+      if (d.title_attr) setVal('wiz-search-title-attr', d.title_attr);
+      if (d.url_selector) setVal('wiz-search-url-sel', d.url_selector);
+      if (d.url_attr) setVal('wiz-search-url-attr', d.url_attr);
+      if (d.cover_selector) setVal('wiz-search-cover', d.cover_selector);
+      if (d.cover_attr) setVal('wiz-search-cover-attr', d.cover_attr);
+      openAdvanced();
+    }
+  });
+
+  // ── Detect by text: Details (step 3) ──
+  $('wiz-details-detect-text-btn').addEventListener('click', async () => {
+    const sampleText = getVal('wiz-details-sample-text');
+    const baseUrl = getVal('wiz-base-url');
+    const urlTemplate = getVal('wiz-details-url');
+    const contentId = getVal('wiz-details-test-id');
+    if (!baseUrl || !urlTemplate || !contentId) {
+      showToast('Completa URL base, URL de detalles y content ID', 'error');
+      return;
+    }
+    const url = fillUrl(urlTemplate, { base: baseUrl, content_id: encodeURIComponent(contentId) });
+    const resultsEl = $('wiz-details-test-results');
+    const d = await detectByText(url, 'details', sampleText, baseUrl, resultsEl);
+    if (d) {
+      if (d.selector) setVal('wiz-details-title', d.selector);
+      if (d.attr) setVal('wiz-details-title-attr', d.attr);
+      openAdvanced();
+    }
+  });
+
+  // ── Detect by text: Chapters (step 4) ──
+  $('wiz-chapters-detect-text-btn').addEventListener('click', async () => {
+    const sampleText = getVal('wiz-chapters-sample-text');
+    const baseUrl = getVal('wiz-base-url');
+    const urlTemplate = getVal('wiz-chapters-url');
+    const contentId = getVal('wiz-chapters-test-id');
+    if (!baseUrl || !urlTemplate || !contentId) {
+      showToast('Completa URL base, URL de capítulos y content ID', 'error');
+      return;
+    }
+    const url = fillUrl(urlTemplate, { base: baseUrl, content_id: encodeURIComponent(contentId) });
+    const resultsEl = $('wiz-chapters-test-results');
+    const d = await detectByText(url, 'chapters', sampleText, baseUrl, resultsEl);
+    if (d) {
+      if (d.item_selector) setVal('wiz-chapters-item', d.item_selector);
+      if (d.num_selector) setVal('wiz-chapters-num', d.num_selector);
+      if (d.num_attr) setVal('wiz-chapters-num-attr', d.num_attr);
+      if (d.url_selector) setVal('wiz-chapters-url-sel', d.url_selector);
+      if (d.url_attr) setVal('wiz-chapters-url-attr', d.url_attr);
+      openAdvanced();
+    }
+  });
+
+  // ── Detect by text: Content (step 5) ──
+  $('wiz-content-detect-text-btn').addEventListener('click', async () => {
+    const sampleText = getVal('wiz-content-sample-text');
+    const baseUrl = getVal('wiz-base-url');
+    const urlTemplate = getVal('wiz-content-url');
+    const contentId = getVal('wiz-details-test-id') || getVal('wiz-chapters-test-id') || '';
+    const chapterId = getVal('wiz-content-test-chapter');
+    if (!baseUrl || !urlTemplate || !contentId || !chapterId) {
+      showToast('Completa URL base, URL de contenido, content ID y chapter ID', 'error');
+      return;
+    }
+    const url = fillUrl(urlTemplate, {
+      base: baseUrl,
+      content_id: encodeURIComponent(contentId),
+      chapter_id: encodeURIComponent(chapterId),
+    });
+    const resultsEl = $('wiz-content-test-results');
+    const d = await detectByText(url, 'content', sampleText, baseUrl, resultsEl);
+    if (d) {
+      if (d.selector) setVal('wiz-content-img', d.selector);
+      if (d.attr) setVal('wiz-content-img-attr', d.attr);
+      openAdvanced();
+    }
+  });
+
+  // ── Detect by text: Catalog (in step 2 catalog section) ──
+  $('wiz-catalog-detect-text-btn').addEventListener('click', async () => {
+    const sampleText = getVal('wiz-catalog-sample-text');
+    const baseUrl = getVal('wiz-base-url');
+    const urlTemplate = getVal('wiz-catalog-url');
+    if (!baseUrl || !urlTemplate) {
+      showToast('Completa URL base y URL del catálogo', 'error');
+      return;
+    }
+    const url = fillUrl(urlTemplate, { base: baseUrl, page: '1' });
+    const resultsEl = $('wiz-search-test-results');
+    const d = await detectByText(url, 'search', sampleText, baseUrl, resultsEl);
+    if (d) {
+      if (d.result_selector) setVal('wiz-catalog-item', d.result_selector);
+      if (d.title_selector) setVal('wiz-catalog-title', d.title_selector);
+      if (d.title_attr) setVal('wiz-catalog-title-attr', d.title_attr);
+      if (d.url_selector) setVal('wiz-catalog-url-sel', d.url_selector);
+      if (d.url_attr) setVal('wiz-catalog-url-attr', d.url_attr);
+      if (d.cover_selector) setVal('wiz-catalog-cover', d.cover_selector);
+      if (d.cover_attr) setVal('wiz-catalog-cover-attr', d.cover_attr);
+      openAdvanced();
+    }
+  });
+
+  function getCatalogConfig() {
+    return {
+      has_catalog: $('wiz-has-catalog').checked,
+      catalog_url_template: getVal('wiz-catalog-url'),
+      catalog_item_selector: getVal('wiz-catalog-item'),
+      catalog_title_selector: getVal('wiz-catalog-title'),
+      catalog_title_attr: getVal('wiz-catalog-title-attr'),
+      catalog_url_selector: getVal('wiz-catalog-url-sel'),
+      catalog_url_attr: getVal('wiz-catalog-url-attr'),
+      catalog_cover_selector: getVal('wiz-catalog-cover'),
+      catalog_cover_attr: getVal('wiz-catalog-cover-attr'),
+      catalog_max_pages: parseInt(getVal('wiz-catalog-max-pages')) || 100,
+      catalog_cache_ttl: parseInt(getVal('wiz-catalog-ttl')) || 259200,
+    };
+  }
 
   function getSearchConfig() {
     return {
@@ -619,6 +839,7 @@
 
     const config = {
       ...getSearchConfig(),
+      ...getCatalogConfig(),
       ...getDetailsConfig(),
       ...getChaptersConfig(),
       ...getContentConfig(),
@@ -660,17 +881,19 @@
     const label = getVal('wiz-label');
     const baseUrl = getVal('wiz-base-url');
 
+    const isCatalog = $('wiz-has-catalog').checked;
     const items = [
       ['Nombre interno', name || '—'],
       ['Tipo', type],
       ['Etiqueta', label || '—'],
       ['URL base', baseUrl || '—'],
-      ['URL busqueda', getVal('wiz-search-url') || '—'],
+      [isCatalog ? 'URL catálogo' : 'URL busqueda', isCatalog ? (getVal('wiz-catalog-url') || '—') : (getVal('wiz-search-url') || '—')],
+      [isCatalog ? 'Catálogo cacheado' : '', isCatalog ? 'Sí' : ''],
       ['URL detalles', getVal('wiz-details-url') || '—'],
       ['URL capitulos', getVal('wiz-chapters-url') || '—'],
       ['Tipo contenido', getVal('wiz-content-type') === 'video' ? 'Video' : 'Imagenes'],
       ['URL contenido', getVal('wiz-content-url') || '—'],
-    ];
+    ].filter(row => row[1] !== '');
 
     $('wiz-summary').innerHTML = items.map(([label, value]) =>
       `<div class="summary-row"><span class="summary-label">${label}</span><span class="summary-value">${value}</span></div>`

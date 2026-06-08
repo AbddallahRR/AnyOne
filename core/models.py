@@ -162,6 +162,19 @@ class ScraperConfigSchema(BaseModel):
     content_video_selector: str = ''
     content_video_attr: str = 'src'
 
+    has_catalog: bool = False
+    catalog_url_template: str = ''
+    catalog_item_selector: str = ''
+    catalog_title_selector: str = ''
+    catalog_title_attr: str = 'text'
+    catalog_url_selector: str = ''
+    catalog_url_attr: str = 'href'
+    catalog_cover_selector: str = ''
+    catalog_cover_attr: str = 'src'
+    catalog_pagination_param: str = 'page'
+    catalog_max_pages: int = 100
+    catalog_cache_ttl: int = 259200
+
     extra_headers: dict = {}
     extra_cookies: dict = {}
     use_cloudscraper: bool = False

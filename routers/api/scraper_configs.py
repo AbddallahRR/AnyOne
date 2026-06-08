@@ -332,7 +332,7 @@ async def api_test_config(request: Request):
                 src = img.get(img_attr) or img.get('src')
                 if src:
                     images.append(_normalize_url(src, base_url))
-            extracted['images'] = images[:20]
+            extracted['images'] = images
         else:
             vid_sel = config.get('content_video_selector', '')
             vid_attr = config.get('content_video_attr', 'src')
@@ -375,6 +375,49 @@ async def api_auto_detect(request: Request):
         return {'suggestions': suggestions, 'html_preview': html[:3000]}
 
     raise HTTPException(status_code=400, detail=f'Unknown stage: {stage}')
+
+
+@api_router.post('/scraper-configs/detect-selectors')
+async def api_detect_selectors(request: Request):
+    """Detect CSS selectors by finding elements that contain a given text.
+
+    Accepts:
+    ```json
+    {
+      \"url\": \"https://example.com/search?q=one+piece\",
+      \"stage\": \"details|search|chapters|content\",
+      \"text\": \"One Piece\",                    // sample text visible on page
+      \"base_url\": \"https://example.com\"       // optional, for cover URL normalization
+    }
+    ```
+    """
+    body = await request.json()
+    url = body.get('url', '').strip()
+    stage = body.get('stage', 'details')
+    text = body.get('text', '').strip()
+    base_url = body.get('base_url', '').rstrip('/')
+
+    if not url:
+        raise HTTPException(status_code=400, detail='url is required')
+    if not text:
+        raise HTTPException(status_code=400, detail='text (sample text) is required')
+
+    try:
+        rate_limiter.wait(url)
+        scraper = HttpPool.get_scraper()
+        resp = scraper.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=_TIMEOUT)
+        resp.raise_for_status()
+        html = resp.text
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f'Fetch error: {exc}')
+
+    from core.selector_detector import detect_selector_by_text
+
+    result = detect_selector_by_text(html, text, stage, base_url)
+    if not result:
+        return {'detected': {}, 'warning': f'No se encontró ningún elemento con el texto "{text}" en la página.'}
+
+    return {'detected': result}
 
 
 @api_router.post('/scraper-configs/auto-configure')

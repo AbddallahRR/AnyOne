@@ -7,10 +7,9 @@
     return;
   }
 
-  const { type, source, id } = window.serieData;
+  const { type, source, id, canStream: canStreamData } = window.serieData;
   const isLocal = source === 'local';
-  const STREAMABLE_SOURCES = { anime: ['jkanime'], manga: ['nartag', 'manhwaweb', 'ikigai'] };
-  const canStream = !isLocal && STREAMABLE_SOURCES[type]?.includes(source);
+  const canStream = !isLocal && (type === 'manga' || canStreamData);
 
   let chapters        = [];
   let sortAsc         = true;

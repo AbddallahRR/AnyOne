@@ -4,6 +4,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from core.sources import get_source
+
 router = APIRouter(tags=['pages'])
 templates = Jinja2Templates(directory='templates')
 
@@ -33,9 +35,16 @@ def settings_page(request: Request):
 
 @router.get('/serie/{type}/{source}/{id}', response_class=HTMLResponse)
 def serie_detail(request: Request, type: str, source: str, id: str):
+    can_stream = False
+    if source != 'local':
+        src = get_source(type, source)
+        if src is not None:
+            can_stream = type == 'manga' or src.supports_streaming
+
     return templates.TemplateResponse(request, 'serie.html', {
         'bundles': _load_bundles(),
-        'type': type, 'source': source, 'id': id
+        'type': type, 'source': source, 'id': id,
+        'can_stream': can_stream,
     })
 
 

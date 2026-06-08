@@ -644,6 +644,10 @@ class JkanimeSource(BaseSource):
 
         raise Exception(f"No se pudo descargar el capítulo {chapter_id} desde ningún servidor")
 
+    @property
+    def supports_streaming(self) -> bool:
+        return True
+
     def get_stream_url_sync(self, content_id: str, chapter_id: str) -> str | None:
         """
         Devuelve la mejor URL de streaming disponible para el episodio.
