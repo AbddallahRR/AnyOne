@@ -118,6 +118,12 @@ try:
 except Exception as exc:
     logger.warning(f'Error loading dynamic sources: {exc}')
 
+# Pre-populate health tracker for all sources
+from core.scraper_health import init_health_for_source  # noqa: E402
+
+for src in ALL_SOURCES_META:
+    init_health_for_source(src['name'])
+
 
 def get_source(content_type, source_name):
     """Devuelve la instancia de la fuente o None si no existe."""
@@ -125,12 +131,14 @@ def get_source(content_type, source_name):
 
 
 def get_enabled_sources(content_type):
-    """Devuelve un dict {nombre: instancia} solo con las fuentes habilitadas."""
+    """Devuelve un dict {nombre: instancia} solo con las fuentes habilitadas
+    y que no esten temporalmente desactivadas por errores."""
+    from core.scraper_health import is_available
     enabled = set(get_enabled_source_names())
     return {
         name: src
         for name, src in SOURCES.get(content_type, {}).items()
-        if name in enabled
+        if name in enabled and is_available(name)
     }
 
 

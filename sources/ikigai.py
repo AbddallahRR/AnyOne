@@ -171,7 +171,7 @@ class IkigaiSource(BaseSource):
         try:
             html = self._fetch_url(url)
         except Exception as exc:
-            logger.error(f"Ikigai: error al cargar catálogo página {page}: {exc}")
+            logger.exception(f"Ikigai: error al cargar catálogo página {page}: {exc}")
             return page, [], False
 
         soup       = BeautifulSoup(html, 'html.parser')
@@ -229,7 +229,7 @@ class IkigaiSource(BaseSource):
                         search_cache.set(page_key, items, ttl=_PAGE_TTL)
                     return pg, items, has_next_p
                 except Exception as exc:
-                    logger.error(f"Ikigai: error página {pg}: {exc}")
+                    logger.exception(f"Ikigai: error página {pg}: {exc}")
                     return pg, [], False
 
             with ThreadPoolExecutor(max_workers=_PAGE_WORKERS) as pool:
@@ -292,7 +292,7 @@ class IkigaiSource(BaseSource):
                     IkigaiSource._last_refresh_ts = time.time()
                     logger.info(f"Ikigai: catálogo refrescado ({len(catalog)} series)")
             except Exception as exc:
-                logger.error(f"Ikigai: error en refresco de catálogo: {exc}")
+                logger.exception(f"Ikigai: error en refresco de catálogo: {exc}")
             finally:
                 IkigaiSource._refresh_lock.release()
 
@@ -318,7 +318,7 @@ class IkigaiSource(BaseSource):
                     IkigaiSource._last_refresh_ts = time.time()
                     logger.info(f"Ikigai: precarga completada ({len(catalog)} series)")
             except Exception as exc:
-                logger.error(f"Ikigai: error en precarga: {exc}")
+                logger.exception(f"Ikigai: error en precarga: {exc}")
 
         threading.Thread(target=_do, daemon=True).start()
 
@@ -397,7 +397,7 @@ class IkigaiSource(BaseSource):
             try:
                 html = self._fetch_url(url)
             except Exception as exc:
-                logger.error(f"Ikigai: error al cargar capítulos página {page} "
+                logger.exception(f"Ikigai: error al cargar capítulos página {page} "
                              f"de '{content_id}': {exc}")
                 break
 

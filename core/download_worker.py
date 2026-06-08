@@ -58,13 +58,16 @@ def _save_series_metadata(series_folder: str, title: str, source_name: str,
 
                 thumb_path = os.path.join(series_folder, 'thumb.webp')
                 if not os.path.exists(thumb_path):
-                    import subprocess
-                    subprocess.run(
-                        ['ffmpeg', '-y', '-i', cover_path,
-                         '-vf', 'scale=200:-1:force_original_aspect_ratio=decrease',
-                         '-q:v', '75', thumb_path],
-                        capture_output=True, timeout=15
-                    )
+                    try:
+                        import subprocess
+                        subprocess.run(
+                            ['ffmpeg', '-y', '-i', cover_path,
+                             '-vf', 'scale=200:-1:force_original_aspect_ratio=decrease',
+                             '-q:v', '75', thumb_path],
+                            capture_output=True, timeout=15
+                        )
+                    except Exception as thumb_exc:
+                        logger.warning(f"No se pudo generar thumbnail para '{title}': {thumb_exc}")
 
         try:
             save_content_to_db(content_type, source_name, content_id,
@@ -73,7 +76,7 @@ def _save_series_metadata(series_folder: str, title: str, source_name: str,
             logger.warning(f"No se pudo actualizar BD para '{final_title}': {db_exc}")
 
     except Exception as exc:
-        logger.error(f"Error descargando portada/detalles para '{title}': {exc}")
+        logger.exception(f"Error descargando portada/detalles para '{title}': {exc}")
         cover_filename = ''
 
     info = {
@@ -156,10 +159,25 @@ def _download_worker(worker_id: int) -> None:
                 chap_num = chapter.number
                 chap_id  = chapter.id
 
-                try:
-                    source.download_chapter_sync(content_id, chap_id, series_folder, chap_num)
-                except Exception as exc:
-                    raise Exception(f"Error en capítulo {chap_num}: {exc}") from exc
+                max_retries = 2
+                last_exc = None
+                for attempt in range(1 + max_retries):
+                    try:
+                        source.download_chapter_sync(content_id, chap_id, series_folder, chap_num)
+                        last_exc = None
+                        break
+                    except Exception as exc:
+                        last_exc = exc
+                        if attempt < max_retries:
+                            logger.warning(f"Job {job_id}: error en capítulo {chap_num} "
+                                           f"(intento {attempt + 1}/{max_retries + 1}): {exc}")
+                            time.sleep(2 ** attempt)  # backoff: 2s, 4s
+                        else:
+                            logger.exception(f"Job {job_id}: error definitivo en capítulo {chap_num} "
+                                             f"tras {max_retries + 1} intentos")
+
+                if last_exc is not None:
+                    raise Exception(f"Error en capítulo {chap_num} tras {max_retries + 1} intentos: {last_exc}") from last_exc
 
                 percent = int((idx / total) * 100)
                 if chapter_id:

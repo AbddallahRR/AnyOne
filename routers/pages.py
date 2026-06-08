@@ -20,6 +20,7 @@ def _load_bundles() -> dict:
             bundles[key.replace(':', '_')] = f"dist/{filename}"
         return bundles
     except Exception:
+        logger.warning('pages: error cargando manifest.json')
         return {}
 
 

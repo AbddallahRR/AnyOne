@@ -528,6 +528,7 @@
       await _renderProgress(prog);
     } catch (err) {
       console.error('loadProgress:', err);
+      showNotification('Error al cargar progreso', 'error');
     }
   }
 

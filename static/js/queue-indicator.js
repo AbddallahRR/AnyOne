@@ -390,6 +390,7 @@
 
     } catch (err) {
       console.error('queue-indicator:', err);
+      showNotification('Error al consultar cola de descarga', 'error');
       scheduleNext(5000);
     }
   }

@@ -161,7 +161,7 @@ class JkanimeSource(BaseSource):
                         })
                     return result
                 except Exception:
-                    pass
+                    logger.debug('Jkanime: fallo JSON en _parse_servers_from_js, usando regex')
 
         # Intento 2: regex directo sobre pares clave-valor
         servers = []
@@ -338,7 +338,7 @@ class JkanimeSource(BaseSource):
         try:
             html = self._get(url).text
         except Exception as exc:
-            logger.error(f"Jkanime search error: {exc}")
+            logger.exception(f"Jkanime search error: {exc}")
             return []
 
         soup    = BeautifulSoup(html, 'html.parser')
@@ -365,7 +365,7 @@ class JkanimeSource(BaseSource):
             try:
                 slug = href.strip('/').split('/')[-1] or None
             except Exception:
-                pass
+                logger.debug('Jkanime: error extrayendo slug')
 
             # Estado y tipo desde los <li> de la card
             li_items = card.select('.anime__item__text ul li')
@@ -414,7 +414,7 @@ class JkanimeSource(BaseSource):
         try:
             html = self._get(f"{self.BASE_URL}/{content_id}/").text
         except Exception as exc:
-            logger.error(f"Jkanime get_details error para '{content_id}': {exc}")
+            logger.exception(f"Jkanime get_details error para '{content_id}': {exc}")
             return SeriesDetails(title=content_id, cover=cover_fallback)
 
         soup = BeautifulSoup(html, 'html.parser')
@@ -485,7 +485,7 @@ class JkanimeSource(BaseSource):
         try:
             resp = self._get(main_url)
         except Exception as exc:
-            logger.error(f"Jkanime get_chapters error para '{content_id}': {exc}")
+            logger.exception(f"Jkanime get_chapters error para '{content_id}': {exc}")
             return []
 
         html = resp.text
@@ -504,7 +504,7 @@ class JkanimeSource(BaseSource):
                         serie_id = m.group(1)
                         break
         if not serie_id:
-            logger.error(f"Jkanime: no se pudo obtener serie_id para '{content_id}'")
+            logger.exception(f"Jkanime: no se pudo obtener serie_id para '{content_id}'")
             return []
 
         logger.debug(f"Jkanime: serie_id={serie_id} para '{content_id}'")
@@ -525,6 +525,7 @@ class JkanimeSource(BaseSource):
             if not data.get('total') and not data.get('data'):
                 data = None
         except Exception:
+            logger.debug(f'Jkanime: GET AJAX falló para {content_id}, usando POST')
             data = None
 
         if data is None:
@@ -532,7 +533,7 @@ class JkanimeSource(BaseSource):
                 ajax_resp = self._post(ajax_url, data=post_data, referer=main_url)
                 data      = ajax_resp.json()
             except Exception as exc:
-                logger.error(f"Jkanime: error en AJAX para '{content_id}': {exc}")
+                logger.exception(f"Jkanime: error en AJAX para '{content_id}': {exc}")
                 return []
 
         total = data.get('total', 0)
@@ -663,7 +664,7 @@ class JkanimeSource(BaseSource):
         try:
             html = self._get(cap_url).text
         except Exception as exc:
-            logger.error(f"Jkanime get_stream_url error: {exc}")
+            logger.exception(f"Jkanime get_stream_url error: {exc}")
             return None
 
         # 1. Iframes nativos del JKPlayer (video[0] = "<iframe src='...'/>")
@@ -717,7 +718,7 @@ class JkanimeSource(BaseSource):
         try:
             html = self._get(cap_url).text
         except Exception as exc:
-            logger.error(f"Jkanime get_episode_links error: {exc}")
+            logger.exception(f"Jkanime get_episode_links error: {exc}")
             return EpisodeLinks()
 
         soup    = BeautifulSoup(html, 'html.parser')
@@ -748,7 +749,7 @@ class JkanimeSource(BaseSource):
                         seen_stream.add(stream_url)
                         stream_links[variant].append(EpisodeLink(server=name, url=stream_url))
                 except Exception:
-                    pass
+                    logger.debug(f'Jkanime: error decodificando remote para {name}')
 
             # Download: construir URL desde remote_base + slug
             if remote_base and slug:

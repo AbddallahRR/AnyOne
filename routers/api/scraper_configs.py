@@ -7,8 +7,14 @@ from fastapi import HTTPException, Request
 
 from core.http_pool import HttpPool
 from core.scraper_config import (
-    create_config, delete_config, get_all_configs, get_config, update_config,
+    create_config,
+    delete_config,
+    get_all_configs,
+    get_config,
+    update_config,
 )
+from core.scraper_health import get_all_status
+from core.scraper_health import re_enable as health_re_enable
 from core.throttle import rate_limiter
 
 from . import api_router
@@ -75,8 +81,12 @@ async def api_create_config(request: Request):
     if not base_url:
         raise HTTPException(status_code=400, detail='Base URL is required')
 
-    result = create_config(name, source_type, label, base_url, config)
-    return result
+    try:
+        result = create_config(name, source_type, label, base_url, config)
+        return result
+    except Exception as exc:
+        logger.exception(f'Error creando configuracion {name}: {exc}')
+        raise HTTPException(status_code=500, detail='Error al crear la configuracion')
 
 
 @api_router.put('/scraper-configs/{name}')
@@ -93,9 +103,13 @@ async def api_update_config(name: str, request: Request):
         enabled = bool(enabled)
     config = body.get('config')
 
-    result = update_config(name, label=label, base_url=base_url,
-                           enabled=enabled, config=config)
-    return result
+    try:
+        result = update_config(name, label=label, base_url=base_url,
+                               enabled=enabled, config=config)
+        return result
+    except Exception as exc:
+        logger.exception(f'Error actualizando configuracion {name}: {exc}')
+        raise HTTPException(status_code=500, detail='Error al actualizar la configuracion')
 
 
 @api_router.delete('/scraper-configs/{name}')
@@ -133,7 +147,8 @@ async def api_test_config(request: Request):
             resp.raise_for_status()
             html = resp.text
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=f'Fetch error: {exc}')
+            logger.exception(f'Fetch error en test_search_selectors: {exc}')
+            raise HTTPException(status_code=502, detail='Error al obtener la pagina de busqueda')
 
         soup = BeautifulSoup(html, 'html.parser')
         result_sel = config.get('search_result_selector', '')
@@ -226,7 +241,8 @@ async def api_test_config(request: Request):
             resp.raise_for_status()
             html = resp.text
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=f'Fetch error: {exc}')
+            logger.exception(f'Fetch error en test_details_selectors: {exc}')
+            raise HTTPException(status_code=502, detail='Error al obtener la pagina de detalles')
 
         soup = BeautifulSoup(html, 'html.parser')
         extracted = {'html_preview': html[:5000], 'url': url}
@@ -314,7 +330,8 @@ async def api_test_config(request: Request):
             resp.raise_for_status()
             html = resp.text
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=f'Fetch error: {exc}')
+            logger.exception(f'Fetch error en test_content_selectors: {exc}')
+            raise HTTPException(status_code=502, detail='Error al obtener la pagina de contenido')
 
         soup = BeautifulSoup(html, 'html.parser')
         content_type = config.get('content_type', 'image')
@@ -365,7 +382,8 @@ async def api_auto_detect(request: Request):
         resp.raise_for_status()
         html = resp.text
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f'Fetch error: {exc}')
+        logger.exception(f'Fetch error en auto_detect_selectors: {exc}')
+        raise HTTPException(status_code=502, detail='Error al obtener la pagina para deteccion automatica')
 
     from core.selector_detector import detect_search_selectors
 
@@ -409,7 +427,8 @@ async def api_detect_selectors(request: Request):
         resp.raise_for_status()
         html = resp.text
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f'Fetch error: {exc}')
+        logger.exception(f'Fetch error en detect_selector: {exc}')
+        raise HTTPException(status_code=502, detail='Error al obtener la pagina para deteccion de selector')
 
     from core.selector_detector import detect_selector_by_text
 
@@ -462,3 +481,27 @@ async def api_auto_configure(request: Request):
         errors.append(f'Error fetching search URL: {exc}')
 
     return {'config': config, 'errors': errors, 'search_url': search_url}
+
+
+# ---------------------------------------------------------------------------
+# Scraper Health Status
+# ---------------------------------------------------------------------------
+
+
+@api_router.get('/scraper-health')
+async def api_scraper_health():
+    """Estado de salud de todas las fuentes (errores, desactivaciones temporales)."""
+    sources_status = get_all_status()
+    return sources_status
+
+
+@api_router.post('/scraper-health/re-enable')
+async def api_scraper_re_enable(request: Request):
+    body = await request.json()
+    name = body.get('name', '').strip()
+    if not name:
+        raise HTTPException(status_code=400, detail='name is required')
+    health_re_enable(name)
+    from core.database import update_source_settings
+    update_source_settings({name: True})
+    return {'status': 'ok', 'name': name}

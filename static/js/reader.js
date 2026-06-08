@@ -40,7 +40,10 @@
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ content_ref: ref, chapter: currentChapterNum }),
       });
-    } catch (e) { console.warn('markCurrentAsWatched:', e); }
+    } catch (e) { 
+      console.warn('markCurrentAsWatched:', e); 
+      showNotification('Error al marcar como visto', 'error');
+    }
   }
 
   // ── Lista de capítulos ─────────────────────────────────────────────────
@@ -113,13 +116,14 @@
 
   // ── Anime ──────────────────────────────────────────────────────────────
   async function loadAnimeChapter() {
-    const chapterArg = source === 'local' ? currentChapterNum : currentChapterId();
-    const videoUrl = source === 'local'
-      ? `/api/play/local/anime/${content_id}/${chapterArg}`
-      : `/api/play/remote/anime/${source}/${content_id}/${chapterArg}`;
+    try {
+      const chapterArg = source === 'local' ? currentChapterNum : currentChapterId();
+      const videoUrl = source === 'local'
+        ? `/api/play/local/anime/${content_id}/${chapterArg}`
+        : `/api/play/remote/anime/${source}/${content_id}/${chapterArg}`;
 
-    let savedTime = 0;
-    let duration  = 0;
+      let savedTime = 0;
+      let duration  = 0;
     let hasMarked = false;
 
     // [OPT-1] Progreso + duración en paralelo (eran secuenciales)
@@ -194,6 +198,13 @@
       if (!hasMarked) { hasMarked = true; markCurrentAsWatched(); }
       if (currentChapterIndex < chaptersList.length - 1) nextChapter();
     });
+    } catch (err) {
+      console.error(err);
+      if (chapterWrapper) chapterWrapper.innerHTML =
+        `<div style="color:var(--accent2); text-align:center; padding:20px;">
+           Error al cargar capítulo: ${err.message}
+         </div>`;
+    }
   }
 
   // ── Manga — visor virtual con búsqueda binaria ─────────────────────────

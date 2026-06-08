@@ -57,6 +57,7 @@ class DynamicSource(BaseSource):
             except (json.JSONDecodeError, TypeError):
                 self._cfg['config'] = {}
         except Exception:
+            logger.warning(f'{self.CONFIG_NAME}: error cargando config desde DB')
             self._cfg = {}
         return self._cfg
 
@@ -105,6 +106,7 @@ class DynamicSource(BaseSource):
         try:
             elem = soup.select_one(selector)
         except Exception:
+            logger.debug(f'{self.CONFIG_NAME}: error en selector CSS: {selector}')
             return ''
         if not elem:
             return ''
@@ -259,7 +261,7 @@ class DynamicSource(BaseSource):
         try:
             html = self._get(url).text
         except Exception as exc:
-            logger.error(f"{self.CONFIG_NAME} search error: {exc}")
+            logger.exception(f"{self.CONFIG_NAME} search error: {exc}")
             return []
 
         soup = BeautifulSoup(html, 'html.parser')
@@ -304,7 +306,7 @@ class DynamicSource(BaseSource):
         try:
             html = self._get(url).text
         except Exception as exc:
-            logger.error(f"{self.CONFIG_NAME} details error: {exc}")
+            logger.exception(f"{self.CONFIG_NAME} details error: {exc}")
             return SeriesDetails(title=content_id)
 
         soup = BeautifulSoup(html, 'html.parser')
@@ -355,7 +357,7 @@ class DynamicSource(BaseSource):
                 html = self._get(url).text
             except Exception as exc:
                 if page == 1:
-                    logger.error(f"{self.CONFIG_NAME} chapters error: {exc}")
+                    logger.exception(f"{self.CONFIG_NAME} chapters error: {exc}")
                 break
 
             soup = BeautifulSoup(html, 'html.parser')
@@ -364,6 +366,7 @@ class DynamicSource(BaseSource):
                 try:
                     items = soup.select(item_sel)
                 except Exception:
+                    logger.debug(f'{self.CONFIG_NAME}: error en selector CSS de capitulos: {item_sel}')
                     items = []
                 for tmpl in soup.find_all('template'):
                     found = tmpl.select(item_sel) if item_sel else []
@@ -414,7 +417,7 @@ class DynamicSource(BaseSource):
         try:
             resp = self._get(url)
         except Exception as exc:
-            logger.error(f"{self.CONFIG_NAME} chapter images error: {exc}")
+            logger.exception(f"{self.CONFIG_NAME} chapter images error: {exc}")
             return []
 
         soup = BeautifulSoup(resp.text, 'html.parser')
@@ -450,6 +453,7 @@ class DynamicSource(BaseSource):
         try:
             resp = self._get(url)
         except Exception:
+            logger.warning(f'{self.CONFIG_NAME}: error obteniendo pagina de video: {url}')
             return None
 
         vid_sel = cfg.get('content_video_selector', '')

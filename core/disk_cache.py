@@ -79,7 +79,7 @@ class DiskCache:
             try:
                 os.unlink(tmp_path)
             except Exception:
-                pass
+                logger.warning('disk_cache: error limpiando archivo temporal %s', tmp_path)
 
     async def aset(self, key: str, value, ttl: int | None = None) -> None:
         return await asyncio.to_thread(self.set, key, value, ttl)

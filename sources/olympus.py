@@ -141,7 +141,7 @@ class OlympusSource(BaseSource):
                 if catalog:
                     search_cache.set("olympus:catalog", catalog, ttl=self._CATALOG_TTL)
             except Exception as exc:
-                logger.error(f"Olympus: error en precarga: {exc}")
+                logger.exception(f"Olympus: error en precarga: {exc}")
 
         threading.Thread(target=_do, daemon=True).start()
 
@@ -163,7 +163,7 @@ class OlympusSource(BaseSource):
                     OlympusSource._last_refresh_ts = time.time()
                     logger.info(f"Olympus: catálogo refrescado ({len(catalog)} series)")
             except Exception as exc:
-                logger.error(f"Olympus: error en refresco de catálogo: {exc}")
+                logger.exception(f"Olympus: error en refresco de catálogo: {exc}")
             finally:
                 OlympusSource._refresh_lock.release()
 
@@ -188,7 +188,7 @@ class OlympusSource(BaseSource):
         try:
             data = self._get_json(first_url)
         except Exception as exc:
-            logger.error(f"Olympus: error al cargar página 1: {exc}")
+            logger.exception(f"Olympus: error al cargar página 1: {exc}")
             return []
 
         first_series = data.get('data', {}).get('series', {}).get('data', [])
@@ -217,7 +217,7 @@ class OlympusSource(BaseSource):
                 items = data.get('data', {}).get('series', {}).get('data', [])
                 return items
             except Exception as exc:
-                logger.error(f"Olympus: error página {pg}: {exc}")
+                logger.exception(f"Olympus: error página {pg}: {exc}")
                 return None
 
         pages = list(range(2, last_page + 1))
@@ -279,6 +279,7 @@ class OlympusSource(BaseSource):
                 q in s.get('name', '').lower() or q in s['slug'].lower()
             )]
         except Exception:
+            logger.debug('Olympus: error filtrando catalogo')
             return []
 
     # -----------------------------------------------------------------------
@@ -302,7 +303,7 @@ class OlympusSource(BaseSource):
             search_cache.set(cache_key, result.model_dump())
             return result
         except Exception as exc:
-            logger.error(f"Olympus: error obteniendo detalles de '{content_id}': {exc}")
+            logger.exception(f"Olympus: error obteniendo detalles de '{content_id}': {exc}")
             return SeriesDetails(title=content_id)
 
     # -----------------------------------------------------------------------
@@ -335,7 +336,7 @@ class OlympusSource(BaseSource):
                     break
                 page += 1
             except Exception as exc:
-                logger.error(f"Olympus: error obteniendo capítulos de '{content_id}': {exc}")
+                logger.exception(f"Olympus: error obteniendo capítulos de '{content_id}': {exc}")
                 break
 
         chapters.sort(

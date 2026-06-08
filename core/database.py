@@ -257,7 +257,7 @@ def cleanup_download_queue() -> None:
                         shutil.rmtree(filepath)
                         logger.info(f"[CLEANUP] Carpeta parcial eliminada: {filepath}")
         except Exception as exc:
-            logger.error(f"[CLEANUP] Error limpiando job {job_id}: {exc}")
+            logger.exception(f"[CLEANUP] Error limpiando job {job_id}: {exc}")
 
     try:
         with conn:

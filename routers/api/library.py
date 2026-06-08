@@ -132,7 +132,7 @@ def api_delete_watched(data: DeleteWatchedRequest):
             delete_watched_chapter(data.content_ref, chap)
             deleted.append(chap)
         except Exception as exc:
-            logger.error(f"Error borrando capítulo {chap} de '{data.content_ref}': {exc}")
+            logger.exception(f"Error borrando capítulo {chap} de '{data.content_ref}': {exc}")
 
     return {'deleted': deleted, 'message': f'Se eliminaron {len(deleted)} capítulos vistos'}
 
@@ -149,7 +149,7 @@ def api_delete_chapter(data: DeleteChapterRequest):
     try:
         _delete_chapter_files(serie_path, data.type, data.chapter)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f'Error al eliminar archivo: {exc}')
+        raise HTTPException(status_code=500, detail='Error al eliminar archivo')
 
     last_chapter_str, _ = get_progress(data.content_ref)
     try:

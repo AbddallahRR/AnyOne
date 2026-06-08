@@ -232,6 +232,15 @@
         </div>`;
     }
 
+    es.addEventListener('source_error', e => {
+      const data = JSON.parse(e.data);
+      const msg = data.disabled
+        ? `${data.source} desactivada temporalmente: ${data.error}`
+        : `${data.source}: ${data.error}`;
+      showNotification(msg, 'error', 4000);
+      if (window.refreshScraperHealth) window.refreshScraperHealth();
+    });
+
     es.addEventListener('results', e => {
       const data = JSON.parse(e.data);
       const items = data.results;
@@ -432,6 +441,7 @@
       }
     } catch (err) {
       console.warn('fetchUpdatesBadge:', err);
+      showNotification('Error al cargar actualizaciones', 'error');
     }
   }
 
@@ -802,6 +812,7 @@
       mangaSelect.insertBefore(allOpt, mangaSelect.firstChild);
     } catch (err) {
       console.warn('Error cargando fuentes:', err);
+      showNotification('Error al cargar fuentes de búsqueda', 'error');
     }
   }
 

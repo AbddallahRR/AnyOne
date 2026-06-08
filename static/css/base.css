@@ -91,8 +91,8 @@ body::before {
   letter-spacing: 0.02em;
   white-space: nowrap;
 }
-.chip-anime    { background: rgba(124,92,252,0.18); color: var(--accent-lt); border: 1px solid rgba(124,92,252,0.3);  }
-.chip-manga    { background: rgba(252,92,138,0.16); color: #ff94b8;          border: 1px solid rgba(252,92,138,0.3);  }
+.chip-anime    { background: rgba(124,92,252,0.50); color: var(--accent-lt); border: 1px solid rgba(124,92,252,0.3);  }
+.chip-manga    { background: rgba(252,92,138,0.50); color: #ff94b8;          border: 1px solid rgba(252,92,138,0.3);  }
 .chip-source   { background: rgba(255,255,255,0.07); color: var(--text-dim); border: 1px solid var(--border-hi);      }
 .chip-watching  { background: rgba(124,92,252,0.18); color: var(--accent-lt); border: 1px solid rgba(124,92,252,0.3); }
 .chip-completed { background: rgba(52,211,153,0.15);  color: #6ee7b7;         border: 1px solid rgba(52,211,153,0.3); }

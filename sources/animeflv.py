@@ -142,7 +142,7 @@ class AnimeflvSource(BaseSource):
             # Primero intento directo con json.loads
             return json.loads(expression)
         except Exception:
-            pass
+            logger.debug('Animeflv: JSON directo falló, normalizando')
 
         try:
             # Normalizar: comillas simples → dobles, trailing commas
@@ -151,6 +151,7 @@ class AnimeflvSource(BaseSource):
             cleaned = re.sub(r'\s+', ' ', cleaned)
             return json.loads(cleaned)
         except Exception:
+            logger.debug('Animeflv: JSON normalizado falló')
             return None
 
     @staticmethod
@@ -169,6 +170,7 @@ class AnimeflvSource(BaseSource):
             if decoded.startswith(('http://', 'https://')):
                 return decoded
         except Exception:
+            logger.debug('Animeflv: base64 decode falló')
             pass
         return None
 
@@ -408,6 +410,7 @@ class AnimeflvSource(BaseSource):
             if m:
                 return int(m.group(1))
         except Exception:
+            logger.debug('Animeflv: error extrayendo numero de episodio de URL')
             pass
         return None
 
@@ -431,7 +434,7 @@ class AnimeflvSource(BaseSource):
         try:
             html = self._get(url).text
         except Exception as exc:
-            logger.error(f"Animeflv search error: {exc}")
+            logger.exception(f"Animeflv search error: {exc}")
             return []
 
         results = self._parse_search_results(html)
@@ -446,7 +449,7 @@ class AnimeflvSource(BaseSource):
         try:
             html = self._get(url).text
         except Exception as exc:
-            logger.error(f"Animeflv get_details error para '{content_id}': {exc}")
+            logger.exception(f"Animeflv get_details error para '{content_id}': {exc}")
             return SeriesDetails(title=content_id)
 
         info     = self._parse_anime_info(html)
@@ -468,7 +471,7 @@ class AnimeflvSource(BaseSource):
         try:
             html = self._get(url).text
         except Exception as exc:
-            logger.error(f"Animeflv get_chapters error para '{content_id}': {exc}")
+            logger.exception(f"Animeflv get_chapters error para '{content_id}': {exc}")
             return []
 
         episodes = self._parse_episodes_from_html(html, content_id)
@@ -478,7 +481,7 @@ class AnimeflvSource(BaseSource):
             episodes = self._parse_episodes_from_script(html, content_id)
 
         if not episodes:
-            logger.error(f"Animeflv: no se encontraron episodios para '{content_id}'")
+            logger.exception(f"Animeflv: no se encontraron episodios para '{content_id}'")
             return []
 
         chapters = [
@@ -549,7 +552,7 @@ class AnimeflvSource(BaseSource):
         try:
             html = self._get(cap_url).text
         except Exception as exc:
-            logger.error(f"Animeflv get_stream_url error: {exc}")
+            logger.exception(f"Animeflv get_stream_url error: {exc}")
             return None
 
         return self._best_stream_url(html)
@@ -559,7 +562,7 @@ class AnimeflvSource(BaseSource):
         try:
             html = self._get(cap_url).text
         except Exception as exc:
-            logger.error(f"Animeflv get_episode_links error: {exc}")
+            logger.exception(f"Animeflv get_episode_links error: {exc}")
             return EpisodeLinks()
 
         stream_links   = {'SUB': [], 'DUB': []}

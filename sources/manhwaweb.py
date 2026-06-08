@@ -169,7 +169,7 @@ class ManhwawebSource(BaseSource):
                         for chunk in resp.iter_content(8192):
                             f.write(chunk)
             except Exception as exc:
-                logger.error(f"ManhwaWeb: error descargando imagen {i} ({norm}): {exc}")
+                logger.exception(f"ManhwaWeb: error descargando imagen {i} ({norm}): {exc}")
                 failures += 1
 
         return failures
@@ -219,7 +219,7 @@ class ManhwawebSource(BaseSource):
         try:
             soup = BeautifulSoup(self._get(url).text, 'html.parser')
         except Exception as e:
-            logger.error(f"ManhwaWeb: error scraping búsqueda para '{query}': {e}")
+            logger.exception(f"ManhwaWeb: error scraping búsqueda para '{query}': {e}")
             return []
         results = []
         # Los resultados suelen estar en elementos .media-card o .item
@@ -277,7 +277,7 @@ class ManhwawebSource(BaseSource):
         try:
             soup = BeautifulSoup(self._get(url).text, 'html.parser')
         except Exception as exc:
-            logger.error(f"ManhwaWeb: error scraping detalles para '{content_id}': {exc}")
+            logger.exception(f"ManhwaWeb: error scraping detalles para '{content_id}': {exc}")
             return SeriesDetails(title=content_id)
 
         title = content_id
@@ -335,7 +335,7 @@ class ManhwawebSource(BaseSource):
         try:
             soup = BeautifulSoup(self._get(url).text, 'html.parser')
         except Exception as exc:
-            logger.error(f"ManhwaWeb: error scraping capítulos para '{content_id}': {exc}")
+            logger.exception(f"ManhwaWeb: error scraping capítulos para '{content_id}': {exc}")
             return []
 
         chapters: list[dict] = []
@@ -385,13 +385,14 @@ class ManhwawebSource(BaseSource):
             if img_urls:
                 return img_urls
         except Exception:
-            pass
+            logger.debug(f'ManhwaWeb: API falló para {content_id}/{chapter_id}, usando scraping')
 
         num     = self._chapter_num_from_id(chapter_id)
         web_url = f"{self.BASE_URL}/leer/{content_id}-{num}"
         try:
             resp = self._get(web_url, headers={'Referer': self.BASE_URL})
         except Exception:
+            logger.warning(f'ManhwaWeb: error obteniendo pagina de lectura para {content_id}/{num}')
             return []
 
         soup = BeautifulSoup(resp.text, 'html.parser')

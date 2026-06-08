@@ -105,9 +105,9 @@ async def api_chapters_with_local(type: str, source: str, id: str):
                 'is_downloaded': (num in local_chapters) if num is not None else False,
             })
         return result
-    except Exception as exc:
+    except Exception:
         logger.exception("Error en api_chapters_with_local:")
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail='Error al obtener capitulos')
 
 
 # ── Rutas genéricas ──
@@ -122,9 +122,9 @@ async def api_content_details(content_type: str, source: str, content_id: str):
         save_content_to_db(content_type, source, content_id,
                            details.title, details.cover or '')
         return details.model_dump()
-    except Exception as exc:
+    except Exception:
         logger.exception("Error en api_content_details:")
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail='Error al obtener detalles')
 
 
 @api_router.get('/chapters/{content_type}/{source}/{content_id}')
@@ -135,9 +135,9 @@ async def api_chapters(content_type: str, source: str, content_id: str):
     try:
         chapters = await src.get_chapters(content_id)
         return [c.model_dump() for c in chapters]
-    except Exception as exc:
+    except Exception:
         logger.exception("Error en api_chapters:")
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail='Error al obtener capitulos')
 
 
 @api_router.get('/local-cover/{type}/{filename:path}')
@@ -233,14 +233,22 @@ async def api_play_remote(content_type: str, source: str, content_id: str, chapt
         raise HTTPException(status_code=404, detail='Fuente no encontrada')
 
     if content_type == 'anime':
-        stream_url = await src.get_stream_url(content_id, chapter)
+        try:
+            stream_url = await src.get_stream_url(content_id, chapter)
+        except Exception as exc:
+            logger.exception(f'Error obteniendo stream URL para {content_id}/{chapter}: {exc}')
+            raise HTTPException(status_code=502, detail='Error al obtener enlace de reproducción')
         if not stream_url:
             raise HTTPException(status_code=404, detail='Esta fuente no soporta streaming remoto')
         return RedirectResponse(url=stream_url, status_code=307)
     else:
-        images = await src.get_chapter_images(content_id, chapter)
+        try:
+            images = await src.get_chapter_images(content_id, chapter)
+        except Exception as exc:
+            logger.exception(f'Error obteniendo imagenes para {content_id}/{chapter}: {exc}')
+            raise HTTPException(status_code=502, detail='Error al obtener imagenes del capitulo')
         if not images:
-            raise HTTPException(status_code=404, detail='No se encontraron imágenes para este capítulo')
+            raise HTTPException(status_code=404, detail='No se encontraron imagenes para este capitulo')
         return JSONResponse(content=images)
 
 
@@ -291,6 +299,6 @@ def video_duration(content_id: str, chapter: str, request: Request):
                 headers={'Cache-Control': 'public, max-age=86400'},
             )
     except Exception as exc:
-        logger.error(f"Error obteniendo duración: {exc}")
+        logger.exception(f"Error obteniendo duración: {exc}")
 
-    raise HTTPException(status_code=500)
+    raise HTTPException(status_code=500, detail='Error al obtener duracion del video')

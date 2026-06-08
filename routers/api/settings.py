@@ -37,6 +37,10 @@ async def api_update_source_settings(request: Request):
     if unknown:
         raise HTTPException(status_code=400, detail=f'Fuentes desconocidas: {", ".join(unknown)}')
 
-    update_source_settings(body)
-    logger.info(f'Configuración de fuentes actualizada: {body}')
+    try:
+        update_source_settings(body)
+        logger.info(f'Configuración de fuentes actualizada: {body}')
+    except Exception as exc:
+        logger.exception(f'Error actualizando configuración de fuentes: {exc}')
+        raise HTTPException(status_code=500, detail='Error al guardar la configuración')
     return {'status': 'ok'}

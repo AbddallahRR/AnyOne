@@ -80,7 +80,7 @@ def _check_series_for_new_chapters(content_ref: str) -> dict:
 def api_check_updates(content_ref: str):
     result = _check_series_for_new_chapters(content_ref)
     if result.get('error'):
-        raise HTTPException(status_code=500, detail=result)
+        raise HTTPException(status_code=500, detail='Error interno al comprobar actualizaciones')
     return result
 
 

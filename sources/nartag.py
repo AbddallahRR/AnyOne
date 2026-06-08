@@ -244,7 +244,7 @@ class NartagSource(BaseSource):
         try:
             html = self._get(url).text
         except Exception as exc:
-            logger.error(f"Nartag: error en búsqueda '{query}': {exc}")
+            logger.exception(f"Nartag: error en búsqueda '{query}': {exc}")
             return []
 
         soup    = BeautifulSoup(html, 'html.parser')
@@ -289,7 +289,7 @@ class NartagSource(BaseSource):
         try:
             soup = BeautifulSoup(self._get(url).text, 'html.parser')
         except Exception as exc:
-            logger.error(f"Nartag: error obteniendo detalles para '{content_id}': {exc}")
+            logger.exception(f"Nartag: error obteniendo detalles para '{content_id}': {exc}")
             return SeriesDetails(title=content_id)
 
         title     = content_id
@@ -341,7 +341,7 @@ class NartagSource(BaseSource):
             resp.raise_for_status()
             html = resp.text
         except Exception as exc:
-            logger.error(
+            logger.exception(
                 f"Nartag: error obteniendo capítulos para '{content_id}': {exc}"
             )
             return []

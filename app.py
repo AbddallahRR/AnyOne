@@ -47,7 +47,7 @@ def _start_update_scheduler():
                     f"{with_updates} con episodios nuevos"
                 )
             except Exception as exc:
-                logger.error(f"[Scheduler] Error en comprobación diaria: {exc}")
+                logger.exception(f"[Scheduler] Error en comprobación diaria: {exc}")
 
             if time.time() - last_cache_evict >= CACHE_EVICT_INTERVAL:
                 try:

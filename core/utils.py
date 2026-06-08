@@ -82,7 +82,7 @@ def _scan_series_dir(serie_dir: Path, content_type: str) -> dict | None:
                     encoded_name = quote(serie_dir.name)
                     cover_url = f"/api/local-cover/{content_type}/{encoded_name}/{cover_filename}"
         except Exception:
-            pass
+            logger.debug('utils: error leyendo info.json para portada')
     if not cover_url:
         for ext in ['jpg', 'jpeg', 'png', 'webp']:
             cover_file = serie_dir / f'cover.{ext}'
@@ -133,7 +133,7 @@ def scan_downloaded_series():
                 if result is not None:
                     series.append(result)
             except Exception:
-                pass
+                logger.debug('utils: error en future.result() para serie local')
 
     # Enriquecer con BD (progreso + portada)
     from core.database import get_conn

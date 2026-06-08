@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from core.database import get_conn, get_content_ref, get_enabled_source_names
 from core.disk_cache import search_cache
 from core.models import SearchQuery
+from core.scraper_health import get_status, record_failure, record_success
 from core.sources import get_enabled_sources, get_source
 
 from . import api_router
@@ -37,6 +38,7 @@ async def api_search(qs: SearchQuery = Depends()):
 
     try:
         results = await source.search(qs.q)
+        record_success(qs.source)
 
         refs = [get_content_ref(qs.source, r.id) for r in results]
         if refs:
@@ -64,7 +66,8 @@ async def api_search(qs: SearchQuery = Depends()):
         return [r.model_dump() for r in results]
     except Exception as exc:
         logger.exception("Error en api_search:")
-        raise HTTPException(status_code=500, detail=str(exc))
+        record_failure(qs.source, str(exc)[:200])
+        raise HTTPException(status_code=500, detail='Error interno en la busqueda')
 
 
 @api_router.get('/search-all')
@@ -85,9 +88,11 @@ async def api_search_all(qs: SearchQuery = Depends()):
             items = await src.search(qs.q)
             for item in items:
                 item.source = source_name
+            record_success(source_name)
             return items
         except Exception as exc:
-            logger.error(f"Error buscando en {source_name}: {exc}")
+            logger.exception(f"Error buscando en {source_name}: {exc}")
+            record_failure(source_name, str(exc)[:200])
             return []
 
     tasks = [search_in_source(name, src) for name, src in sources_dict.items()]
@@ -131,9 +136,12 @@ async def api_search_all_stream(qs: SearchQuery = Depends()):
                 items = await src.search(qs.q)
                 for item in items:
                     item.source = source_name
+                record_success(source_name)
                 return source_name, [m.model_dump() for m in items]
             except Exception as exc:
-                logger.error(f"Error buscando en {source_name}: {exc}")
+                logger.exception(f"Error buscando en {source_name}: {exc}")
+                error_msg = str(exc)[:200]
+                record_failure(source_name, error_msg)
                 return source_name, []
 
         tasks = {name: search_in_source(name, src) for name, src in sources_dict.items()}
@@ -141,12 +149,23 @@ async def api_search_all_stream(qs: SearchQuery = Depends()):
         for name, coro in tasks.items():
             try:
                 source_name, items = await asyncio.wait_for(coro, timeout=_SSE_TIMEOUT)
+                if not items:
+                    status = get_status(source_name)
+                    if status.get('temporarily_disabled'):
+                        payload = {'source': source_name, 'error': status.get('last_error', ''), 'disabled': True}
+                        yield f"event: source_error\ndata: {json.dumps(payload)}\n\n"
+                    continue
                 all_results[source_name] = items
                 yield f"event: results\ndata: {json.dumps({'source': source_name, 'results': items})}\n\n"
             except asyncio.TimeoutError:
                 logger.warning(f"SSE search-all timeout para '{name}' tras {_SSE_TIMEOUT}s")
-                continue
+                error_msg = f"Timeout tras {_SSE_TIMEOUT}s"
+                record_failure(name, error_msg)
+                disabled = get_status(name).get('temporarily_disabled', False)
+                payload = {'source': name, 'error': error_msg, 'disabled': disabled}
+                yield f"event: source_error\ndata: {json.dumps(payload)}\n\n"
             except Exception:
+                logger.exception(f"Error inesperado en {name}")
                 continue
 
         if all_results:
