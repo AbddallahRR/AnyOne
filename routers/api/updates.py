@@ -52,7 +52,7 @@ def _check_series_for_new_chapters(content_ref: str) -> dict:
             local_list = _local_chapters_anime(local_dir)
         else:
             local_list = _local_chapters_manga(local_dir)
-        local_nums = {ch['number'] for ch in local_list}
+        local_nums = {int(float(ch['number'])) for ch in local_list}
 
         new_nums = sorted(remote_nums - local_nums)
 

@@ -157,7 +157,7 @@ def _download_worker(worker_id: int) -> None:
                 chap_id  = chapter.id
 
                 try:
-                    source.download_chapter_sync(content_id, chap_id, series_folder)
+                    source.download_chapter_sync(content_id, chap_id, series_folder, chap_num)
                 except Exception as exc:
                     raise Exception(f"Error en capítulo {chap_num}: {exc}") from exc
 

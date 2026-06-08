@@ -563,7 +563,8 @@
     const ref         = `local:${item.id}`;
     const status      = _libraryStatuses[ref] || 'none';
     const meta        = STATUS_META[status];
-    const lastChapter = item.last_chapter || '1';
+    const resumeChapter = item.progress_chapter && item.progress_chapter !== '0'
+      ? item.progress_chapter : (item.last_chapter || '1');
     const isAnime     = item.type === 'anime';
     const typeClass   = isAnime ? 'chip-anime' : 'chip-manga';
     const typeLabel   = isAnime ? 'Anime' : 'Manga';
@@ -595,8 +596,8 @@
                   ${statusChipHtml}
                 </div>
                 <div class="card-actions-row">
-                  <button class="resume-btn" data-last-chapter="${lastChapter}">
-                    <i class="fas fa-play" style="font-size:9px;"></i> Cap. ${lastChapter}
+                  <button class="resume-btn" data-last-chapter="${resumeChapter}">
+                    <i class="fas fa-play" style="font-size:9px;"></i> Cap. ${resumeChapter}
                   </button>
                   ${statusBtn}
                 </div>`,
@@ -774,175 +775,6 @@
     setTimeout(() => popup.remove(), 150);
     document.removeEventListener('click',   _popupCloseHandler);
     document.removeEventListener('keydown', _escCloseHandler);
-  }
-
-  // ── Settings popup (activar/desactivar fuentes) ─────────────────────────
-  let _settingsPopup       = null;
-  let _settingsBtnRef      = null;
-  let _settingsCloseHandler = null;
-  let _settingsEscHandler  = null;
-
-  const SOURCE_ICONS = {
-    anime: 'fa-film',
-    manga: 'fa-book',
-  };
-
-  window.toggleSettingsPopup = function(btn) {
-    if (_settingsPopup) {
-      closeSettingsPopup();
-    } else {
-      openSettingsPopup(btn);
-    }
-  };
-
-  async function openSettingsPopup(anchorBtn) {
-    closeSettingsPopup();
-    _settingsBtnRef = anchorBtn;
-
-    const popup = document.createElement('div');
-    popup.id = 'settings-popup';
-    Object.assign(popup.style, {
-      position:       'fixed',
-      zIndex:         '10002',
-      background:     'rgba(10,10,15,0.97)',
-      border:         '1px solid rgba(255,255,255,0.12)',
-      borderRadius:   '12px',
-      padding:        '4px',
-      display:        'flex',
-      flexDirection:  'column',
-      gap:            '2px',
-      backdropFilter: 'blur(16px)',
-      boxShadow:      '0 8px 32px rgba(0,0,0,0.5)',
-      minWidth:       '200px',
-      opacity:        '0',
-      transform:      'scale(0.95) translateY(-4px)',
-      transition:     'opacity 0.15s ease, transform 0.15s ease',
-    });
-
-    // Header
-    const header = document.createElement('div');
-    header.className = 'settings-header';
-    header.innerHTML = '<span>Fuentes</span>';
-    popup.appendChild(header);
-
-    // Loading state
-    const loadingRow = document.createElement('div');
-    loadingRow.style.cssText = 'padding:12px 10px; text-align:center; font-size:12px; color:var(--muted);';
-    loadingRow.textContent = 'Cargando…';
-    popup.appendChild(loadingRow);
-    document.body.appendChild(popup);
-
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      popup.style.opacity   = '1';
-      popup.style.transform = 'scale(1) translateY(0)';
-    }));
-
-    _settingsPopup = popup;
-
-    _settingsEscHandler = e => {
-      if (e.key === 'Escape') closeSettingsPopup();
-    };
-    _settingsCloseHandler = e => {
-      if (!popup.contains(e.target) && e.target !== anchorBtn) closeSettingsPopup();
-    };
-    setTimeout(() => {
-      document.addEventListener('keydown', _settingsEscHandler);
-      document.addEventListener('click', _settingsCloseHandler);
-    }, 0);
-
-    // Position
-    positionSettingsPopup(anchorBtn, popup);
-
-    // Fetch sources
-    try {
-      const res = await fetch('/api/settings/sources');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const sources = await res.json();
-      loadingRow.remove();
-      renderSourceSettings(popup, sources);
-    } catch (err) {
-      loadingRow.textContent = 'Error al cargar';
-      loadingRow.style.color = 'var(--danger)';
-    }
-  }
-
-  function positionSettingsPopup(anchorBtn, popup) {
-    const rect = anchorBtn.getBoundingClientRect();
-    const pw   = 200;
-    const ph   = 220;
-    let top    = rect.bottom + 6;
-    let left   = rect.right - pw;
-    if (left < 8) left = 8;
-    if (top + ph > window.innerHeight - 8) top = rect.top - ph - 6;
-    if (top < 8) top = 8;
-    popup.style.top  = `${top}px`;
-    popup.style.left = `${left}px`;
-  }
-
-  function renderSourceSettings(popup, sources) {
-    sources.forEach(src => {
-      const row = document.createElement('div');
-      row.className = 'settings-source-row';
-
-      const icon = document.createElement('i');
-      icon.className = `fas ${SOURCE_ICONS[src.type] || 'fa-globe'} settings-source-icon`;
-      icon.style.color = src.type === 'anime' ? 'var(--accent-lt)' : '#ff94b8';
-
-      const label = document.createElement('span');
-      label.className = 'settings-source-label';
-      label.textContent = src.label;
-
-      const toggle = document.createElement('label');
-      toggle.className = 'settings-toggle';
-
-      const input = document.createElement('input');
-      input.type = 'checkbox';
-      input.checked = src.enabled;
-
-      const track = document.createElement('span');
-      track.className = 'toggle-track';
-
-      toggle.appendChild(input);
-      toggle.appendChild(track);
-
-      input.addEventListener('change', async function() {
-        const newVal = this.checked;
-        try {
-          const res = await fetch('/api/settings/sources', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ [src.name]: newVal }),
-          });
-          if (!res.ok) {
-            this.checked = !newVal;
-            if (window.showNotification) window.showNotification('Error al guardar', 'error');
-          } else {
-            src.enabled = newVal;
-            populateSourceDropdowns();
-          }
-        } catch (err) {
-          this.checked = !newVal;
-          if (window.showNotification) window.showNotification(`Error: ${err.message}`, 'error');
-        }
-      });
-
-      row.appendChild(icon);
-      row.appendChild(label);
-      row.appendChild(toggle);
-      popup.appendChild(row);
-    });
-  }
-
-  function closeSettingsPopup() {
-    if (!_settingsPopup) return;
-    const popup  = _settingsPopup;
-    _settingsPopup = null;
-    _settingsBtnRef = null;
-    popup.style.opacity   = '0';
-    popup.style.transform = 'scale(0.95) translateY(-4px)';
-    setTimeout(() => popup.remove(), 150);
-    document.removeEventListener('click',   _settingsCloseHandler);
-    document.removeEventListener('keydown', _settingsEscHandler);
   }
 
   // ── Notificaciones (global) ────────────────────────────────────────────

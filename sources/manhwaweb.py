@@ -4,9 +4,7 @@
 import logging
 import os
 import re
-import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import quote as _url_quote
 from urllib.parse import urljoin, urlparse
@@ -23,7 +21,6 @@ from . import BaseSource
 logger = logging.getLogger(__name__)
 
 _TIMEOUT   = 30
-_MAX_PAGES = 500
 
 
 class ManhwawebSource(BaseSource):
@@ -32,11 +29,6 @@ class ManhwawebSource(BaseSource):
     BASE_URL = "https://www.manhwaweb.com"
     API_BASE = "https://manhwawebbackend-production.up.railway.app"
     UA       = "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0"
-
-    _CATALOG_TTL = 60 * 60 * 24 * 3   # 3 días
-
-    _refresh_lock    = threading.Lock()
-    _last_refresh_ts = 0.0
 
     def __init__(self):
         self.scraper = HttpPool.get_scraper()
@@ -115,7 +107,7 @@ class ManhwawebSource(BaseSource):
         Ej: 'lector-omnisciente-99214996766-1' → '1'
              'serie-123-5.5'                  → '5.5'
         """
-        m = re.search(r'(\d+(?:\.\d+)?)$', chapter_id)
+        m = re.search(r'([\d._]+)$', chapter_id)
         return m.group(1) if m else chapter_id
 
     # -----------------------------------------------------------------------
@@ -130,8 +122,9 @@ class ManhwawebSource(BaseSource):
         _log = logging.getLogger(__name__)
         for ch in chapters:
             num = ch['number']
+            san = num.replace('_', '')
             try:
-                if float(num) != int(float(num)):
+                if float(san) != int(float(san)):
                     _log.debug(f"ManhwaWeb: ignorando capítulo decimal {num!r}")
                     continue
             except (ValueError, TypeError):
@@ -139,8 +132,13 @@ class ManhwawebSource(BaseSource):
             if num not in seen:
                 seen.add(num)
                 result.append(ch)
-        result.sort(key=lambda x: float(x['number'])
-                    if x['number'].replace('.', '', 1).isdigit() else 0)
+        def _sort_key(ch: dict) -> float:
+            san = ch['number'].replace('_', '.')
+            try:
+                return float(san)
+            except ValueError:
+                return 0
+        result.sort(key=_sort_key)
         return result
 
     # -----------------------------------------------------------------------
@@ -186,154 +184,33 @@ class ManhwawebSource(BaseSource):
         )
 
     # -----------------------------------------------------------------------
-    # Background cache
-    # -----------------------------------------------------------------------
-
-    def warm_cache_sync(self) -> None:
-        """Precarga el catálogo en background al arrancar la app."""
-        if search_cache.get("manhwaweb:catalog") is not None:
-            logger.debug("ManhwaWeb: catálogo ya en caché, sin precarga necesaria")
-            return
-
-        logger.info("ManhwaWeb: iniciando precarga de catálogo en background")
-
-        def _do() -> None:
-            try:
-                catalog = self._fetch_full_catalog()
-                if catalog:
-                    search_cache.set("manhwaweb:catalog", catalog, ttl=self._CATALOG_TTL)
-            except RuntimeError as e:
-                if "interpreter shutdown" in str(e):
-                    pass
-                else:
-                    raise
-            except Exception as exc:
-                logger.error(f"ManhwaWeb: error en precarga: {exc}")
-
-        threading.Thread(target=_do, daemon=True).start()
-
-    def _refresh_catalog_background(self) -> None:
-        """Refresca el catálogo en background si ha pasado suficiente tiempo."""
-        now = time.time()
-        if now - ManhwawebSource._last_refresh_ts < self._CATALOG_TTL:
-            return
-        if not ManhwawebSource._refresh_lock.acquire(blocking=False):
-            return
-
-        def _do() -> None:
-            try:
-                logger.info("ManhwaWeb: refresco de catálogo en background")
-                search_cache.delete("manhwaweb:catalog")
-                catalog = self._fetch_full_catalog()
-                if catalog:
-                    search_cache.set("manhwaweb:catalog", catalog, ttl=self._CATALOG_TTL)
-                    ManhwawebSource._last_refresh_ts = time.time()
-                    logger.info(f"ManhwaWeb: catálogo refrescado ({len(catalog)} series)")
-            except RuntimeError as e:
-                if "interpreter shutdown" in str(e):
-                    return
-                raise
-            except Exception as exc:
-                logger.error(f"ManhwaWeb: error en refresco de catálogo: {exc}")
-            finally:
-                ManhwawebSource._refresh_lock.release()
-
-        threading.Thread(target=_do, daemon=True).start()
-
-    # -----------------------------------------------------------------------
     # Búsqueda
     # -----------------------------------------------------------------------
 
-    def _fetch_full_catalog(self) -> list[dict]:
-        """
-        Descarga el catálogo completo paginado desde la API en paralelo.
-        Estrategia: lotes de _PAGE_WORKERS páginas en paralelo,
-        reutilizando un solo ThreadPoolExecutor para todo el ciclo.
-        """
-        _PAGE_WORKERS = 8
-        results:  list[dict] = []
-        seen_ids: set[str]   = set()
-        got_first_page       = False
-
-        def _fetch_page(pg: int) -> list[dict]:
-            url = f"{self.API_BASE}/manhwa/library?buscar=&page={pg}"
-            try:
-                data  = self._get_json(url)
-                items = data.get('data', [])
-                return items
-            except Exception:
-                return None
-
-        page = 0
-        pool = ThreadPoolExecutor(max_workers=_PAGE_WORKERS)
-        try:
-            while page < _MAX_PAGES:
-                batch = list(range(page, min(page + _PAGE_WORKERS, _MAX_PAGES)))
-                futures = {pool.submit(_fetch_page, pg): pg for pg in batch}
-                results_map = {}
-                for future in as_completed(futures):
-                    pg = futures[future]
-                    try:
-                        results_map[pg] = future.result()
-                    except RuntimeError as e:
-                        if "interpreter shutdown" in str(e):
-                            return results
-                        raise
-
-                stop = False
-                for pg in sorted(results_map):
-                    items = results_map[pg]
-                    if items is None:
-                        if not got_first_page:
-                            return []
-                        stop = True
-                        break
-                    if not items:
-                        stop = True
-                        break
-                    got_first_page = True
-                    for item in items:
-                        _id = item.get('_id')
-                        if not _id or _id in seen_ids:
-                            continue
-                        seen_ids.add(_id)
-                        title = (item.get('the_real_name') or item.get('name_esp')
-                                 or item.get('_name') or _id)
-                        results.append({'id': _id, 'title': title,
-                                        'cover': item.get('_imagen', '')})
-                if stop:
-                    break
-                page += _PAGE_WORKERS
-        finally:
-            pool.shutdown(wait=False)
-
-        if page >= _MAX_PAGES:
-            logger.warning(f"ManhwaWeb: límite de {_MAX_PAGES} páginas alcanzado en catálogo")
-
-        logger.info(f"ManhwaWeb: catálogo descargado con {len(results)} series")
-        return results
-
     def search_sync(self, query: str) -> list[SearchResult]:
         """
-        Busca en el catálogo cacheados si está disponible.
-        Si no hay catálogo en caché, hace una búsqueda por scraping directa
-        (rápida) y dispara la descarga del catálogo en background para
-        próximas búsquedas.
+        Busca en vivo vía API de ManhwaWeb con el query como parámetro.
+        Si la API falla, hace scraping de la página de búsqueda.
         """
-        cache_key = "manhwaweb:catalog"
-        catalog = search_cache.get(cache_key)
-        if catalog is not None:
-            self._refresh_catalog_background()
-            q = query.lower()
-            return [
-                SearchResult(id=r['id'], title=r['title'], cover=r.get('cover', ''))
-                for r in catalog
-                if q in r['title'].lower() or q in r['id'].lower()
-            ]
+        try:
+            data = self._get_json(
+                f"{self.API_BASE}/manhwa/library?buscar={_url_quote(query)}&page=1"
+            )
+            items = data.get('data', [])
+            if items:
+                results = []
+                for item in items:
+                    _id = item.get('_id')
+                    if not _id:
+                        continue
+                    title = (item.get('the_real_name') or item.get('name_esp')
+                             or item.get('_name') or _id)
+                    cover = item.get('_imagen', '')
+                    results.append(SearchResult(id=_id, title=title, cover=cover))
+                return results
+        except Exception as exc:
+            logger.warning(f"ManhwaWeb: API search falló para '{query}': {exc}")
 
-        # Sin catálogo en caché: búsqueda rápida por scraping + precarga en background
-        logger.info("ManhwaWeb: sin catálogo en caché, usando búsqueda directa")
-        self.warm_cache_sync()
         return self._search_scrape(query)
 
     def _search_scrape(self, query: str) -> list[SearchResult]:
@@ -472,7 +349,7 @@ class ManhwawebSource(BaseSource):
                 if not a_tag:
                     continue
                 href = a_tag.get('href', '')
-                m    = re.search(r'(\d+(?:\.\d+)?)$', href)
+                m    = re.search(r'([\d._]+)$', href)
                 if not m:
                     continue
                 num     = m.group(1)
@@ -484,7 +361,7 @@ class ManhwawebSource(BaseSource):
             logger.debug(f"ManhwaWeb: capítulos via fallback /leer/ para '{content_id}'")
             for a in soup.select('a[href*="/leer/"]'):
                 href = a.get('href', '')
-                m    = re.search(r'-(\d+(?:\.\d+)?)$', href)
+                m    = re.search(r'-([\d._]+)$', href)
                 if m:
                     num = m.group(1)
                     chapters.append({'number': num, 'id': f"{content_id}-{num}"})
@@ -492,20 +369,11 @@ class ManhwawebSource(BaseSource):
         return self._dedup_sort_chapters(chapters)
 
     # -----------------------------------------------------------------------
-    # Descarga de capítulo
+    # Streaming (obtener URLs de imágenes sin descargar)
     # -----------------------------------------------------------------------
 
-    def download_chapter_sync(self, content_id: str, chapter_id: str,
-                         dest_folder: str) -> str:
-        num         = self._chapter_num_from_id(chapter_id)
-        dir_name    = (f"cap_{int(float(num)):04d}"
-                       if num.replace('.', '', 1).isdigit() else f"cap_{num}")
-        cap_dir     = os.path.join(dest_folder, dir_name)
-        os.makedirs(cap_dir, exist_ok=True)
-
-        # Obtener lista de imágenes desde la API
+    def get_chapter_images_sync(self, content_id: str, chapter_id: str) -> list[str]:
         api_url = f"{self.API_BASE}/chapters/see/{chapter_id}"
-        img_urls: list[str] = []
         try:
             data         = self._get_json(api_url)
             chapter_data = data.get('chapter', {})
@@ -514,14 +382,61 @@ class ManhwawebSource(BaseSource):
                             or data.get('img')
                             or data.get('pages')
                             or [])
-            if not img_urls:
-                raise Exception("La API no devolvió imágenes")
-        except Exception as exc:
-            logger.warning(f"ManhwaWeb: API imágenes falló para '{chapter_id}': {exc}, "
-                           f"usando scraping")
+            if img_urls:
+                return img_urls
+        except Exception:
+            pass
+
+        num     = self._chapter_num_from_id(chapter_id)
+        web_url = f"{self.BASE_URL}/leer/{content_id}-{num}"
+        try:
+            resp = self._get(web_url, headers={'Referer': self.BASE_URL})
+        except Exception:
+            return []
+
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        container = (soup.select_one('#chapter-content, .chapter-content, .reading-content')
+                     or soup)
+        seen: set[str] = set()
+        img_urls: list[str] = []
+        all_imgs = list(container.find_all('img'))
+        for noscript in container.find_all('noscript'):
+            inner = BeautifulSoup(noscript.decode_contents(), 'html.parser')
+            all_imgs.extend(inner.find_all('img'))
+        for img in all_imgs:
+            src = (img.get('data-src') or img.get('data-lazy') or
+                   img.get('data-original') or img.get('data-url') or
+                   img.get('src'))
+            url = self._normalize_url(src, self.BASE_URL)
+            if url and url not in seen:
+                seen.add(url)
+                img_urls.append(url)
+        return img_urls
+
+    # -----------------------------------------------------------------------
+    # Descarga de capítulo
+    # -----------------------------------------------------------------------
+
+    def download_chapter_sync(self, content_id: str, chapter_id: str,
+                         dest_folder: str, chapter_number: str | None = None) -> str:
+        num = chapter_number or self._chapter_num_from_id(chapter_id)
+        if '_' in num:
+            dir_name = f"cap_{num}"
+        elif num.replace('.', '', 1).isdigit():
+            dir_name = f"cap_{int(float(num)):04d}"
+        else:
+            dir_name = f"cap_{num}"
+        cap_dir     = os.path.join(dest_folder, dir_name)
+        os.makedirs(cap_dir, exist_ok=True)
+
+        img_urls = self.get_chapter_images_sync(content_id, chapter_id)
+
+        # Si get_chapter_images_sync falló, intentar con el scraping+descarga original
+        if not img_urls:
+            logger.warning(f"ManhwaWeb: get_chapter_images_sync devolvió vacío para "
+                           f"'{chapter_id}', usando fallback scrape+descarga")
             return self._download_chapter_scrape(content_id, chapter_id, cap_dir)
 
-        # Verificar si ya está completo (evita redownload de capítulos parciales)
         existing = self._count_images(cap_dir)
         if existing >= len(img_urls):
             logger.debug(f"ManhwaWeb: capítulo ya completo ({existing} imágenes): {cap_dir}")

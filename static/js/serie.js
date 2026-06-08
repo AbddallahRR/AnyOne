@@ -9,6 +9,8 @@
 
   const { type, source, id } = window.serieData;
   const isLocal = source === 'local';
+  const STREAMABLE_SOURCES = { anime: ['jkanime'], manga: ['nartag', 'manhwaweb', 'ikigai'] };
+  const canStream = !isLocal && STREAMABLE_SOURCES[type]?.includes(source);
 
   let chapters        = [];
   let sortAsc         = true;
@@ -208,9 +210,16 @@
       ? `<button class="play-chapter-btn chapter-action-btn" data-chapter="${number}" title="Reproducir">
            <i class="fas fa-play"></i>
          </button>`
-      : `<button class="download-chapter-btn chapter-action-btn" data-chapter="${number}" data-chapter-id="${chId}" title="Descargar">
-           <i class="fas fa-download"></i>
-         </button>`;
+      : canStream
+        ? `<button class="stream-chapter-btn chapter-action-btn" data-chapter="${number}" title="Reproducir en streaming">
+             <i class="fas fa-play"></i>
+           </button>
+           <button class="download-chapter-btn chapter-action-btn" data-chapter="${number}" data-chapter-id="${chId}" title="Descargar">
+             <i class="fas fa-download"></i>
+           </button>`
+        : `<button class="download-chapter-btn chapter-action-btn" data-chapter="${number}" data-chapter-id="${chId}" title="Descargar">
+             <i class="fas fa-download"></i>
+           </button>`;
 
     const localBtns = isLocal ? `
       <button class="watched-toggle-btn chapter-action-btn ${is_watched ? 'is-watched' : ''}"
@@ -249,7 +258,7 @@
       e.stopPropagation();
       const { chapter, chapterId } = btn.dataset;
 
-      if (btn.classList.contains('play-chapter-btn')) {
+      if (btn.classList.contains('play-chapter-btn') || btn.classList.contains('stream-chapter-btn')) {
         window.location.href = `/reader/${type}/${source}/${id}/${chapter}`;
       } else if (btn.classList.contains('download-chapter-btn')) {
         downloadSingleChapter(chapter, chapterId);

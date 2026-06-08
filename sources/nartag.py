@@ -374,11 +374,21 @@ class NartagSource(BaseSource):
         return [Chapter(**c) for c in chapters]
 
     # -----------------------------------------------------------------------
+    # Streaming (obtener URLs de imágenes sin descargar)
+    # -----------------------------------------------------------------------
+
+    def get_chapter_images_sync(self, content_id: str, chapter_id: str) -> list[str]:
+        cap_url = f"{self.BASE_URL}/manga/{content_id}/capitulos/{chapter_id}/"
+        reader_url, _ = self._get_reader_url(cap_url)
+        img_urls = self._extract_manga_images(reader_url, referer=cap_url)
+        return img_urls
+
+    # -----------------------------------------------------------------------
     # Descarga de capítulo
     # -----------------------------------------------------------------------
 
     def download_chapter_sync(self, content_id: str, chapter_id: str,
-                         dest_folder: str) -> str:
+                         dest_folder: str, chapter_number: str | None = None) -> str:
         m       = re.search(r'capitulo-(\d+(?:\.\d+)?)', chapter_id)
         cap_num = m.group(1) if m else chapter_id
         dir_name = (
@@ -389,20 +399,14 @@ class NartagSource(BaseSource):
         cap_dir = os.path.join(dest_folder, dir_name)
         os.makedirs(cap_dir, exist_ok=True)
 
-        # ── 1. URL canónica del capítulo ─────────────────────────────────────
-        cap_url = f"{self.BASE_URL}/manga/{content_id}/capitulos/{chapter_id}/"
-
-        # ── 2. POST al authorize → obtener URL del lector con cookie de sesión
-        reader_url, _ = self._get_reader_url(cap_url)
-
-        # ── 3. Extraer imágenes del manga desde la página del lector ─────────
-        img_urls = self._extract_manga_images(reader_url, referer=cap_url)
+        img_urls = self.get_chapter_images_sync(content_id, chapter_id)
         if not img_urls:
             raise Exception(
-                f"Nartag: no se encontraron imágenes del manga en '{reader_url}'"
+                f"Nartag: no se encontraron imágenes del manga para '{chapter_id}'"
             )
 
-        # ── 4. Saltar si ya está completo ────────────────────────────────────
+        # ── Saltar si ya está completo ─────────────────────────────────────
+        reader_url = f"{self.BASE_URL}/manga/{content_id}/capitulos/{chapter_id}/"
         existing = self._count_images(cap_dir)
         if existing >= len(img_urls):
             logger.debug(
@@ -410,7 +414,7 @@ class NartagSource(BaseSource):
             )
             return cap_dir
 
-        # ── 5. Descargar ─────────────────────────────────────────────────────
+        # ── Descargar ─────────────────────────────────────────────────────
         dl_headers = {'User-Agent': self.UA, 'Referer': reader_url}
         for i, img_url in enumerate(img_urls, start=1):
             ext      = self._url_ext(img_url)

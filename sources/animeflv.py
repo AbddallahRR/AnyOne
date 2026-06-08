@@ -490,7 +490,7 @@ class AnimeflvSource(BaseSource):
         search_cache.set(cache_key, [c.model_dump() for c in chapters])
         return chapters
 
-    def download_chapter_sync(self, content_id: str, chapter_id: str, dest_folder: str) -> str:
+    def download_chapter_sync(self, content_id: str, chapter_id: str, dest_folder: str, chapter_number: str | None = None) -> str:
         """
         AnimeFLV no ofrece descarga directa confiable; los links van a hosts externos.
         Intenta con yt-dlp sobre los sources embebidos.

@@ -357,7 +357,7 @@ class OlympusSource(BaseSource):
     # -----------------------------------------------------------------------
 
     def download_chapter_sync(self, content_id: str, chapter_id: str,
-                         dest_folder: str) -> str:
+                         dest_folder: str, chapter_number: str | None = None) -> str:
         full_slug = self._full_slug(content_id)
         cap_url   = f"{self.BASE_URL}/capitulo/{chapter_id}/{full_slug}"
         headers   = {'Referer': self.BASE_URL}

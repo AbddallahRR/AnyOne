@@ -58,7 +58,65 @@ def _discover_sources():
                     logger.warning(f'Error instanciando {name}: {exc}')
 
 
+def register_dynamic_source(name: str) -> bool:
+    """Register a single dynamic source by importing its stub module
+    and adding it to SOURCES and ALL_SOURCES_META."""
+    modname = f"sources.{name}"
+    try:
+        module = importlib.import_module(modname)
+    except Exception as exc:
+        logger.warning(f'Could not import dynamic source {modname}: {exc}')
+        return False
+
+    from sources import BaseSource
+
+    found = False
+    for cls_name, cls in inspect.getmembers(module, inspect.isclass):
+        if issubclass(cls, BaseSource) and cls is not BaseSource:
+            try:
+                instance = cls()
+                source_type = instance.type or ''
+                source_label = instance.label or cls_name
+                if not source_type:
+                    logger.warning(f'Dynamic source {cls_name} sin type, omitiendo')
+                    continue
+                src_name = name
+                SOURCES.setdefault(source_type, {})[src_name] = instance
+                # Avoid duplicates in meta
+                global ALL_SOURCES_META
+                ALL_SOURCES_META = [m for m in ALL_SOURCES_META if m['name'] != src_name]
+                ALL_SOURCES_META.append({
+                    'name': src_name,
+                    'type': source_type,
+                    'label': source_label,
+                })
+                # NO escribir a la BD durante import (lock con --reload).
+                # ensure_source_in_db se llama desde sync_source_settings en lifespan.
+                logger.info(f'Fuente dinámica registrada: {src_name} ({source_type})')
+                found = True
+            except Exception as exc:
+                logger.warning(f'Error instanciando fuente dinámica {cls_name}: {exc}')
+    return found
+
+
+def sync_source_settings():
+    from core.database import ensure_source_in_db
+
+    for src in ALL_SOURCES_META:
+        try:
+            ensure_source_in_db(src['name'], src['type'])
+        except Exception:
+            logger.warning(f"No se pudo registrar {src['name']} en source_settings")
+
+
 _discover_sources()
+
+# Load dynamic (user-generated) sources at startup
+try:
+    from core.scraper_config import load_dynamic_sources
+    load_dynamic_sources()
+except Exception as exc:
+    logger.warning(f'Error loading dynamic sources: {exc}')
 
 
 def get_source(content_type, source_name):
@@ -79,10 +137,3 @@ def get_enabled_sources(content_type):
 def get_all_sources_meta():
     """Devuelve la lista de metadatos de todas las fuentes descubiertas."""
     return list(ALL_SOURCES_META)
-
-
-def sync_source_settings():
-    from core.database import ensure_source_in_db
-
-    for src in ALL_SOURCES_META:
-        ensure_source_in_db(src['name'], src['type'])

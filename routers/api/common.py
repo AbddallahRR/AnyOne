@@ -170,10 +170,12 @@ def _local_chapters_anime(serie_dir: Path) -> list[dict]:
 def _local_chapters_manga(serie_dir: Path) -> list[dict]:
     chapters = []
     for d in sorted(d for d in serie_dir.iterdir() if d.is_dir() and d.name.startswith('cap_')):
-        m = re.search(r'cap_(\d+)', d.name)
+        m = re.search(r'cap_([\d._]+)', d.name)
         if m:
-            num = int(m.group(1))
-            chapters.append({'number': num, 'id': str(num)})
+            num = m.group(1)
+            parts = num.split('.')
+            parts[0] = parts[0].lstrip('0') or '0'
+            chapters.append({'number': '.'.join(parts), 'id': '.'.join(parts)})
     return chapters
 
 

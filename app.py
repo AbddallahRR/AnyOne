@@ -87,6 +87,8 @@ async def _warm_all_sources():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if settings.secret_key == 'insecure-dev-key-change-in-production':
+        logger.warning("SECRET_KEY insegura por defecto — cámbiala en producción vía variable de entorno SECRET_KEY")
     init_db()
     sync_source_settings()
     cleanup_download_queue()
@@ -125,13 +127,10 @@ class CachedStaticFiles(StaticFiles):
                 headers = message.get("headers", [])
                 path = scope.get("path", "")
                 if "/dist/" in path:
-                    cache_age = 31536000
                     cache_control = b"public, max-age=31536000, immutable"
                 elif path.endswith((".woff2", ".ttf", ".woff")):
-                    cache_age = 2592000
                     cache_control = b"public, max-age=2592000"
                 else:
-                    cache_age = 86400
                     cache_control = b"public, max-age=86400"
                 headers = list(headers)
                 headers.append((b"cache-control", cache_control))
@@ -153,8 +152,6 @@ def health():
 
 if __name__ == '__main__':
     import uvicorn
-    if settings.secret_key == 'insecure-dev-key-change-in-production':
-        logger.warning("⚠️  SECRET_KEY insegura por defecto — cámbiala en producción vía variable de entorno SECRET_KEY")
     print("🔧 Iniciando servidor...")
     print(f"📁 Directorio de descargas: {config.BASE_DOWNLOAD_DIR}")
     print(f"🗄️  Base de datos: {config.DB_PATH}")

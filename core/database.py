@@ -22,12 +22,13 @@ _local = threading.local()
 def get_conn() -> sqlite3.Connection:
     """Devuelve la conexión SQLite del hilo actual, creándola si no existe."""
     if not hasattr(_local, 'conn') or _local.conn is None:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=5)
-        conn.row_factory = sqlite3.Row          # acceso por nombre de columna
-        conn.execute("PRAGMA journal_mode=WAL") # lecturas y escrituras no se bloquean entre sí
-        conn.execute("PRAGMA synchronous=NORMAL")  # más rápido, igual de seguro que FULL
-        conn.execute("PRAGMA cache_size=-32000")   # 32 MB de caché en memoria
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=60)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA cache_size=-32000")
         conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA busy_timeout=60000")
         _local.conn = conn
     return _local.conn
 
@@ -36,7 +37,7 @@ def get_conn() -> sqlite3.Connection:
 # Migraciones versionadas
 # ---------------------------------------------------------------------------
 
-SCHEMA_VERSION = 6  # incrementar al agregar una migración nueva
+SCHEMA_VERSION = 7  # incrementar al agregar una migración nueva
 
 def _get_schema_version(conn: sqlite3.Connection) -> int:
     conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)")
@@ -143,6 +144,28 @@ def _run_migrations(conn: sqlite3.Connection, current: int) -> None:
                 ('ikigai',    'manga', 1);
         ''')
 
+    if current < 7:
+        logger.info("Migracion 7: tabla scraper_configs")
+        conn.executescript('''
+            CREATE TABLE IF NOT EXISTS scraper_configs (
+                name        TEXT PRIMARY KEY,
+                type        TEXT NOT NULL,
+                label       TEXT NOT NULL,
+                base_url    TEXT NOT NULL DEFAULT '',
+                built_in    INTEGER NOT NULL DEFAULT 0,
+                enabled     INTEGER NOT NULL DEFAULT 1,
+                config_json TEXT NOT NULL DEFAULT '{}',
+                created_at  REAL NOT NULL,
+                updated_at  REAL NOT NULL
+            );
+            INSERT OR IGNORE INTO scraper_configs (name, type, label, base_url, built_in, enabled, config_json, created_at, updated_at)
+            VALUES
+                ('jkanime', 'anime', 'JKanime', 'https://jkanime.net', 1, 1, '{}', strftime('%s','now'), strftime('%s','now')),
+                ('nartag', 'manga', 'Nartag', 'https://nartag.com', 1, 1, '{}', strftime('%s','now'), strftime('%s','now')),
+                ('manhwaweb', 'manga', 'ManhwaWeb', 'https://www.manhwaweb.com', 1, 1, '{}', strftime('%s','now'), strftime('%s','now')),
+                ('ikigai', 'manga', 'Ikigai', 'https://visorikigai.yomod.xyz', 1, 1, '{}', strftime('%s','now'), strftime('%s','now'));
+        ''')
+
 
 # ---------------------------------------------------------------------------
 # Inicialización pública
@@ -150,15 +173,32 @@ def _run_migrations(conn: sqlite3.Connection, current: int) -> None:
 
 def init_db() -> None:
     """Crea / migra el esquema. Llamar una sola vez desde create_app()."""
-    conn = get_conn()
-    with conn:                              # transacción única para todo el esquema
-        current = _get_schema_version(conn)
-        if current < SCHEMA_VERSION:
-            _run_migrations(conn, current)
-            _set_schema_version(conn, SCHEMA_VERSION)
-            logger.info(f"Esquema actualizado a version {SCHEMA_VERSION}")
-        else:
-            logger.debug("Esquema ya actualizado, sin migraciones pendientes")
+    import time
+    for attempt in range(6):
+        try:
+            conn = get_conn()
+            with conn:
+                current = _get_schema_version(conn)
+                if current < SCHEMA_VERSION:
+                    _run_migrations(conn, current)
+                    _set_schema_version(conn, SCHEMA_VERSION)
+                    logger.info(f"Esquema actualizado a version {SCHEMA_VERSION}")
+                else:
+                    logger.debug("Esquema ya actualizado, sin migraciones pendientes")
+            return
+        except sqlite3.OperationalError as exc:
+            if 'locked' in str(exc):
+                if attempt < 5:
+                    logger.warning(f"init_db: DB bloqueada, reintento {attempt+1}/5...")
+                    time.sleep(2 ** attempt)
+                    _local.conn = None
+                    continue
+                logger.warning(
+                    "init_db: DB persistentemente bloqueada, saltando migraciones. "
+                    "Si el esquema cambió, reiniciar cuando no haya otro proceso activo."
+                )
+                return
+            raise
 
 
 # ---------------------------------------------------------------------------
@@ -171,13 +211,25 @@ def cleanup_download_queue() -> None:
     como 'failed'. La lógica de rutas vive aquí, no en database.py puro, pero
     se mantiene en este módulo para no romper la API pública existente.
     """
-    conn = get_conn()
-
-    # Jobs que estaban descargando cuando el servidor se cayó
-    rows = conn.execute(
-        'SELECT id, content_ref, type, title, current_chapter, chapter_id '
-        'FROM download_queue WHERE status = "downloading"'
-    ).fetchall()
+    import time
+    for attempt in range(6):
+        try:
+            conn = get_conn()
+            rows = conn.execute(
+                'SELECT id, content_ref, type, title, current_chapter, chapter_id '
+                'FROM download_queue WHERE status = "downloading"'
+            ).fetchall()
+            break
+        except sqlite3.OperationalError as exc:
+            if 'locked' in str(exc):
+                if attempt < 5:
+                    logger.warning(f"cleanup_download_queue: DB bloqueada, reintento {attempt+1}/5...")
+                    time.sleep(2 ** attempt)
+                    _local.conn = None
+                    continue
+                logger.warning("cleanup_download_queue: DB persistentemente bloqueada, omitiendo.")
+                return
+            raise
 
     for row in rows:
         job_id, content_ref, content_type, title, current_chapter, chapter_id = row
@@ -207,12 +259,15 @@ def cleanup_download_queue() -> None:
         except Exception as exc:
             logger.error(f"[CLEANUP] Error limpiando job {job_id}: {exc}")
 
-    with conn:
-        conn.execute(
-            "UPDATE download_queue SET status='failed', error='Interrumpido por reinicio del servidor' "
-            "WHERE status IN ('pending', 'downloading')"
-        )
-    logger.info("[CLEANUP] Cola de descarga limpiada")
+    try:
+        with conn:
+            conn.execute(
+                "UPDATE download_queue SET status='failed', error='Interrumpido por reinicio del servidor' "
+                "WHERE status IN ('pending', 'downloading')"
+            )
+        logger.info("[CLEANUP] Cola de descarga limpiada")
+    except sqlite3.OperationalError as exc:
+        logger.warning(f"[CLEANUP] No se pudo limpiar la cola: {exc}")
 
 
 # ---------------------------------------------------------------------------

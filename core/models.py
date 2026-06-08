@@ -31,6 +31,13 @@ class Chapter(BaseModel):
     url: Optional[str] = None
     is_downloaded: bool = False
 
+    @field_validator('number')
+    @classmethod
+    def normalize_number(cls, v: str) -> str:
+        parts = v.split('.')
+        parts[0] = parts[0].lstrip('0') or '0'
+        return '.'.join(parts)
+
 
 class EpisodeLink(BaseModel):
     server: str
@@ -116,6 +123,50 @@ class SearchQuery(BaseModel):
     source: Optional[str] = None
     q: str = ''
     refresh: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Scraper Generator Configuration
+# ---------------------------------------------------------------------------
+
+class ScraperConfigSchema(BaseModel):
+    search_url_template: str = ''
+    search_method: str = 'GET'
+    search_post_template: str = ''
+    search_result_selector: str = ''
+    search_title_selector: str = ''
+    search_title_attr: str = 'text'
+    search_url_selector: str = ''
+    search_url_attr: str = 'href'
+    search_cover_selector: str = ''
+    search_cover_attr: str = 'src'
+
+    details_url_template: str = ''
+    details_title_selector: str = ''
+    details_title_attr: str = 'text'
+    details_cover_selector: str = ''
+    details_cover_attr: str = 'src'
+    details_synopsis_selector: str = ''
+
+    chapters_url_template: str = ''
+    chapters_item_selector: str = ''
+    chapters_num_selector: str = ''
+    chapters_num_attr: str = 'text'
+    chapters_url_selector: str = ''
+    chapters_url_attr: str = 'href'
+
+    content_type: str = 'image'
+    content_page_template: str = ''
+    content_image_selector: str = ''
+    content_image_attr: str = 'src'
+    content_video_selector: str = ''
+    content_video_attr: str = 'src'
+
+    extra_headers: dict = {}
+    extra_cookies: dict = {}
+    use_cloudscraper: bool = False
+    has_pagination: bool = False
+    pagination_param: str = 'page'
 
 
 # ---------------------------------------------------------------------------

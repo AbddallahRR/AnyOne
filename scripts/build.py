@@ -23,16 +23,18 @@ def write(p: Path, content: str):
 
 # ── CSS bundles ───────────────────────────────────────────────────────────
 CSS_BUNDLES = {
-    "index":  ["inter.css", "fa-subset.css", "base.css", "layout.css", "index.css"],
-    "serie":  ["inter.css", "fa-subset.css", "base.css", "layout.css", "serie.css"],
-    "reader": ["inter.css", "fa-subset.css", "base.css", "layout.css", "reader.css"],
+    "index":    ["inter.css", "fa-subset.css", "base.css", "layout.css", "index.css"],
+    "serie":    ["inter.css", "fa-subset.css", "base.css", "layout.css", "serie.css"],
+    "reader":   ["inter.css", "fa-subset.css", "base.css", "layout.css", "reader.css"],
+    "settings": ["inter.css", "fa-subset.css", "base.css", "layout.css", "settings.css"],
 }
 
 # ── JS bundles ────────────────────────────────────────────────────────────
 JS_BUNDLES = {
-    "index":  ["queue-indicator.js", "app.js"],
-    "serie":  ["queue-indicator.js", "serie.js"],
-    "reader": ["reader.js"],
+    "index":    ["queue-indicator.js", "app.js"],
+    "serie":    ["queue-indicator.js", "serie.js"],
+    "reader":   ["reader.js"],
+    "settings": ["settings.js"],
 }
 
 try:

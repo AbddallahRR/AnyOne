@@ -350,7 +350,7 @@ class JkanimeSource(BaseSource):
                 continue
 
             title = title_tag.get_text(strip=True)
-            href  = title_tag.get('href') or card.select_one('a', {}).get('href', '')
+            href = title_tag.get('href') or (card.select_one('a').get('href', '') if card.select_one('a') else '')
 
             # Imagen: primero data-setbg del pic-container, luego <img>
             pic = card.select_one('.anime__item__pic')
@@ -584,7 +584,7 @@ class JkanimeSource(BaseSource):
         search_cache.set(cache_key, [c.model_dump() for c in chapters])
         return chapters
 
-    def download_chapter_sync(self, content_id: str, chapter_id: str, dest_folder: str) -> str:
+    def download_chapter_sync(self, content_id: str, chapter_id: str, dest_folder: str, chapter_number: str | None = None) -> str:
         cap_url = f"{self.BASE_URL}/{content_id}/{chapter_id}/"
         html    = self._get(cap_url).text
         soup    = BeautifulSoup(html, 'html.parser')

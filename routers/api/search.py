@@ -55,7 +55,9 @@ async def api_search(qs: SearchQuery = Depends()):
 
         for r, ref in zip(results, refs):
             chapter, progress = progress_map.get(ref, ('1', '0'))
-            r.last_chapter = chapter
+            parts = chapter.split('.')
+            parts[0] = parts[0].lstrip('0') or '0'
+            r.last_chapter = '.'.join(parts)
             r.progress = progress
 
         await search_cache.aset(cache_key, [r.model_dump() for r in results])

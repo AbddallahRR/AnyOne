@@ -1,0 +1,395 @@
+<!-- templates/settings.html -->
+{% extends "base.html" %}
+
+{% block title %}Configuración — Comic Web{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', path=bundles.get('css_settings', 'css/settings.css')) }}">
+{% endblock %}
+
+{% block content %}
+<div class="settings-page">
+
+  <!-- Header -->
+  <header class="settings-header">
+    <a href="/" class="settings-back-btn">&larr; Volver</a>
+    <h1 class="settings-title">Configuración</h1>
+  </header>
+
+  <div class="settings-layout">
+    <!-- Sidebar -->
+    <nav class="settings-sidebar">
+      <button class="settings-tab active" data-tab="sources">
+        <i class="fas fa-layer-group"></i> Fuentes
+      </button>
+      <button class="settings-tab" data-tab="generator">
+        <i class="fas fa-sync-alt"></i> Generador
+      </button>
+    </nav>
+
+    <!-- Main content -->
+    <main class="settings-main">
+
+      <!-- ── Sources Tab ── -->
+      <section id="tab-sources" class="settings-tab-content active">
+        <div class="tab-header">
+          <h2>Fuentes de contenido</h2>
+          <p class="tab-desc">Activa o desactiva las fuentes de anime y manga.</p>
+        </div>
+        <div id="sources-list" class="sources-list">
+          <div class="loading-spinner"></div>
+        </div>
+      </section>
+
+      <!-- ── Generator Tab ── -->
+      <section id="tab-generator" class="settings-tab-content">
+        <div class="tab-header">
+          <h2>Generador de fuentes</h2>
+          <p class="tab-desc">Crea o edita fuentes de contenido dinámicas.</p>
+        </div>
+
+        <!-- Toolbar -->
+        <div class="generator-toolbar">
+          <button id="new-scraper-btn" class="btn-primary">
+            + Nueva fuente
+          </button>
+        </div>
+
+        <!-- Dynamic sources list -->
+        <div id="dynamic-sources-list" class="sources-list"></div>
+
+
+
+        <!-- Wizard (hidden by default) -->
+        <div id="scraper-wizard" class="wizard hidden">
+
+          <!-- Progress bar -->
+          <div class="wizard-progress">
+            <div class="wp-step active" data-step="1">1. Básico</div>
+            <div class="wp-step" data-step="2">2. Búsqueda</div>
+            <div class="wp-step" data-step="3">3. Detalles</div>
+            <div class="wp-step" data-step="4">4. Capítulos</div>
+            <div class="wp-step" data-step="5">5. Contenido</div>
+            <div class="wp-step" data-step="6">6. Guardar</div>
+          </div>
+
+          <!-- Step 1: Basic Info -->
+          <div class="wizard-step" data-step="1">
+            <h3>Información básica</h3>
+            <div class="form-group">
+              <label>Tipo de contenido</label>
+              <select id="wiz-type" class="input-field">
+                <option value="manga">Manga</option>
+                <option value="anime">Anime</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Nombre interno</label>
+              <input id="wiz-name" type="text" class="input-field" placeholder="ej: mi-fuente">
+              <small>Solo letras, números, guiones. Se usará como identificador.</small>
+            </div>
+            <div class="form-group">
+              <label>Etiqueta visible</label>
+              <input id="wiz-label" type="text" class="input-field" placeholder="ej: Mi Fuente">
+            </div>
+            <div class="form-group">
+              <label>URL base</label>
+              <input id="wiz-base-url" type="text" class="input-field" placeholder="ej: https://mifuente.com">
+            </div>
+            <div class="wizard-nav">
+              <button class="wiz-next btn-primary" data-next="2">Siguiente</button>
+            </div>
+          </div>
+
+          <!-- Step 2: Search -->
+          <div class="wizard-step hidden" data-step="2">
+            <h3>Configuración de búsqueda</h3>
+            <div class="form-group">
+              <label>URL de búsqueda (usa {base} y {query})</label>
+              <input id="wiz-search-url" type="text" class="input-field input-mono" placeholder="{base}/buscar?q={query}">
+            </div>
+
+            <!-- Advanced selectors (collapsible) -->
+            <div class="advanced-section">
+              <div class="advanced-toggle" onclick="this.parentElement.classList.toggle('advanced-open')">
+                <span><i class="fas fa-cog"></i> Configuración avanzada</span>
+                <span class="advanced-arrow"><i class="fas fa-chevron-down"></i></span>
+              </div>
+              <div class="advanced-body">
+                <div class="form-group">
+                  <label>Selector CSS para cada resultado</label>
+                  <input id="wiz-search-result" type="text" class="input-field input-mono" placeholder="ej: .result-card, .item · CSS que matchea cada tarjeta individual">
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label>Selector del título</label>
+                    <input id="wiz-search-title" type="text" class="input-field input-mono" placeholder="h3 a, .title">
+                  </div>
+                  <div class="form-group">
+                    <label>Atributo</label>
+                    <select id="wiz-search-title-attr" class="input-field">
+                      <option value="text">texto</option>
+                      <option value="href">href</option>
+                      <option value="src">src</option>
+                      <option value="data-src">data-src</option>
+                      <option value="title">title</option>
+                      <option value="alt">alt</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label>Selector del enlace</label>
+                    <input id="wiz-search-url-sel" type="text" class="input-field input-mono" placeholder="a[href*='serie']">
+                  </div>
+                  <div class="form-group">
+                    <label>Atributo</label>
+                    <select id="wiz-search-url-attr" class="input-field">
+                      <option value="href">href</option>
+                      <option value="src">src</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label>Selector de portada</label>
+                    <input id="wiz-search-cover" type="text" class="input-field input-mono" placeholder="img.cover, .poster img">
+                  </div>
+                  <div class="form-group">
+                    <label>Atributo</label>
+                    <select id="wiz-search-cover-attr" class="input-field">
+                      <option value="src">src</option>
+                      <option value="data-src">data-src</option>
+                      <option value="data-lazy">data-lazy</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="test-panel">
+              <div class="test-row">
+                <input id="wiz-search-test-query" type="text" class="input-field" placeholder="Query de prueba (ej: one piece)">
+                <button id="wiz-search-detect-btn" class="btn-accent" title="Auto-detectar selectores"><i class="fas fa-wand-magic-sparkles"></i></button>
+                <button id="wiz-search-test-btn" class="btn-secondary">Probar</button>
+              </div>
+              <div id="wiz-search-test-results" class="test-results"></div>
+            </div>
+            <div class="wizard-nav">
+              <button class="wiz-prev btn-ghost" data-prev="1">Anterior</button>
+              <button class="wiz-next btn-primary" data-next="3">Siguiente</button>
+            </div>
+          </div>
+
+          <!-- Step 3: Details -->
+          <div class="wizard-step hidden" data-step="3">
+            <h3>Configuración de detalles</h3>
+            <div class="form-group">
+              <label>URL de detalles (usa {base} y {content_id})</label>
+              <input id="wiz-details-url" type="text" class="input-field input-mono" placeholder="{base}/{content_id}/">
+            </div>
+
+            <!-- Advanced selectors (collapsible) -->
+            <div class="advanced-section">
+              <div class="advanced-toggle" onclick="this.parentElement.classList.toggle('advanced-open')">
+                <span><i class="fas fa-cog"></i> Configuración avanzada</span>
+                <span class="advanced-arrow"><i class="fas fa-chevron-down"></i></span>
+              </div>
+              <div class="advanced-body">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label>Selector del título</label>
+                    <input id="wiz-details-title" type="text" class="input-field input-mono" placeholder="h1, .series-title">
+                  </div>
+                  <div class="form-group">
+                    <label>Atributo</label>
+                    <select id="wiz-details-title-attr" class="input-field">
+                      <option value="text">texto</option>
+                      <option value="title">title</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label>Selector de portada</label>
+                    <input id="wiz-details-cover" type="text" class="input-field input-mono" placeholder=".poster img, img.cover">
+                  </div>
+                  <div class="form-group">
+                    <label>Atributo</label>
+                    <select id="wiz-details-cover-attr" class="input-field">
+                      <option value="src">src</option>
+                      <option value="data-src">data-src</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>Selector de sinopsis</label>
+                  <input id="wiz-details-synopsis" type="text" class="input-field input-mono" placeholder=".description, .synopsis p">
+                </div>
+              </div>
+            </div>
+
+            <div class="test-panel">
+              <div class="test-row">
+                <input id="wiz-details-test-id" type="text" class="input-field" placeholder="ID de contenido de prueba">
+                <button id="wiz-details-test-btn" class="btn-secondary">Probar</button>
+              </div>
+              <div id="wiz-details-test-results" class="test-results"></div>
+            </div>
+            <div class="wizard-nav">
+              <button class="wiz-prev btn-ghost" data-prev="2">Anterior</button>
+              <button class="wiz-next btn-primary" data-next="4">Siguiente</button>
+            </div>
+          </div>
+
+          <!-- Step 4: Chapters -->
+          <div class="wizard-step hidden" data-step="4">
+            <h3>Configuración de capítulos</h3>
+            <div class="form-group">
+              <label>URL de capítulos (usa {base} y {content_id})</label>
+              <input id="wiz-chapters-url" type="text" class="input-field input-mono" placeholder="{base}/{content_id}/">
+            </div>
+
+            <!-- Advanced selectors (collapsible) -->
+            <div class="advanced-section">
+              <div class="advanced-toggle" onclick="this.parentElement.classList.toggle('advanced-open')">
+                <span><i class="fas fa-cog"></i> Configuración avanzada</span>
+                <span class="advanced-arrow"><i class="fas fa-chevron-down"></i></span>
+              </div>
+              <div class="advanced-body">
+                <div class="form-group">
+                  <label>Selector para cada capítulo</label>
+                  <input id="wiz-chapters-item" type="text" class="input-field input-mono" placeholder="ej: #chapter-list a, li.chapter · CSS que matchea cada fila individual">
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label>Selector del número</label>
+                    <input id="wiz-chapters-num" type="text" class="input-field input-mono" placeholder=".chap-num, span.num">
+                  </div>
+                  <div class="form-group">
+                    <label>Atributo</label>
+                    <select id="wiz-chapters-num-attr" class="input-field">
+                      <option value="text">texto</option>
+                      <option value="href">href</option>
+                      <option value="data-number">data-number</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label>Selector del enlace</label>
+                    <input id="wiz-chapters-url-sel" type="text" class="input-field input-mono" placeholder="a[href*='capitulo']">
+                  </div>
+                  <div class="form-group">
+                    <label>Atributo</label>
+                    <select id="wiz-chapters-url-attr" class="input-field">
+                      <option value="href">href</option>
+                      <option value="src">src</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="test-panel">
+              <div class="test-row">
+                <input id="wiz-chapters-test-id" type="text" class="input-field" placeholder="ID de contenido de prueba">
+                <button id="wiz-chapters-test-btn" class="btn-secondary">Probar</button>
+              </div>
+              <div id="wiz-chapters-test-results" class="test-results"></div>
+            </div>
+            <div class="wizard-nav">
+              <button class="wiz-prev btn-ghost" data-prev="3">Anterior</button>
+              <button class="wiz-next btn-primary" data-next="5">Siguiente</button>
+            </div>
+          </div>
+
+          <!-- Step 5: Content -->
+          <div class="wizard-step hidden" data-step="5">
+            <h3>Configuración de contenido</h3>
+            <div class="form-group">
+              <label>Tipo de contenido</label>
+              <select id="wiz-content-type" class="input-field">
+                <option value="image">Imágenes (manga)</option>
+                <option value="video">Video (anime)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>URL de página de contenido (usa {base}, {content_id}, {chapter_id})</label>
+              <input id="wiz-content-url" type="text" class="input-field input-mono" placeholder="{base}/leer/{content_id}/{chapter_id}/">
+            </div>
+
+            <!-- Advanced selectors (collapsible) -->
+            <div class="advanced-section">
+              <div class="advanced-toggle" onclick="this.parentElement.classList.toggle('advanced-open')">
+                <span><i class="fas fa-cog"></i> Configuración avanzada</span>
+                <span class="advanced-arrow"><i class="fas fa-chevron-down"></i></span>
+              </div>
+              <div class="advanced-body">
+                <div id="wiz-image-config">
+                  <div class="form-group">
+                    <label>Selector de imágenes</label>
+                    <input id="wiz-content-img" type="text" class="input-field input-mono" placeholder="#reader img, .chapter-content img">
+                  </div>
+                  <div class="form-group">
+                    <label>Atributo de imagen</label>
+                    <select id="wiz-content-img-attr" class="input-field">
+                      <option value="src">src</option>
+                      <option value="data-src">data-src</option>
+                      <option value="data-lazy">data-lazy</option>
+                      <option value="data-original">data-original</option>
+                    </select>
+                  </div>
+                </div>
+                <div id="wiz-video-config" class="hidden">
+                  <div class="form-group">
+                    <label>Selector del video/iframe</label>
+                    <input id="wiz-content-vid" type="text" class="input-field input-mono" placeholder="iframe[src*='player'], video source">
+                  </div>
+                  <div class="form-group">
+                    <label>Atributo</label>
+                    <select id="wiz-content-vid-attr" class="input-field">
+                      <option value="src">src</option>
+                      <option value="data-src">data-src</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="test-panel">
+              <div class="test-row">
+                <input id="wiz-content-test-chapter" type="text" class="input-field" placeholder="chapter_id de prueba (ej: 1)">
+                <button id="wiz-content-test-btn" class="btn-secondary">Probar</button>
+              </div>
+              <div id="wiz-content-test-results" class="test-results"></div>
+            </div>
+            <div class="wizard-nav">
+              <button class="wiz-prev btn-ghost" data-prev="4">Anterior</button>
+              <button class="wiz-next btn-primary" data-next="6">Siguiente</button>
+            </div>
+          </div>
+
+          <!-- Step 6: Save -->
+          <div class="wizard-step hidden" data-step="6">
+            <h3>Guardar fuente</h3>
+            <div id="wiz-summary" class="wizard-summary"></div>
+            <div class="wizard-nav" style="margin-top:24px;">
+              <button class="wiz-prev btn-ghost" data-prev="5">Anterior</button>
+              <button id="wiz-save-btn" class="btn-primary">
+                <i class="fas fa-check"></i> Guardar fuente
+              </button>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', path=bundles.get('js_settings', 'js/settings.js')) }}"></script>
+{% endblock %}

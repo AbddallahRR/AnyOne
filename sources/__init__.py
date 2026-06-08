@@ -1,5 +1,4 @@
 import asyncio
-import functools
 from concurrent.futures import ThreadPoolExecutor
 
 from core.models import Chapter, SearchResult, SeriesDetails
@@ -41,17 +40,23 @@ class BaseSource:
     async def get_chapters(self, content_id: str) -> list[Chapter]:
         return await self._run_in_executor(self.get_chapters_sync, content_id)
 
-    def download_chapter_sync(self, content_id: str, chapter_id: str, dest_folder: str) -> str:
+    def download_chapter_sync(self, content_id: str, chapter_id: str, dest_folder: str, chapter_number: str | None = None) -> str:
         raise NotImplementedError
 
-    async def download_chapter(self, content_id: str, chapter_id: str, dest_folder: str) -> str:
-        return await self._run_in_executor(self.download_chapter_sync, content_id, chapter_id, dest_folder)
+    async def download_chapter(self, content_id: str, chapter_id: str, dest_folder: str, chapter_number: str | None = None) -> str:
+        return await self._run_in_executor(self.download_chapter_sync, content_id, chapter_id, dest_folder, chapter_number)
 
     def get_stream_url_sync(self, content_id: str, chapter_id: str) -> str | None:
         return None
 
     async def get_stream_url(self, content_id: str, chapter_id: str) -> str | None:
         return await self._run_in_executor(self.get_stream_url_sync, content_id, chapter_id)
+
+    def get_chapter_images_sync(self, content_id: str, chapter_id: str) -> list[str]:
+        return []
+
+    async def get_chapter_images(self, content_id: str, chapter_id: str) -> list[str]:
+        return await self._run_in_executor(self.get_chapter_images_sync, content_id, chapter_id)
 
     def warm_cache_sync(self) -> None:
         pass

@@ -33,12 +33,12 @@
 
   // ── Marcar visto ───────────────────────────────────────────────────────
   async function markCurrentAsWatched() {
-    if (source !== 'local') return;
+    const ref = source === 'local' ? `local:${content_id}` : `${source}:${content_id}`;
     try {
       await fetch('/api/watched', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ content_ref: `local:${content_id}`, chapter: currentChapterNum }),
+        body:    JSON.stringify({ content_ref: ref, chapter: currentChapterNum }),
       });
     } catch (e) { console.warn('markCurrentAsWatched:', e); }
   }
@@ -107,11 +107,16 @@
     loadCurrentChapter();
   }
 
+  function currentChapterId() {
+    return chaptersList[currentChapterIndex]?.id || currentChapterNum;
+  }
+
   // ── Anime ──────────────────────────────────────────────────────────────
   async function loadAnimeChapter() {
+    const chapterArg = source === 'local' ? currentChapterNum : currentChapterId();
     const videoUrl = source === 'local'
-      ? `/api/play/local/anime/${content_id}/${currentChapterNum}`
-      : `/api/play/anime/${source}/${content_id}/${currentChapterNum}`;
+      ? `/api/play/local/anime/${content_id}/${chapterArg}`
+      : `/api/play/remote/anime/${source}/${content_id}/${chapterArg}`;
 
     let savedTime = 0;
     let duration  = 0;
@@ -209,20 +214,17 @@
   //         libera el slot para que se pueda reintentar.
 
   async function loadMangaChapter() {
-    if (source !== 'local') {
-      if (chapterWrapper) chapterWrapper.innerHTML =
-        `<div style="color:var(--accent2); text-align:center; padding:20px;">
-           El visor de manga solo funciona con capítulos descargados localmente.
-         </div>`;
-      return;
-    }
-
     try {
-      const imgRes = await fetch(`/api/play/local/manga/${content_id}/${currentChapterNum}`);
+      const isRemote = source !== 'local';
+      const chapterArg = isRemote ? currentChapterId() : currentChapterNum;
+      const imgUrl  = isRemote
+        ? `/api/play/remote/manga/${source}/${content_id}/${chapterArg}`
+        : `/api/play/local/manga/${content_id}/${chapterArg}`;
+      const imgRes = await fetch(imgUrl);
       if (!imgRes.ok) throw new Error('No se pudieron cargar las imágenes');
-      const relPaths = await imgRes.json();
+      const rawData = await imgRes.json();
 
-      if (!relPaths.length) {
+      if (!rawData.length) {
         if (chapterWrapper) chapterWrapper.innerHTML =
           `<div style="color:var(--muted); text-align:center; padding:20px;">
              No hay imágenes en este capítulo.
@@ -230,7 +232,7 @@
         return;
       }
 
-      const imageUrls = relPaths.map(p => `/api/manga/images/${p}`);
+      const imageUrls = isRemote ? rawData : rawData.map(p => `/api/manga/images/${p}`);
       const total     = imageUrls.length;
 
       const WINDOW     = 2;
@@ -429,7 +431,7 @@
 
           clearTimeout(saveTimeout);
           saveTimeout = setTimeout(() => {
-            fetch(`/api/progress/local/manga/${content_id}`, {
+            fetch(`/api/progress/manga/${source}/${content_id}`, {
               method:  'POST',
               headers: { 'Content-Type': 'application/json' },
               body:    JSON.stringify({ chapter: currentChapterNum, progress: idx }),
@@ -447,7 +449,7 @@
 
       window.addEventListener('beforeunload', () => {
         clearTimeout(saveTimeout);
-        fetch(`/api/progress/local/manga/${content_id}`, {
+        fetch(`/api/progress/manga/${source}/${content_id}`, {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify({ chapter: currentChapterNum, progress: currentPage }),
@@ -457,7 +459,10 @@
       // ── Restaurar posición guardada ────────────────────────────────────
       let savedIndex = 0;
       try {
-        const res  = await fetch(`/api/progress/local/manga/${content_id}`);
+        const progUrl = isRemote
+          ? `/api/progress/manga/${source}/${content_id}`
+          : `/api/progress/local/manga/${content_id}`;
+        const res  = await fetch(progUrl);
         const prog = await res.json();
         if (String(prog.chapter) === String(currentChapterNum) && prog.progress) {
           const idx = parseInt(prog.progress);

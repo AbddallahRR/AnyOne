@@ -19,9 +19,9 @@
       </span>
       <div style="display:flex; align-items:center; gap:8px;">
         <span id="queue-hint" style="font-size:12px; color:var(--muted);"></span>
-        <button id="settings-btn" class="btn-ghost" style="padding:6px 10px; font-size:16px; border-radius:8px; line-height:1;" title="Configuración">
+        <a href="/settings" class="btn-ghost" style="display:inline-flex; align-items:center; padding:6px 10px; font-size:16px; border-radius:8px; line-height:1; text-decoration:none;" title="Configuración">
           &#9881;
-        </button>
+        </a>
       </div>
     </div>
 
@@ -163,12 +163,6 @@
     if (e.key === 'Escape') closeModal();
   });
 
-  // ── Settings popup ──────────────────────────────────────────
-  document.getElementById('settings-btn').addEventListener('click', e => {
-    e.stopPropagation();
-    if (typeof window.toggleSettingsPopup === 'function') {
-      window.toggleSettingsPopup(e.currentTarget);
-    }
-  });
+
 </script>
 {% endblock %}

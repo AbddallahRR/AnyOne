@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 
 from fastapi import HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 
 from config import ANIME_DOWNLOAD_DIR, MANGA_DOWNLOAD_DIR
 from core.database import save_content_to_db
@@ -30,8 +30,8 @@ def api_local_content_details(type: str, id: str):
     serie_path = Path(_base_folder(type)) / normalized_id
 
     cover_url = ''
-    # Preferir thumbnail WebP
-    if (serie_path / 'thumb.webp').exists():
+    # Preferir thumbnail WebP si existe y la original no es ya WebP (animada)
+    if (serie_path / 'thumb.webp').exists() and not (serie_path / 'cover.webp').exists():
         cover_url = f'/api/local-cover/{type}/{normalized_id}/thumb.webp?thumb=1'
     else:
         for ext in ['jpg', 'jpeg', 'png', 'webp']:
@@ -224,6 +224,24 @@ def api_play(content_type: str, source: str, content_id: str, chapter: str):
     if not filepath.exists():
         raise HTTPException(status_code=404, detail='Archivo no encontrado')
     return FileResponse(filepath, headers={"Accept-Ranges": "bytes"})
+
+
+@api_router.get('/play/remote/{content_type}/{source}/{content_id}/{chapter}')
+async def api_play_remote(content_type: str, source: str, content_id: str, chapter: str):
+    src = get_source(content_type, source)
+    if not src:
+        raise HTTPException(status_code=404, detail='Fuente no encontrada')
+
+    if content_type == 'anime':
+        stream_url = await src.get_stream_url(content_id, chapter)
+        if not stream_url:
+            raise HTTPException(status_code=404, detail='Esta fuente no soporta streaming remoto')
+        return RedirectResponse(url=stream_url, status_code=307)
+    else:
+        images = await src.get_chapter_images(content_id, chapter)
+        if not images:
+            raise HTTPException(status_code=404, detail='No se encontraron imágenes para este capítulo')
+        return JSONResponse(content=images)
 
 
 @api_router.get('/manga/images/{subpath:path}')

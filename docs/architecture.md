@@ -29,7 +29,8 @@ AnyOne/
 │       ├── content.py        →   Detalle, capítulos y reproducción (/api/content, /api/play)
 │       ├── library.py        →   Biblioteca, progreso, etiquetas, vistos
 │       ├── downloads.py      →   Cola de descarga (/api/download, /api/queue)
-│       └── updates.py        →   Comprobación de capítulos nuevos
+│       ├── updates.py        →   Comprobación de capítulos nuevos
+│       └── scraper_configs.py →   CRUD de scrapers dinámicos (/api/scraper-configs/*)
 │
 ├── core/                     → Lógica compartida
 │   ├── database.py           →   SQLite (migraciones, progreso, cola, etiquetas)
@@ -40,6 +41,8 @@ AnyOne/
 │   ├── settings.py           →   Config tipada con pydantic-settings
 │   ├── sources.py            →   Registro de fuentes disponibles
 │   ├── throttle.py           →   Rate limiter por dominio
+│   ├── scraper_config.py     →   Gestión de scrapers dinámicos (carga, validación, persistencia)
+│   ├── selector_detector.py  →   Inferencia automática de selectores CSS desde HTML
 │   └── utils.py              →   Normalización de títulos, escaneo local
 │
 ├── sources/                  → Scrapers (uno por sitio upstream)
@@ -49,7 +52,8 @@ AnyOne/
 │   ├── nartag.py             →   nartag.com (manga)
 │   ├── manhwaweb.py          →   manhwaweb.com (manga)
 │   ├── ikigai.py             →   visorikigai (manga)
-│   └── olympus.py            →   olympusscanlation (manga)
+│   ├── olympus.py            →   olympusscanlation (manga)
+│   └── dynamic.py            →   Motor de scrapers dinámicos definidos por el usuario
 │
 ├── templates/                → Jinja2 (server-side rendered)
 │   ├── base.html             →   Layout: fonts, icons, CSS, JS globales
@@ -166,9 +170,10 @@ Punto de entrada. Usa `lifespan` de FastAPI:
 4. Limpia la cola de descargas interrumpidas (`cleanup_download_queue`)
 5. Inicia `DOWNLOAD_NUM_WORKERS` workers de descarga en hilos daemon
 6. Arranca el scheduler de actualizaciones (cada 24 h)
-7. Monta `StaticFiles` y registra los routers (`pages`, `api`)
-8. Lanza precarga en background de todas las fuentes (`asyncio.create_task(_warm_all_sources())`)
-9. Al shutdown: detiene los workers gracefulmente (`stop_workers()`)
+7. Emite warning si `SECRET_KEY` tiene el valor inseguro por defecto
+8. Monta `StaticFiles` y registra los routers (`pages`, `api`)
+9. Lanza precarga en background de todas las fuentes (`asyncio.create_task(_warm_all_sources())`)
+10. Al shutdown: detiene los workers gracefulmente (`stop_workers()`)
 
 La precarga de catálogos (`_warm_all_sources`) ejecuta todos los `warm_cache()` en paralelo
 con `asyncio.gather()` y timeout de 30 s por fuente, usando `asyncio.create_task()` en el
@@ -232,8 +237,9 @@ Todos los endpoints son `async def` y hacen `await` a los métodos async de las 
 - `GET /api/content/local/<type>/<id>` — detalle de contenido local
 - `GET /api/chapters/local/<type>/<id>` — capítulos locales en disco
 - `GET /api/local-cover/<type>/<path:filename>` — sirve portada local (soporta `?thumb=1` para thumbnail WebP, con `Cache-Control` y `ETag` para caché HTTP)
-- `GET /api/play/<type>/<source>/<id>/<chapter>` — sirve video local
+- `GET /api/play/<type>/<source>/<id>/<chapter>` — sirve video local (legacy)
 - `GET /api/play/local/<type>/<id>/<chapter>` — reproducción local (path traversal safe)
+- `GET /api/play/remote/<type>/<source>/<id>/<chapter>` — streaming remoto: anime → redirect 307 a CDN, manga → JSON con URLs de imágenes
 - `GET /api/manga/images/<path:subpath>` — imágenes de manga (con `Cache-Control: max-age=86400` y `ETag` para 304 Not Modified)
 - `GET /api/video-duration/anime/<id>/<chapter>` — duración del video con ffprobe (cached 24 h)
 
@@ -284,6 +290,23 @@ Endpoints CRUD para activar/desactivar fuentes desde el frontend:
 Usado por el popup de configuración (icono engranaje en `index.html`).
 
 ---
+
+#### `api/scraper_configs.py` — CRUD de scrapers dinámicos
+
+Endpoints para gestionar scrapers definidos por el usuario:
+
+- `GET /api/scraper-configs` — lista todas las configuraciones guardadas
+- `POST /api/scraper-configs` — crea/actualiza una configuración
+- `DELETE /api/scraper-configs/<name>` — elimina una configuración
+- `POST /api/scraper-configs/test` — prueba una configuración contra una URL real
+- `POST /api/scraper-configs/auto-detect` — infiere selectores automáticamente desde una URL usando `selector_detector.py`
+- `POST /api/scraper-configs/reload` — recarga todas las fuentes dinámicas sin reiniciar el servidor
+
+El auto-detect funciona en 3 etapas (`search`, `details`, `chapters`) y devuelve selectores CSS candidatos que el usuario puede ajustar.
+
+---
+
+
 
 ### `core/database.py` — SQLite
 
@@ -376,11 +399,12 @@ subclases de `BaseSource`. Cada subclase debe definir `type` (categoría) y `lab
 directorio (excluyendo `__init__.py`) y reúne instancias en un diccionario.
 
 ```python
-# Estructura resultante (generada automáticamente):
+# Estructura resultante (auto-descubierta — varía según fuentes cargadas):
 SOURCES = {
-    'anime': {'jkanime': JkanimeSource()},
-    'manga': {'nartag': NartagSource(), 'manhwaweb': ManhwawebSource(), 'ikigai': IkigaiSource()}
+    'anime': {'jkanime': JkanimeSource(), 'animeflv': AnimeflvSource()},
+    'manga': {'nartag': NartagSource(), 'manhwaweb': ManhwawebSource(), 'ikigai': IkigaiSource(), 'olympus': OlympusSource()}
 }
+# Además se cargan scrapers dinámicos desde core/scraper_config.py bajo SOURCES['dynamic']
 ```
 
 Funciones:
@@ -400,6 +424,31 @@ Per-domain rate limiter con algoritmo **token bucket**. Espera un mínimo de 2 s
 - `_get_remaining(domain)` — devuelve segundos restantes hasta la próxima llamada permitida
 
 Usa `urlparse` para extraer el netloc. Instancia global `rate_limiter` con `min_interval=2.0`.
+
+---
+
+### `core/scraper_config.py` — Scrapers dinámicos
+
+Gestiona scrapers definidos por el usuario (sin código) a través de configuración JSON:
+
+- **Carga**: `load_dynamic_sources()` se invoca en `core/sources.py` tras el auto-descubrimiento. Lee la tabla `scraper_configs` de la BD, genera dinámicamente clases Python que heredan de `DynamicSource` (definido en `sources/dynamic.py`) y las registra en `SOURCES['dynamic']`.
+- **Validación**: `validate_config(config)` checkea que la configuración tenga estructura válida (selectores, URL, tipo de contenido).
+- **Persistencia**: `save_config(name, config)` guarda en BD; `get_config(name)`, `list_configs()`, `delete_config(name)`.
+- **Test**: `test_config(config, url)` ejecuta el scraper dinámico contra una URL real para verificar que los selectores funcionan.
+
+Los usuarios definen scrapers desde el frontend mediante el endpoint `POST /api/scraper-configs/auto-detect` que infiere selectores automáticamente.
+
+---
+
+### `core/selector_detector.py` — Inferencia de selectores
+
+Analiza HTML de sitios upstream para sugerir selectores CSS automáticamente:
+
+- **`detect_search_selectors(html, url)`**: dado el HTML de una página de búsqueda/results, encuentra elementos que contienen enlaces, imágenes y títulos. Devuelve selectores candidatos para `card`, `title`, `link`, `image`, etc.
+- **`detect_detail_selectors(html, url)`**: analiza página de detalle de serie para inferir selectores de portada, sinopsis, géneros.
+- **`detect_chapter_selectors(html, url)`**: analiza página de capítulos para inferir selectores de ítem, número y enlace.
+
+Usa heurísticas como: elementos `<a>` con href, imágenes con `src` o `data-setsrc`, patrones de clase comunes. Es usado por `POST /api/scraper-configs/auto-detect` para guiar al usuario en la creación de scrapers dinámicos.
 
 ---
 
@@ -431,6 +480,7 @@ Las subclases pueden sobreescribir la versión async para implementaciones nativ
 | `get_chapters_sync(id)` | `get_chapters(id)` | `list[Chapter]` | Capítulos con `{number, id}` |
 | `download_chapter_sync(id, chapter_id, dest)` | `download_chapter(id, chapter_id, dest)` | `str` | Descarga un capítulo, devuelve ruta |
 | `get_stream_url_sync(id, chapter_id)` | `get_stream_url(id, chapter_id)` | `str\|None` | URL directa para streaming (solo anime) |
+| `get_chapter_images_sync(id, chapter_id)` | `get_chapter_images(id, chapter_id)` | `list[str]` | URLs de imágenes para streaming (solo manga) |
 | `warm_cache_sync()` | `warm_cache()` | `None` | Precarga catálogo en background (opcional) |
 
 **Uso:**
@@ -460,7 +510,8 @@ Scraper de `nartag.com`:
 - **Búsqueda**: catálogo paginado desde API interna + scraping como fallback
 - **Detalles**: API + scraping
 - **Capítulos**: API (`/wp-json/...`) con paginación
-- **Descarga imágenes**: iteración sobre `<img>` en página del capítulo, con soporte de `<noscript>` para lazy-loading
+- **Streaming**: `get_chapter_images_sync()` reusa `_get_reader_url()` y `_extract_manga_images()` para obtener URLs de imágenes sin descargar
+- **Descarga imágenes**: usa `get_chapter_images_sync()` y luego descarga, con soporte de `<noscript>` para lazy-loading
 - **Cache**: catálogo completo (TTL 3 días), detalles y capítulos por serie
 
 ---
@@ -472,7 +523,8 @@ Scraper de `manhwaweb.com`:
 - **Búsqueda**: catálogo desde API backend (`manhwawebbackend-production.up.railway.app`) con paginación paralela (8 workers por lote, max 500 páginas). Fallback a scraping HTML.
 - **Detalles**: API + scraping
 - **Capítulos**: API (campo `chapters[]`) + scraping de enlaces `/leer/`
-- **Descarga imágenes**: API (`/chapters/see/{chapter_id}`) o scraping. Descarga por lotes con retry (3 intentos, backoff exponencial)
+- **Streaming**: `get_chapter_images_sync()` obtiene URLs de imágenes vía API o scraping, sin descargar
+- **Descarga imágenes**: usa `get_chapter_images_sync()` y luego descarga por lotes con retry (3 intentos, backoff exponencial)
 - **Cache**: catálogo completo (TTL 3 días), detalles y capítulos por serie
 - **Background**: `warm_cache()` + `_refresh_catalog_background()` en daemon threads
 
@@ -484,11 +536,29 @@ Scraper de `ikigai.yomod.xyz`:
 
 - **Búsqueda**: catálogo desde API con paginación secuencial
 - **Detalles y capítulos**: API REST
-- **Descarga imágenes**: API → lista de URLs → descarga secuencial
+- **Streaming**: `get_chapter_images_sync()` extrae URLs de imágenes vía scraping de la página del capítulo
+- **Descarga imágenes**: usa `get_chapter_images_sync()` y luego descarga secuencial
 - **Cache**: catálogo completo, detalles y capítulos
 - Usa `cloudscraper` para bypass de Cloudflare
 
 ---
+
+### `sources/dynamic.py` — Motor de scrapers dinámicos
+
+Clase `DynamicSource` que hereda de `BaseSource` y ejecuta scrapers definidos por configuración JSON (sin código):
+
+- **Configuración**: recibe un dict con `search_selector`, `detail_selectors`, `chapter_selectors`, `content_type`, etc.
+- **Búsqueda**: usa `soup.select(config['search_selector'])` para extraer resultados. También inspecciona `<template>` tags para sitios con patrón "load more" (deduplica por `href`).
+- **Detalles**: extrae portada, sinopsis y géneros según selectores configurados.
+- **Capítulos**: extrae lista numerada de capítulos desde selectores CSS.
+- **Streaming/descarga**: según `content_type` (`image` o `video`), extrae URLs de imágenes o video URL.
+- **Cache**: usa `search_cache` con TTL por defecto.
+
+Las instancias son creadas por `core/scraper_config.py` y registradas automáticamente en `SOURCES['dynamic']`.
+
+---
+
+
 
 ## Frontend
 
@@ -595,11 +665,11 @@ python3 scripts/build.py
 {% endif %}
 ```
 
-Además, en producción se emiten **preload hints** para los font files críticos y se agregan headers de caché agresivos (`Cache-Control: public, max-age=31536000, immutable`) a través de un middleware en `server.py` para toda la carpeta `/static/dist/`.
+Además, en producción se emiten **preload hints** para los font files críticos y se agregan headers de caché agresivos (`Cache-Control: public, max-age=31536000, immutable`) a través de la clase `CachedStaticFiles` en `app.py` para toda la carpeta `/static/dist/`.
 
 ### Cache headers
 
-En `server.py` se configuran dos niveles de caché:
+En `app.py` (clase `CachedStaticFiles`) se configuran dos niveles de caché:
 
 | Ruta | Cache-Control | Estrategia |
 |---|---|---|

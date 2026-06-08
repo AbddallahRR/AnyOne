@@ -452,35 +452,20 @@ class IkigaiSource(BaseSource):
         search_cache.set(cache_key, chapters)
         return [Chapter(**c) for c in chapters]
 
-    def download_chapter_sync(self, content_id: str, chapter_id: str, dest_folder: str) -> str:
-        cap_url  = f"{self.BASE_URL}/capitulo/{chapter_id}/"
-        html     = self._fetch_url(cap_url)
-        soup     = BeautifulSoup(html, 'html.parser')
-
-        cap_num  = chapter_id
-        m        = re.search(r'Capítulo\s+(\d+(?:\.\d+)?)', html, re.I)
-        if m:
-            cap_num = m.group(1)
-
-        dir_name = (f"cap_{int(float(cap_num)):04d}"
-                    if cap_num.replace('.', '', 1).isdigit()
-                    else f"cap_{cap_num}")
-        cap_dir  = os.path.join(dest_folder, dir_name)
-        os.makedirs(cap_dir, exist_ok=True)
+    def get_chapter_images_sync(self, content_id: str, chapter_id: str) -> list[str]:
+        cap_url = f"{self.BASE_URL}/capitulo/{chapter_id}/"
+        html    = self._fetch_url(cap_url)
+        soup    = BeautifulSoup(html, 'html.parser')
 
         seen:     set[str]  = set()
         img_urls: list[str] = []
 
-        # Recopilar todos los <img>, incluyendo los dentro de <noscript>
-        # (técnica común de lazy loading donde la img real va en noscript)
         all_imgs = list(soup.find_all('img'))
         for noscript in soup.find_all('noscript'):
             inner = BeautifulSoup(noscript.decode_contents(), 'html.parser')
             all_imgs.extend(inner.find_all('img'))
 
         for img in all_imgs:
-            # Priorizar data-src y variantes de lazy loading sobre src,
-            # ya que src puede contener un placeholder (loading.gif, etc.)
             src = (img.get('data-src') or img.get('data-lazy') or
                    img.get('data-original') or img.get('data-url') or
                    img.get('src'))
@@ -489,9 +474,22 @@ class IkigaiSource(BaseSource):
                 seen.add(url)
                 img_urls.append(url)
 
+        return img_urls
+
+    def download_chapter_sync(self, content_id: str, chapter_id: str, dest_folder: str, chapter_number: str | None = None) -> str:
+        img_urls = self.get_chapter_images_sync(content_id, chapter_id)
+
         if not img_urls:
             raise Exception(f"Ikigai: no se encontraron imágenes en capítulo {chapter_id}")
 
+        cap_num = chapter_number or chapter_id
+        dir_name = (f"cap_{int(float(cap_num)):04d}"
+                    if cap_num.replace('.', '', 1).isdigit()
+                    else f"cap_{cap_num}")
+        cap_dir  = os.path.join(dest_folder, dir_name)
+        os.makedirs(cap_dir, exist_ok=True)
+
+        cap_url = f"{self.BASE_URL}/capitulo/{chapter_id}/"
         dl_headers       = {**self._headers, 'Referer': cap_url}
         downloaded_count = 0
         for i, img_url in enumerate(img_urls, start=1):
