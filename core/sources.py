@@ -108,15 +108,27 @@ def sync_source_settings():
         except Exception:
             logger.warning(f"No se pudo registrar {src['name']} en source_settings")
 
+    # Also sync from scraper_configs table (dynamic sources that may have
+    # been created after module import, or missed during early import
+    # before DB tables existed).
+    try:
+        from core.scraper_config import get_all_configs
+        for cfg in get_all_configs():
+            if not cfg.get('built_in'):
+                ensure_source_in_db(cfg['name'], cfg['type'])
+    except Exception:
+        pass
+
 
 _discover_sources()
 
-# Load dynamic (user-generated) sources at startup
+# Load dynamic (user-generated) sources at startup.
+# Retry is safe: second call simply re-registers already-known sources.
 try:
     from core.scraper_config import load_dynamic_sources
     load_dynamic_sources()
 except Exception as exc:
-    logger.warning(f'Error loading dynamic sources: {exc}')
+    logger.warning(f'Error loading dynamic sources at import: {exc}')
 
 # Pre-populate health tracker for all sources
 from core.scraper_health import init_health_for_source  # noqa: E402

@@ -1,3 +1,4 @@
+import html as _html
 import json
 import logging
 import os
@@ -11,6 +12,7 @@ from bs4 import BeautifulSoup
 
 from core.database import get_conn
 from core.disk_cache import search_cache
+from core.html_utils import extract_items_with_templates
 from core.http_pool import HttpPool
 from core.models import Chapter, SearchResult, SeriesDetails
 from core.throttle import rate_limiter
@@ -24,6 +26,11 @@ _TIMEOUT = 30
 _REFRESH_COOLDOWN = 86400  # 24 h
 _refresh_locks: dict[str, threading.Lock] = {}
 _last_refresh_ts: dict[str, float] = {}
+_last_errors: dict[str, str] = {}  # CONFIG_NAME -> last error message
+
+
+def get_last_error(name: str) -> str:
+    return _last_errors.get(name, '')
 
 
 # --- IGNORE --- (base class for generated scrapers, not standalone)
@@ -36,30 +43,39 @@ class DynamicSource(BaseSource):
         self._cfg = None
 
     def _load_config(self) -> dict:
-        if self._cfg is not None:
-            return self._cfg
         try:
             conn = get_conn()
             row = conn.execute(
-                'SELECT type, label, base_url, config_json FROM scraper_configs WHERE name = ?',
+                'SELECT type, label, base_url, config_json, updated_at FROM scraper_configs WHERE name = ?',
                 (self.CONFIG_NAME,)
             ).fetchone()
             if not row:
                 self._cfg = {}
                 return self._cfg
+            updated_at = row['updated_at']
+            # Invalidate cache if DB timestamp changed
+            if self._cfg is not None and self._cfg.get('_updated_at') == updated_at:
+                return self._cfg
             self._cfg = {
                 'type': row['type'],
                 'label': row['label'],
                 'base_url': row['base_url'],
+                '_updated_at': updated_at,
             }
             try:
                 self._cfg['config'] = json.loads(row['config_json'])
             except (json.JSONDecodeError, TypeError):
                 self._cfg['config'] = {}
-        except Exception:
-            logger.warning(f'{self.CONFIG_NAME}: error cargando config desde DB')
+        except Exception as exc:
+            logger.warning(f'{self.CONFIG_NAME}: error cargando config desde DB: {exc}')
             self._cfg = {}
         return self._cfg
+
+    def _set_error(self, msg: str) -> None:
+        _last_errors[self.CONFIG_NAME] = msg
+
+    def _clear_error(self) -> None:
+        _last_errors.pop(self.CONFIG_NAME, None)
 
     @property
     def label(self) -> str:
@@ -107,9 +123,12 @@ class DynamicSource(BaseSource):
             elem = soup.select_one(selector)
         except Exception:
             logger.debug(f'{self.CONFIG_NAME}: error en selector CSS: {selector}')
+            self._set_error(f'Invalid CSS selector: {selector}')
             return ''
         if not elem:
+            self._set_error(f'Selector "{selector}" matched no elements')
             return ''
+        self._clear_error()
         if attr == 'text':
             text = elem.get_text(strip=True)
             if not text:
@@ -187,7 +206,7 @@ class DynamicSource(BaseSource):
                 break
 
             soup = BeautifulSoup(html, 'html.parser')
-            items = soup.select(item_sel) if item_sel else [soup]
+            items = extract_items_with_templates(soup, item_sel, deduplicate_href=True) if item_sel else [soup]
             page_items = 0
             for item in items:
                 title = self._extract_attr(item, title_sel, title_attr) if title_sel else ''
@@ -229,6 +248,53 @@ class DynamicSource(BaseSource):
         finally:
             lock.release()
 
+    def _fetch_page(self, url: str, method: str = 'GET', post_template: str = '') -> str:
+        """Fetch a page using GET or POST."""
+        if method.upper() == 'POST' and post_template:
+            data = {}
+            for pair in post_template.split('&'):
+                if '=' in pair:
+                    k, v = pair.split('=', 1)
+                    data[k] = v.replace('{query}', '')
+            data = {k: (v.replace('{query}', '') if isinstance(v, str) else v) for k, v in data.items()}
+            resp = self.scraper.post(url, headers=self._headers, data=data, timeout=_TIMEOUT)
+            resp.raise_for_status()
+            return resp.text
+        return self._get(url).text
+
+    def _normalize_cover(self, cover: str) -> str:
+        if not cover:
+            return ''
+        if cover.startswith('//'):
+            return 'https:' + cover
+        if cover.startswith('/'):
+            return urljoin(self.BASE_URL, cover)
+        return cover
+
+    def _build_search_urls(self, url_template: str, query: str) -> list[str]:
+        """Build search URLs. If search pagination is enabled, generates page URLs.
+
+        Supports two pagination modes:
+        1. ``{page}`` placeholder in the URL template itself (e.g. ``/page/{page}/?s={query}``)
+        2. Query parameter pagination via *search_pagination_param* (e.g. ``?page=2``)
+        """
+        cfg = self._load_config().get('config', {})
+        urls: list[str] = []
+        if cfg.get('search_has_pagination'):
+            part_name = cfg.get('search_pagination_param', 'page')
+            for page in range(1, 101):
+                url = self._build_url(url_template, query=query, page=str(page))
+                if '{page}' not in url_template:
+                    parsed = list(urllib.parse.urlparse(url))
+                    qs = dict(urllib.parse.parse_qsl(parsed[4]))
+                    qs[part_name] = str(page)
+                    parsed[4] = urllib.parse.urlencode(qs)
+                    url = urllib.parse.urlunparse(parsed)
+                urls.append(url)
+        else:
+            urls.append(self._build_url(url_template, query=query, page='1'))
+        return urls
+
     def search_sync(self, query: str) -> list[SearchResult]:
         cfg = self._load_config().get('config', {})
 
@@ -257,14 +323,16 @@ class DynamicSource(BaseSource):
         if not url_template:
             return []
 
-        url = self._build_url(url_template, query=query)
-        try:
-            html = self._get(url).text
-        except Exception as exc:
-            logger.exception(f"{self.CONFIG_NAME} search error: {exc}")
-            return []
+        # Try cached results first (non-catalog mode)
+        cache_ttl = int(cfg.get('search_cache_ttl', 0))
+        cache_key = f"{self.CONFIG_NAME}:search:{query.lower().strip()}"
+        if cache_ttl > 0:
+            cached = search_cache.get(cache_key)
+            if cached is not None:
+                return [SearchResult(**r) for r in cached]
 
-        soup = BeautifulSoup(html, 'html.parser')
+        search_method = cfg.get('search_method', 'GET')
+        search_post_template = cfg.get('search_post_template', '')
         result_sel = cfg.get('search_result_selector', '')
         title_sel = cfg.get('search_title_selector', '')
         title_attr = cfg.get('search_title_attr', 'text')
@@ -273,26 +341,59 @@ class DynamicSource(BaseSource):
         cover_sel = cfg.get('search_cover_selector', '')
         cover_attr = cfg.get('search_cover_attr', 'src')
 
+        seen = set()
         results = []
-        for card in soup.select(result_sel) if result_sel else [soup]:
-            title = self._extract_attr(card, title_sel, title_attr) if title_sel else ''
-            href = ''
-            if url_sel:
-                href = self._extract_attr(card, url_sel, url_attr)
-            if not href and card.name == 'a':
-                href = card.get('href', '')
-            cover = self._extract_attr(card, cover_sel, cover_attr) if cover_sel else ''
+        urls = self._build_search_urls(url_template, query)
 
-            if not title:
-                continue
+        for url in urls:
+            try:
+                if search_method.upper() == 'POST' and search_post_template:
+                    filled_template = search_post_template.replace('{query}', query)
+                    html = self._fetch_page(url, 'POST', filled_template)
+                else:
+                    html = self._get(url).text
+            except Exception as exc:
+                logger.exception(f"{self.CONFIG_NAME} search error: {exc}")
+                self._set_error(f'Search fetch error: {exc}')
+                break
 
-            content_id = href.rstrip('/').split('/')[-1] if href else title
-            if cover and cover.startswith('//'):
-                cover = 'https:' + cover
-            elif cover and cover.startswith('/'):
-                cover = urljoin(self.BASE_URL, cover)
+            soup = BeautifulSoup(html, 'html.parser')
+            cards = extract_items_with_templates(soup, result_sel, deduplicate_href=True) if result_sel else [soup]
 
-            results.append(SearchResult(id=content_id, title=title, cover=cover))
+            page_results = 0
+            for card in cards:
+                title = self._extract_attr(card, title_sel, title_attr) if title_sel else ''
+                href = self._extract_attr(card, url_sel, url_attr) if url_sel else ''
+                if not href and card.name == 'a':
+                    href = card.get('href', '')
+                cover = self._extract_attr(card, cover_sel, cover_attr) if cover_sel else ''
+
+                if not title:
+                    continue
+
+                content_id = href.rstrip('/').split('/')[-1] if href else title
+                key = (content_id, title)
+                if key in seen:
+                    continue
+                seen.add(key)
+
+                results.append(SearchResult(
+                    id=content_id,
+                    title=title,
+                    cover=self._normalize_cover(cover),
+                ))
+                page_results += 1
+
+            if not cfg.get('search_has_pagination') or page_results == 0:
+                break
+
+        # Cache results if TTL configured
+        if cache_ttl > 0 and results:
+            search_cache.set(
+                cache_key,
+                [r.model_dump() for r in results],
+                ttl=cache_ttl,
+            )
 
         return results
 
@@ -321,12 +422,7 @@ class DynamicSource(BaseSource):
         cover = self._extract_attr(soup, cover_sel, cover_attr) if cover_sel else ''
         synopsis = self._extract_attr(soup, synopsis_sel) if synopsis_sel else ''
 
-        if cover and cover.startswith('//'):
-            cover = 'https:' + cover
-        elif cover and cover.startswith('/'):
-            cover = urljoin(self.BASE_URL, cover)
-
-        return SeriesDetails(title=title, cover=cover, synopsis=synopsis)
+        return SeriesDetails(title=title, cover=self._normalize_cover(cover), synopsis=synopsis)
 
     def get_chapters_sync(self, content_id: str) -> list[Chapter]:
         cfg = self._load_config().get('config', {})
@@ -341,13 +437,12 @@ class DynamicSource(BaseSource):
         url_sel = cfg.get('chapters_url_selector', '')
         url_attr = cfg.get('chapters_url_attr', 'href')
 
-        base_url = self._build_url(url_template, content_id=content_id)
         seen = set()
         all_chapters = []
         page = 1
         while True:
-            url = base_url
-            if part_name:
+            url = self._build_url(url_template, content_id=content_id, page=str(page))
+            if part_name and '{page}' not in url_template:
                 parsed = list(urllib.parse.urlparse(url))
                 qs = dict(urllib.parse.parse_qsl(parsed[4]))
                 qs[part_name] = str(page)
@@ -361,20 +456,7 @@ class DynamicSource(BaseSource):
                 break
 
             soup = BeautifulSoup(html, 'html.parser')
-            items = []
-            if item_sel:
-                try:
-                    items = soup.select(item_sel)
-                except Exception:
-                    logger.debug(f'{self.CONFIG_NAME}: error en selector CSS de capitulos: {item_sel}')
-                    items = []
-                for tmpl in soup.find_all('template'):
-                    found = tmpl.select(item_sel) if item_sel else []
-                    if not found and items:
-                        found = tmpl.find_all(items[0].name)
-                    items.extend(found)
-            else:
-                items = [soup]
+            items = extract_items_with_templates(soup, item_sel, deduplicate_href=True) if item_sel else [soup]
 
             page_chapters = 0
             for item in items:
@@ -433,6 +515,43 @@ class DynamicSource(BaseSource):
                 if norm and norm not in seen:
                     seen.add(norm)
                     urls.append(norm)
+
+        # Fallback: extract from ts_reader.run() / similar JS config
+        if not urls:
+            for script in soup.find_all('script'):
+                text = script.string or ''
+                if 'ts_reader.run' in text or 'ts_reader_data' in text:
+                    match = re.search(r'(?:ts_reader\.run|ts_reader_data)\s*\(\s*(\{.+?\})\s*\)\s*;', text, re.DOTALL)
+                    if match:
+                        try:
+                            raw = match.group(1)
+                            # Unescape HTML entities and fix escaped slashes
+                            raw = _html.unescape(raw).replace('\\/', '/')
+                            data = json.loads(raw)
+                            sources = data.get('sources', [])
+                            for src_group in sources:
+                                for img_url in src_group.get('images', []):
+                                    norm = self._normalize_url(img_url)
+                                    if norm and norm not in seen:
+                                        seen.add(norm)
+                                        urls.append(norm)
+                        except Exception:
+                            pass
+                    if urls:
+                        break
+
+        # Fallback: extract from Qwik JSON (<script type="qwik/json">)
+        if not urls:
+            for script in soup.find_all('script', type='qwik/json'):
+                matches = re.findall(r'https://image3\.ikigaimangas\.cloud[^"\'\\\s]+\.webp', script.string or '')
+                for u in matches:
+                    norm = self._normalize_url(u)
+                    if norm and norm not in seen:
+                        seen.add(norm)
+                        urls.append(norm)
+                if urls:
+                    break
+
         return urls
 
     @property

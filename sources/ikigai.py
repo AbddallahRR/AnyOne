@@ -474,6 +474,18 @@ class IkigaiSource(BaseSource):
                 seen.add(url)
                 img_urls.append(url)
 
+        # Fallback: extract from Qwik JSON (<script type="qwik/json">)
+        if not img_urls:
+            for script in soup.find_all('script', type='qwik/json'):
+                urls = re.findall(r'https://image3\.ikigaimangas\.cloud[^"\'\\\s]+\.webp', script.string or '')
+                for u in urls:
+                    norm = self._normalize_url(u, self.BASE_URL)
+                    if norm and norm not in seen:
+                        seen.add(norm)
+                        img_urls.append(norm)
+                if img_urls:
+                    break
+
         return img_urls
 
     def download_chapter_sync(self, content_id: str, chapter_id: str, dest_folder: str, chapter_number: str | None = None) -> str:

@@ -140,6 +140,9 @@ class ScraperConfigSchema(BaseModel):
     search_url_attr: str = 'href'
     search_cover_selector: str = ''
     search_cover_attr: str = 'src'
+    search_has_pagination: bool = False
+    search_pagination_param: str = 'page'
+    search_cache_ttl: int = 0
 
     details_url_template: str = ''
     details_title_selector: str = ''

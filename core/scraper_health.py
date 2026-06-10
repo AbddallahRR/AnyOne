@@ -103,6 +103,17 @@ def get_all_status() -> dict[str, dict]:
     result = {}
     for name in list(_health.keys()):
         result[name] = get_status(name)
+
+    # Include last errors from dynamic sources
+    try:
+        from sources.dynamic import get_last_error
+        for name in list(result.keys()):
+            dyn_err = get_last_error(name)
+            if dyn_err and not result[name].get('last_error'):
+                result[name]['last_error'] = dyn_err
+    except Exception:
+        pass
+
     return result
 
 

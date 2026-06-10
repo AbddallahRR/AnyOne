@@ -1,11 +1,14 @@
+import html as _html
 import logging
 import re
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse, urlunparse, unquote
 
 from bs4 import BeautifulSoup
 from fastapi import HTTPException, Request
 
+from core.html_utils import extract_items_with_templates, normalize_url, validate_css_selector
 from core.http_pool import HttpPool
+from core.models import ScraperConfigSchema
 from core.scraper_config import (
     create_config,
     delete_config,
@@ -23,13 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 def _normalize_url(url: str, base_url: str) -> str:
-    if not url or url.startswith('data:'):
-        return url
-    if url.startswith('//'):
-        return 'https:' + url
-    if url.startswith('/'):
-        return urljoin(base_url.rstrip('/') + '/', url.lstrip('/'))
-    return url
+    return normalize_url(url, base_url)
 
 
 def _fill_template(template: str, **kwargs) -> str:
@@ -37,7 +34,32 @@ def _fill_template(template: str, **kwargs) -> str:
     with curly braces in URLs/CSS selectors."""
     for key, value in kwargs.items():
         template = template.replace(f'{{{key}}}', str(value))
+    # Collapse double slashes in the path portion of URLs
+    if template.startswith('http://') or template.startswith('https://'):
+        parsed = urlparse(template)
+        clean_path = parsed.path.replace('//', '/')
+        if clean_path != parsed.path:
+            template = urlunparse((parsed.scheme, parsed.netloc, clean_path, parsed.params, parsed.query, parsed.fragment))
     return template
+
+
+_SELECTOR_FIELDS = [
+    'search_result_selector', 'search_title_selector', 'search_url_selector', 'search_cover_selector',
+    'details_title_selector', 'details_cover_selector', 'details_synopsis_selector',
+    'chapters_item_selector', 'chapters_num_selector', 'chapters_url_selector',
+    'content_image_selector', 'content_video_selector',
+    'catalog_item_selector', 'catalog_title_selector', 'catalog_url_selector', 'catalog_cover_selector',
+]
+
+
+def _validate_config_selectors(config: dict) -> list[str]:
+    """Validate all CSS selectors in the config. Returns list of error messages."""
+    errors = []
+    for field in _SELECTOR_FIELDS:
+        sel = config.get(field, '')
+        if sel and not validate_css_selector(sel):
+            errors.append(f'Invalid CSS selector for "{field}": {sel}')
+    return errors
 
 _TIMEOUT = 30
 
@@ -81,6 +103,18 @@ async def api_create_config(request: Request):
     if not base_url:
         raise HTTPException(status_code=400, detail='Base URL is required')
 
+    # Validate config with Pydantic schema
+    try:
+        validated = ScraperConfigSchema(**config)
+        config = validated.model_dump()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f'Invalid config: {exc}')
+
+    # Validate CSS selectors
+    selector_errors = _validate_config_selectors(config)
+    if selector_errors:
+        raise HTTPException(status_code=400, detail='; '.join(selector_errors))
+
     try:
         result = create_config(name, source_type, label, base_url, config)
         return result
@@ -102,6 +136,19 @@ async def api_update_config(name: str, request: Request):
     if enabled is not None:
         enabled = bool(enabled)
     config = body.get('config')
+
+    if config is not None:
+        # Validate config with Pydantic schema
+        try:
+            validated = ScraperConfigSchema(**config)
+            config = validated.model_dump()
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f'Invalid config: {exc}')
+
+        # Validate CSS selectors
+        selector_errors = _validate_config_selectors(config)
+        if selector_errors:
+            raise HTTPException(status_code=400, detail='; '.join(selector_errors))
 
     try:
         result = update_config(name, label=label, base_url=base_url,
@@ -139,7 +186,7 @@ async def api_test_config(request: Request):
         url_template = config.get('search_url_template', '')
         if not url_template:
             raise HTTPException(status_code=400, detail='search_url_template is required')
-        url = _fill_template(url_template, base=base_url, query=query)
+        url = _fill_template(url_template, base=base_url, query=query, page='1')
         try:
             rate_limiter.wait(url)
             scraper = HttpPool.get_scraper()
@@ -160,13 +207,7 @@ async def api_test_config(request: Request):
 
         extracted = []
         try:
-            cards = soup.select(result_sel) if result_sel else [soup]
-            if result_sel:
-                for tmpl in soup.find_all('template'):
-                    found = tmpl.select(result_sel)
-                    if not found and cards:
-                        found = tmpl.find_all(cards[0].name)
-                    cards.extend(found)
+            cards = extract_items_with_templates(soup, result_sel, deduplicate_href=True) if result_sel else [soup]
         except Exception:
             cards = [soup]
         for card in cards:
@@ -199,15 +240,7 @@ async def api_test_config(request: Request):
                 extracted.append(item)
 
         try:
-            total_cards = len(soup.select(result_sel)) if result_sel else 0
-            if result_sel:
-                for tmpl in soup.find_all('template'):
-                    found = tmpl.select(result_sel)
-                    if not found:
-                        main = soup.select(result_sel)
-                        if main:
-                            found = tmpl.find_all(main[0].name)
-                    total_cards += len(found)
+            total_cards = len(extract_items_with_templates(soup, result_sel, deduplicate_href=False)) if result_sel else 0
         except Exception:
             total_cards = 0
 
@@ -233,7 +266,7 @@ async def api_test_config(request: Request):
         if not content_id:
             raise HTTPException(status_code=400, detail='content_id is required')
 
-        url = _fill_template(url_template, base=base_url, content_id=content_id)
+        url = _fill_template(url_template, base=base_url, content_id=content_id, page='1')
         try:
             rate_limiter.wait(url)
             scraper = HttpPool.get_scraper()
@@ -270,26 +303,13 @@ async def api_test_config(request: Request):
 
             chapters = []
             try:
-                items = soup.select(item_sel) if item_sel else [soup]
+                items_before = len(extract_items_with_templates(soup, item_sel, deduplicate_href=False)) if item_sel else 1
+                items = extract_items_with_templates(soup, item_sel, deduplicate_href=True) if item_sel else [soup]
                 if item_sel:
-                    tmpl_items = []
-                    for tmpl in soup.find_all('template'):
-                        found = tmpl.select(item_sel)
-                        if not found and items:
-                            found = tmpl.find_all(items[0].name)
-                        tmpl_items.extend(found)
-                    if tmpl_items:
-                        seen_hrefs = set()
-                        for item in items:
-                            href = item.get('href', '') if hasattr(item, 'get') else ''
-                            seen_hrefs.add(href)
-                        for item in tmpl_items:
-                            href = item.get('href', '') if hasattr(item, 'get') else ''
-                            if href not in seen_hrefs:
-                                items.append(item)
-                                seen_hrefs.add(href)
+                    tmpl_count = len(items) - items_before
+                    if tmpl_count > 0:
                         extracted.setdefault('warning', '')
-                        extracted['warning'] += f' Se incluyeron {len(tmpl_items)} capítulos ocultos dentro de un &lt;template&gt; (carga dinámica). '
+                        extracted['warning'] += f' Se incluyeron {tmpl_count} capítulos ocultos dentro de un &lt;template&gt; (carga dinámica). '
             except Exception:
                 items = [soup]
             if item_sel and len(items) <= 1:
@@ -305,6 +325,9 @@ async def api_test_config(request: Request):
                     elem = item.select_one(url_sel)
                     if elem:
                         ch['url'] = elem.get(url_attr, '')
+                    # Fallback: the item itself may be the link element
+                    if 'url' not in ch and item.name == 'a' and item.get('href'):
+                        ch['url'] = item.get('href', '')
                 elif item.name == 'a':
                     ch['url'] = item.get('href', '')
                 if ch:
@@ -349,6 +372,38 @@ async def api_test_config(request: Request):
                 src = img.get(img_attr) or img.get('src')
                 if src:
                     images.append(_normalize_url(src, base_url))
+
+            # Fallback: extract from ts_reader.run() JS config
+            if not images:
+                for script in soup.find_all('script'):
+                    text = script.string or ''
+                    if 'ts_reader.run' in text or 'ts_reader_data' in text:
+                        match = re.search(r'(?:ts_reader\.run|ts_reader_data)\s*\(\s*(\{.+?\})\s*\)\s*;', text, re.DOTALL)
+                        if match:
+                            try:
+                                raw = _html.unescape(match.group(1)).replace('\\/', '/')
+                                data = json.loads(raw)
+                                for src_group in data.get('sources', []):
+                                    for img_url in src_group.get('images', []):
+                                        norm = _normalize_url(img_url, base_url)
+                                        if norm:
+                                            images.append(norm)
+                            except Exception:
+                                pass
+                        if images:
+                            break
+
+            # Fallback: extract from Qwik JSON (<script type="qwik/json">)
+            if not images:
+                for script in soup.find_all('script', type='qwik/json'):
+                    matches = re.findall(r'https://image3\.ikigaimangas\.cloud[^"\'\\\s]+\.webp', script.string or '')
+                    for u in matches:
+                        norm = _normalize_url(u, base_url)
+                        if norm:
+                            images.append(norm)
+                    if images:
+                        break
+
             extracted['images'] = images
         else:
             vid_sel = config.get('content_video_selector', '')
@@ -395,6 +450,7 @@ async def api_auto_detect(request: Request):
     raise HTTPException(status_code=400, detail=f'Unknown stage: {stage}')
 
 
+
 @api_router.post('/scraper-configs/detect-selectors')
 async def api_detect_selectors(request: Request):
     """Detect CSS selectors by finding elements that contain a given text.
@@ -419,6 +475,12 @@ async def api_detect_selectors(request: Request):
         raise HTTPException(status_code=400, detail='url is required')
     if not text:
         raise HTTPException(status_code=400, detail='text (sample text) is required')
+    # Safety net: replace any leftover template variables (e.g. {page})
+    # so detection still works even if the frontend forgot to fill them.
+    url = _fill_template(url, page='1', content_id='', chapter_id='')
+    # URL-decode the path — %2F in particular breaks path-based routing
+    parsed = urlparse(url)
+    url = urlunparse((parsed.scheme, parsed.netloc, unquote(parsed.path), parsed.params, parsed.query, parsed.fragment))
 
     try:
         rate_limiter.wait(url)
@@ -445,6 +507,7 @@ async def api_auto_configure(request: Request):
     base_url = body.get('base_url', '').strip().rstrip('/')
     search_url_template = body.get('search_url_template', '').strip()
     search_query = body.get('search_query', '').strip()
+    sample_content_id = body.get('sample_content_id', '').strip()
 
     if not base_url:
         raise HTTPException(status_code=400, detail='base_url is required')
@@ -453,12 +516,12 @@ async def api_auto_configure(request: Request):
     if not search_query:
         raise HTTPException(status_code=400, detail='search_query is required')
 
-    from core.selector_detector import detect_search_selectors
+    from core.selector_detector import detect_search_selectors, detect_selector_by_text
 
     config = {}
     errors = []
 
-    search_url = _fill_template(search_url_template, base=base_url, query=search_query)
+    search_url = _fill_template(search_url_template, base=base_url, query=search_query, page='1')
     try:
         rate_limiter.wait(search_url)
         scraper = HttpPool.get_scraper()
@@ -479,6 +542,40 @@ async def api_auto_configure(request: Request):
             errors.append('No se pudieron detectar selectores de búsqueda automáticamente')
     except Exception as exc:
         errors.append(f'Error fetching search URL: {exc}')
+
+    # Try to detect details/chapters/content if sample_content_id is provided
+    if sample_content_id and config.get('search_url_selector'):
+        for stage in ('details', 'chapters'):
+            stage_url_template = body.get(f'{stage}_url_template', '').strip()
+            if not stage_url_template:
+                continue
+            stage_url = _fill_template(stage_url_template, base=base_url, content_id=sample_content_id)
+            try:
+                rate_limiter.wait(stage_url)
+                scraper = HttpPool.get_scraper()
+                resp = scraper.get(stage_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=_TIMEOUT)
+                resp.raise_for_status()
+                if stage == 'details':
+                    result = detect_search_selectors(resp.text, base_url)
+                    # Just detect title and cover on the page
+                    soup = BeautifulSoup(resp.text, 'html.parser')
+                    for field, text_hint in [('title', body.get('sample_title', '')), ('cover', '')]:
+                        if text_hint:
+                            detected = detect_selector_by_text(resp.text, text_hint, 'details', base_url)
+                            if detected:
+                                config[f'details_{field}_selector'] = detected.get('selector', '')
+                else:
+                    detected = detect_selector_by_text(resp.text, body.get('sample_chapter_num', '1'), 'chapters', base_url)
+                    if detected:
+                        config['chapters_url_template'] = stage_url_template
+                        if 'item_selector' in detected:
+                            config['chapters_item_selector'] = detected['item_selector']
+                        if 'num_selector' in detected:
+                            config['chapters_num_selector'] = detected['num_selector']
+                        if 'url_selector' in detected:
+                            config['chapters_url_selector'] = detected['url_selector']
+            except Exception as exc:
+                errors.append(f'Error fetching {stage} URL: {exc}')
 
     return {'config': config, 'errors': errors, 'search_url': search_url}
 

@@ -220,6 +220,7 @@
     setVal('wiz-search-url-attr', data.search_url_attr || 'href');
     setVal('wiz-search-cover', data.search_cover_selector || '');
     setVal('wiz-search-cover-attr', data.search_cover_attr || 'src');
+    setVal('wiz-search-cache-ttl', data.search_cache_ttl || 0);
 
     // Catalog fields
     $('wiz-has-catalog').checked = data.has_catalog || false;
@@ -248,6 +249,8 @@
     setVal('wiz-chapters-num-attr', data.chapters_num_attr || 'text');
     setVal('wiz-chapters-url-sel', data.chapters_url_selector || '');
     setVal('wiz-chapters-url-attr', data.chapters_url_attr || 'href');
+    $('wiz-chapters-pagination').checked = data.has_pagination || false;
+    setVal('wiz-chapters-page-param', data.pagination_param || 'page');
 
     setVal('wiz-content-type', data.content_type || 'image');
     setVal('wiz-content-url', data.content_page_template || '');
@@ -357,6 +360,7 @@
           _wizardData.search_url_attr = getVal('wiz-search-url-attr');
           _wizardData.search_cover_selector = getVal('wiz-search-cover');
           _wizardData.search_cover_attr = getVal('wiz-search-cover-attr');
+          _wizardData.search_cache_ttl = parseInt(getVal('wiz-search-cache-ttl')) || 0;
         }
         break;
       case 3:
@@ -374,6 +378,8 @@
         _wizardData.chapters_num_attr = getVal('wiz-chapters-num-attr');
         _wizardData.chapters_url_selector = getVal('wiz-chapters-url-sel');
         _wizardData.chapters_url_attr = getVal('wiz-chapters-url-attr');
+        _wizardData.has_pagination = $('wiz-chapters-pagination').checked;
+        _wizardData.pagination_param = getVal('wiz-chapters-page-param');
         break;
       case 5:
         _wizardData.content_type = getVal('wiz-content-type');
@@ -603,7 +609,7 @@
       showToast('Completa URL base, URL de búsqueda y query de prueba', 'error');
       return;
     }
-    const url = urlTemplate.replace('{base}', baseUrl).replace('{query}', encodeURIComponent(query));
+    const url = urlTemplate.replace('{base}', baseUrl).replace('{query}', encodeURIComponent(query)).replace('{page}', '1');
     const resultsEl = $('wiz-search-test-results');
     resultsEl.innerHTML = '<div class="loading-spinner"></div>';
 
@@ -655,7 +661,7 @@
       showToast('Completa URL base, URL de búsqueda y query de prueba', 'error');
       return;
     }
-    const url = fillUrl(urlTemplate, { base: baseUrl, query: encodeURIComponent(query) });
+    const url = fillUrl(urlTemplate, { base: baseUrl, query: encodeURIComponent(query), page: '1' });
     const resultsEl = $('wiz-search-test-results');
     const d = await detectByText(url, 'search', sampleText, baseUrl, resultsEl);
     if (d) {
@@ -680,12 +686,14 @@
       showToast('Completa URL base, URL de detalles y content ID', 'error');
       return;
     }
-    const url = fillUrl(urlTemplate, { base: baseUrl, content_id: encodeURIComponent(contentId) });
+    const url = fillUrl(urlTemplate, { base: baseUrl, content_id: encodeURI(contentId) });
     const resultsEl = $('wiz-details-test-results');
     const d = await detectByText(url, 'details', sampleText, baseUrl, resultsEl);
     if (d) {
-      if (d.selector) setVal('wiz-details-title', d.selector);
-      if (d.attr) setVal('wiz-details-title-attr', d.attr);
+      setVal('wiz-details-title', d.selector || '');
+      setVal('wiz-details-title-attr', d.attr || 'text');
+      setVal('wiz-details-cover', d.cover_selector || '');
+      setVal('wiz-details-cover-attr', d.cover_attr || 'src');
       openAdvanced();
     }
   });
@@ -700,7 +708,7 @@
       showToast('Completa URL base, URL de capítulos y content ID', 'error');
       return;
     }
-    const url = fillUrl(urlTemplate, { base: baseUrl, content_id: encodeURIComponent(contentId) });
+    const url = fillUrl(urlTemplate, { base: baseUrl, content_id: encodeURI(contentId) });
     const resultsEl = $('wiz-chapters-test-results');
     const d = await detectByText(url, 'chapters', sampleText, baseUrl, resultsEl);
     if (d) {
@@ -726,8 +734,8 @@
     }
     const url = fillUrl(urlTemplate, {
       base: baseUrl,
-      content_id: encodeURIComponent(contentId),
-      chapter_id: encodeURIComponent(chapterId),
+      content_id: encodeURI(contentId),
+      chapter_id: encodeURI(chapterId),
     });
     const resultsEl = $('wiz-content-test-results');
     const d = await detectByText(url, 'content', sampleText, baseUrl, resultsEl);
@@ -788,6 +796,7 @@
       search_url_attr: getVal('wiz-search-url-attr'),
       search_cover_selector: getVal('wiz-search-cover'),
       search_cover_attr: getVal('wiz-search-cover-attr'),
+      search_cache_ttl: parseInt(getVal('wiz-search-cache-ttl')) || 0,
     };
   }
 
@@ -810,6 +819,8 @@
       chapters_num_attr: getVal('wiz-chapters-num-attr'),
       chapters_url_selector: getVal('wiz-chapters-url-sel'),
       chapters_url_attr: getVal('wiz-chapters-url-attr'),
+      has_pagination: $('wiz-chapters-pagination').checked,
+      pagination_param: getVal('wiz-chapters-page-param'),
     };
   }
 

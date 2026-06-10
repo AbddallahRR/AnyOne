@@ -117,7 +117,7 @@
             <!-- ── Search section (default) ── -->
             <div id="wiz-search-section">
               <div class="form-group">
-                <label>URL de búsqueda (usa {base} y {query})</label>
+                <label>URL de búsqueda (usa {base}, {query} y {page} si hay paginación)</label>
                 <input id="wiz-search-url" type="text" class="input-field input-mono" placeholder="{base}/buscar?q={query}">
               </div>
 
@@ -187,6 +187,13 @@
                     </div>
                   </div>
                 </div>
+              </div>
+
+              <!-- Cache TTL -->
+              <div class="form-group" style="margin-top:8px;">
+                <label>TTL de caché de búsqueda (segundos, 0 = sin caché)</label>
+                <input id="wiz-search-cache-ttl" type="number" class="input-field input-mono" value="0" placeholder="0 = sin caché" style="max-width:160px;">
+                <small>Si el sitio cambia poco, puedes cachear resultados de búsqueda por N segundos. Usa <code>{page}</code> en la URL si hay paginación.</small>
               </div>
 
               <div class="test-panel">
@@ -360,7 +367,7 @@
           <div class="wizard-step hidden" data-step="4">
             <h3>Configuración de capítulos</h3>
             <div class="form-group">
-              <label>URL de capítulos (usa {base} y {content_id})</label>
+              <label>URL de capítulos (usa {base}, {content_id} y {page} si hay paginación)</label>
               <input id="wiz-chapters-url" type="text" class="input-field input-mono" placeholder="{base}/{content_id}/">
             </div>
 
@@ -411,6 +418,28 @@
                       <option value="src">src</option>
                     </select>
                   </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Pagination toggle (chapters) -->
+            <div class="advanced-section">
+              <div class="advanced-toggle" onclick="this.parentElement.classList.toggle('advanced-open')">
+                <span><i class="fas fa-layer-group"></i> Paginación de capítulos</span>
+                <span class="advanced-arrow"><i class="fas fa-chevron-down"></i></span>
+              </div>
+              <div class="advanced-body">
+                <div class="form-group">
+                  <label class="checkbox-label">
+                    <input id="wiz-chapters-pagination" type="checkbox" class="toggle-input">
+                    <span>La lista de capítulos tiene paginación</span>
+                  </label>
+                  <small>Si usas <code>{page}</code> en la URL de arriba (ej: <code>{base}/{content_id}/page/{page}/</code>), el parámetro de abajo se ignora.</small>
+                </div>
+                <div class="form-group">
+                  <label>Parámetro de paginación</label>
+                  <input id="wiz-chapters-page-param" type="text" class="input-field input-mono" value="page" placeholder="page">
+                  <small>Ej: si la URL base es <code>{base}/{content_id}/chapters</code>, el parámetro "page" genera .../chapters?page=2</small>
                 </div>
               </div>
             </div>
@@ -472,6 +501,7 @@
                       <option value="data-src">data-src</option>
                       <option value="data-lazy">data-lazy</option>
                       <option value="data-original">data-original</option>
+                      <option value="data-lm-orig-src">data-lm-orig-src</option>
                     </select>
                   </div>
                 </div>
