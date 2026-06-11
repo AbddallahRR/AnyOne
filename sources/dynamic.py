@@ -12,9 +12,16 @@ from bs4 import BeautifulSoup
 
 from core.database import get_conn
 from core.disk_cache import search_cache
-from core.html_utils import extract_items_with_templates
+from core.html_utils import (
+    ATTR_PRIORITY,
+    extract_background_images,
+    extract_images_from_noscript,
+    extract_images_from_scripts,
+    extract_items_with_templates,
+    normalize_image_url,
+)
 from core.http_pool import HttpPool
-from core.models import Chapter, SearchResult, SeriesDetails
+from core.models import Chapter, SearchResult, SeriesDetails, chapter_to_filename
 from core.throttle import rate_limiter
 
 from . import BaseSource
@@ -43,24 +50,21 @@ class DynamicSource(BaseSource):
         self._cfg = None
 
     def _load_config(self) -> dict:
+        if self._cfg is not None:
+            return self._cfg
         try:
             conn = get_conn()
             row = conn.execute(
-                'SELECT type, label, base_url, config_json, updated_at FROM scraper_configs WHERE name = ?',
+                'SELECT type, label, base_url, config_json FROM scraper_configs WHERE name = ?',
                 (self.CONFIG_NAME,)
             ).fetchone()
             if not row:
                 self._cfg = {}
                 return self._cfg
-            updated_at = row['updated_at']
-            # Invalidate cache if DB timestamp changed
-            if self._cfg is not None and self._cfg.get('_updated_at') == updated_at:
-                return self._cfg
             self._cfg = {
                 'type': row['type'],
                 'label': row['label'],
                 'base_url': row['base_url'],
-                '_updated_at': updated_at,
             }
             try:
                 self._cfg['config'] = json.loads(row['config_json'])
@@ -71,6 +75,10 @@ class DynamicSource(BaseSource):
             self._cfg = {}
         return self._cfg
 
+    def reload_config(self) -> None:
+        self._cfg = None
+        self._load_config()
+
     def _set_error(self, msg: str) -> None:
         _last_errors[self.CONFIG_NAME] = msg
 
@@ -79,15 +87,18 @@ class DynamicSource(BaseSource):
 
     @property
     def label(self) -> str:
-        return self._load_config().get('label', self.CONFIG_NAME)
+        self._load_config()
+        return self._cfg.get('label', self.CONFIG_NAME) if self._cfg else self.CONFIG_NAME
 
     @property
     def type(self) -> str:
-        return self._load_config().get('type', '')
+        self._load_config()
+        return self._cfg.get('type', '') if self._cfg else ''
 
     @property
     def BASE_URL(self) -> str:
-        return self._load_config().get('base_url', '')
+        self._load_config()
+        return self._cfg.get('base_url', '') if self._cfg else ''
 
     @property
     def UA(self) -> str:
@@ -96,10 +107,11 @@ class DynamicSource(BaseSource):
 
     @property
     def _headers(self) -> dict:
-        cfg = self._load_config()
+        self._load_config()
         headers = {'User-Agent': self.UA}
-        extra = cfg.get('config', {}).get('extra_headers', {})
-        headers.update(extra)
+        if self._cfg:
+            extra = self._cfg.get('config', {}).get('extra_headers', {})
+            headers.update(extra)
         return headers
 
     def _get(self, url: str, **kwargs):
@@ -505,52 +517,79 @@ class DynamicSource(BaseSource):
         soup = BeautifulSoup(resp.text, 'html.parser')
         img_sel = cfg.get('content_image_selector', '')
         img_attr = cfg.get('content_image_attr', 'src')
+        base_url = self.BASE_URL
 
-        seen = set()
-        urls = []
-        for img in soup.select(img_sel):
-            src = img.get(img_attr) or img.get('src')
-            if src:
-                norm = self._normalize_url(src)
-                if norm and norm not in seen:
-                    seen.add(norm)
-                    urls.append(norm)
+        seen: set[str] = set()
+        urls: list[str] = []
 
-        # Fallback: extract from ts_reader.run() / similar JS config
-        if not urls:
-            for script in soup.find_all('script'):
-                text = script.string or ''
-                if 'ts_reader.run' in text or 'ts_reader_data' in text:
-                    match = re.search(r'(?:ts_reader\.run|ts_reader_data)\s*\(\s*(\{.+?\})\s*\)\s*;', text, re.DOTALL)
-                    if match:
-                        try:
-                            raw = match.group(1)
-                            # Unescape HTML entities and fix escaped slashes
-                            raw = _html.unescape(raw).replace('\\/', '/')
-                            data = json.loads(raw)
-                            sources = data.get('sources', [])
-                            for src_group in sources:
-                                for img_url in src_group.get('images', []):
-                                    norm = self._normalize_url(img_url)
-                                    if norm and norm not in seen:
-                                        seen.add(norm)
-                                        urls.append(norm)
-                        except Exception:
-                            pass
+        def _add(norm_url):
+            if norm_url and norm_url not in seen:
+                seen.add(norm_url)
+                urls.append(norm_url)
+
+        # Strategy 1: CSS selector + configured attribute
+        if img_sel:
+            for img in soup.select(img_sel):
+                src = img.get(img_attr) or img.get('src')
+                if src:
+                    _add(self._normalize_url(src))
+            if urls:
+                return urls
+
+        # Strategy 2: CSS selector + try all priority attrs
+        if img_sel:
+            for attr_name in ATTR_PRIORITY:
+                if attr_name == img_attr:
+                    continue
+                batch = []
+                for img in soup.select(img_sel):
+                    src = img.get(attr_name) or img.get('src')
+                    if src:
+                        norm = self._normalize_url(src)
+                        if norm:
+                            batch.append(norm)
+                if batch:
+                    for n in batch:
+                        _add(n)
                     if urls:
-                        break
+                        logger.info(f'{self.CONFIG_NAME}: images found via {attr_name} (fallback attr)')
+                        return urls
 
-        # Fallback: extract from Qwik JSON (<script type="qwik/json">)
-        if not urls:
-            for script in soup.find_all('script', type='qwik/json'):
-                matches = re.findall(r'https://image3\.ikigaimangas\.cloud[^"\'\\\s]+\.webp', script.string or '')
-                for u in matches:
-                    norm = self._normalize_url(u)
-                    if norm and norm not in seen:
-                        seen.add(norm)
-                        urls.append(norm)
-                if urls:
-                    break
+        # Strategy 3: <noscript> extraction
+        noscript_imgs = extract_images_from_noscript(soup)
+        for entry in noscript_imgs:
+            _add(normalize_image_url(entry['src'], base_url))
+        if urls:
+            logger.info(f'{self.CONFIG_NAME}: images found via <noscript>')
+            return urls
+
+        # Strategy 4: JS script extraction
+        script_urls = extract_images_from_scripts(soup, base_url)
+        for u in script_urls:
+            _add(normalize_image_url(u, base_url))
+        if urls:
+            logger.info(f'{self.CONFIG_NAME}: images found via JS scripts')
+            return urls
+
+        # Strategy 5: CSS background-image
+        bg_urls = extract_background_images(soup, img_sel or '')
+        for u in bg_urls:
+            _add(normalize_image_url(u, base_url))
+        if urls:
+            logger.info(f'{self.CONFIG_NAME}: images found via CSS background-image')
+            return urls
+
+        # Strategy 6: Any <img> with any src-like attribute (last resort)
+        for img in soup.find_all('img'):
+            for attr_name in ATTR_PRIORITY:
+                src = img.get(attr_name)
+                if src:
+                    norm = self._normalize_url(src)
+                    if norm:
+                        _add(norm)
+                        break
+            if urls:
+                break
 
         return urls
 
@@ -597,7 +636,7 @@ class DynamicSource(BaseSource):
 
         cap_num = chapter_number or chapter_id
         if cap_num.replace('.', '', 1).isdigit():
-            dir_name = f"cap_{int(float(cap_num)):04d}"
+            dir_name = f"cap_{chapter_to_filename(cap_num)}"
         else:
             dir_name = f"cap_{cap_num}"
         cap_dir = os.path.join(dest_folder, dir_name)

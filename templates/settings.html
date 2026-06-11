@@ -94,7 +94,10 @@
             </div>
             <div class="form-group">
               <label>URL base</label>
-              <input id="wiz-base-url" type="text" class="input-field" placeholder="ej: https://mifuente.com">
+              <div class="input-with-status">
+                <input id="wiz-base-url" type="text" class="input-field" placeholder="ej: https://mifuente.com">
+                <span id="wiz-url-status" class="url-status"></span>
+              </div>
             </div>
             <div class="wizard-nav">
               <button class="wiz-next btn-primary" data-next="2">Siguiente</button>
@@ -117,8 +120,11 @@
             <!-- ── Search section (default) ── -->
             <div id="wiz-search-section">
               <div class="form-group">
-                <label>URL de búsqueda (usa {base}, {query} y {page} si hay paginación)</label>
-                <input id="wiz-search-url" type="text" class="input-field input-mono" placeholder="{base}/buscar?q={query}">
+                <label>
+                  URL de búsqueda
+                  <span class="help-icon" title="{base} = URL base&#10;{query} = término de búsqueda&#10;{page} = número de página">ⓘ</span>
+                </label>
+                <input id="wiz-search-url" type="text" class="input-field input-mono" placeholder="{base}/buscar?q={query}" title="Placeholders disponibles: {base} {query} {page}">
               </div>
 
               <!-- Sample text + detect -->
@@ -209,8 +215,11 @@
             <!-- ── Catalog section (shown when has_catalog is checked) ── -->
             <div id="wiz-catalog-section" class="hidden">
               <div class="form-group">
-                <label>URL del catálogo (usa {base} y {page})</label>
-                <input id="wiz-catalog-url" type="text" class="input-field input-mono" placeholder="{base}/series/page/{page}/">
+                <label>
+                  URL del catálogo
+                  <span class="help-icon" title="{base} = URL base&#10;{page} = número de página">ⓘ</span>
+                </label>
+                <input id="wiz-catalog-url" type="text" class="input-field input-mono" placeholder="{base}/series/page/{page}/" title="Placeholders disponibles: {base} {page}">
               </div>
 
               <div class="detect-section">
@@ -296,8 +305,11 @@
           <div class="wizard-step hidden" data-step="3">
             <h3>Configuración de detalles</h3>
             <div class="form-group">
-              <label>URL de detalles (usa {base} y {content_id})</label>
-              <input id="wiz-details-url" type="text" class="input-field input-mono" placeholder="{base}/{content_id}/">
+              <label>
+                URL de detalles
+                <span class="help-icon" title="{base} = URL base&#10;{content_id} = ID de la serie">ⓘ</span>
+              </label>
+              <input id="wiz-details-url" type="text" class="input-field input-mono" placeholder="{base}/{content_id}/" title="Placeholders disponibles: {base} {content_id}">
             </div>
 
             <!-- Sample text + detect -->
@@ -367,8 +379,11 @@
           <div class="wizard-step hidden" data-step="4">
             <h3>Configuración de capítulos</h3>
             <div class="form-group">
-              <label>URL de capítulos (usa {base}, {content_id} y {page} si hay paginación)</label>
-              <input id="wiz-chapters-url" type="text" class="input-field input-mono" placeholder="{base}/{content_id}/">
+              <label>
+                URL de capítulos
+                <span class="help-icon" title="{base} = URL base&#10;{content_id} = ID de la serie&#10;{page} = número de página">ⓘ</span>
+              </label>
+              <input id="wiz-chapters-url" type="text" class="input-field input-mono" placeholder="{base}/{content_id}/" title="Placeholders disponibles: {base} {content_id} {page}">
             </div>
 
             <!-- Sample text + detect -->
@@ -468,8 +483,11 @@
               </select>
             </div>
             <div class="form-group">
-              <label>URL de página de contenido (usa {base}, {content_id}, {chapter_id})</label>
-              <input id="wiz-content-url" type="text" class="input-field input-mono" placeholder="{base}/leer/{content_id}/{chapter_id}/">
+              <label>
+                URL de página de contenido
+                <span class="help-icon" title="{base} = URL base&#10;{content_id} = ID de la serie&#10;{chapter_id} = número o ID del capítulo">ⓘ</span>
+              </label>
+              <input id="wiz-content-url" type="text" class="input-field input-mono" placeholder="{base}/leer/{content_id}/{chapter_id}/" title="Placeholders disponibles: {base} {content_id} {chapter_id}">
             </div>
 
             <!-- Sample text + detect (images) -->
@@ -538,6 +556,10 @@
           <div class="wizard-step hidden" data-step="6">
             <h3>Guardar fuente</h3>
             <div id="wiz-summary" class="wizard-summary"></div>
+            <details class="stub-preview" style="margin-top:16px;">
+              <summary><i class="fas fa-code"></i> Ver código Python generado</summary>
+              <pre id="wiz-stub-preview" class="stub-preview-code">// El código se generará al revisar los datos</pre>
+            </details>
             <div class="wizard-nav">
               <button class="wiz-prev btn-ghost" data-prev="5">Anterior</button>
               <button id="wiz-save-btn" class="btn-primary">

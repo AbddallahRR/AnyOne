@@ -1,5 +1,7 @@
+import functools
 import json
 import logging
+import os
 import subprocess
 from pathlib import Path
 
@@ -8,6 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 
 from config import ANIME_DOWNLOAD_DIR, MANGA_DOWNLOAD_DIR
 from core.database import save_content_to_db
+from core.models import chapter_to_filename
 from core.sources import get_source
 from core.utils import normalize_title
 
@@ -87,22 +90,18 @@ async def api_chapters_with_local(type: str, source: str, id: str):
         base_dir = Path(_base_folder(type))
         serie_dir = _find_local_serie_dir(base_dir, id)
 
-        local_chapters: set[int] = set()
+        local_chapters: set[str] = set()
         if serie_dir:
             local_list = (_local_chapters_anime(serie_dir) if type == 'anime'
                           else _local_chapters_manga(serie_dir))
-            local_chapters = {ch['number'] for ch in local_list}
+            local_chapters = {str(ch['number']) for ch in local_list}
 
         result = []
         for ch in remote_chapters:
-            try:
-                num = int(float(ch.number))
-            except (TypeError, ValueError):
-                num = None
             result.append({
                 'number': ch.number,
                 'id': ch.id,
-                'is_downloaded': (num in local_chapters) if num is not None else False,
+                'is_downloaded': ch.number in local_chapters,
             })
         return result
     except Exception:
@@ -183,19 +182,26 @@ def api_play_local(type: str, id: str, chapter: str):
     if not safe.exists():
         raise HTTPException(status_code=404)
     if type == 'anime':
-        try:
-            chap_num = int(chapter)
-        except ValueError:
-            raise HTTPException(status_code=400)
-        files = list(safe.glob(f"*_{chap_num:03d}.mp4"))
+        files = list(safe.glob(f"*_{chapter}.mp4"))
+        if not files:
+            try:
+                chap_int = int(float(chapter))
+                files = list(safe.glob(f"*_{chap_int:03d}.mp4"))
+            except (ValueError, TypeError):
+                pass
         if not files:
             raise HTTPException(status_code=404)
         return FileResponse(files[0], headers={"Accept-Ranges": "bytes"})
     else:
-        try:
-            cap_dir = safe / f"cap_{int(chapter):04d}"
-        except ValueError:
-            raise HTTPException(status_code=400)
+        cap_dir = safe / f"cap_{chapter}"
+        if not cap_dir.exists():
+            cap_dir = safe / f"cap_{chapter_to_filename(chapter)}"
+        if not cap_dir.exists():
+            try:
+                cap_int = int(float(chapter))
+                cap_dir = safe / f"cap_{cap_int:04d}"
+            except (ValueError, TypeError):
+                pass
         if not cap_dir.exists():
             raise HTTPException(status_code=404)
         images = (
@@ -211,17 +217,18 @@ def api_play(content_type: str, source: str, content_id: str, chapter: str):
     if content_type != 'anime':
         return {'message': 'Usa el visor de manga en el frontend'}
 
-    try:
-        chap_num = int(float(chapter)) if any(c.isdigit() for c in chapter) else 0
-    except ValueError:
-        raise HTTPException(status_code=400, detail='Capítulo inválido')
-
     serie_dir = _find_local_serie_dir(Path(ANIME_DOWNLOAD_DIR), content_id)
     if not serie_dir:
         raise HTTPException(status_code=404, detail='Archivo no encontrado')
 
-    filepath = serie_dir / f"{serie_dir.name}_{chap_num:03d}.mp4"
+    filepath = serie_dir / f"{serie_dir.name}_{chapter}.mp4"
     if not filepath.exists():
+        try:
+            chap_int = int(float(chapter))
+            filepath = serie_dir / f"{serie_dir.name}_{chap_int:03d}.mp4"
+        except (ValueError, TypeError):
+            pass
+    if not filepath or not filepath.exists():
         raise HTTPException(status_code=404, detail='Archivo no encontrado')
     return FileResponse(filepath, headers={"Accept-Ranges": "bytes"})
 
@@ -271,34 +278,51 @@ def api_manga_images(subpath: str, request: Request):
     })
 
 
+_duration_cache: dict[str, tuple[float, float]] = {}
+
+def _get_cached_duration(filepath: str) -> float | None:
+    key = filepath
+    try:
+        mtime = os.path.getmtime(filepath)
+    except OSError:
+        return None
+    cached = _duration_cache.get(key)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+    try:
+        result = subprocess.run(
+            ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+             '-of', 'default=noprint_wrappers=1:nokey=1', filepath],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0:
+            duration = float(result.stdout.strip())
+            _duration_cache[key] = (mtime, duration)
+            return duration
+    except Exception as exc:
+        logger.exception(f"Error obteniendo duración: {exc}")
+    return None
+
+
 @api_router.get('/video-duration/anime/{content_id}/{chapter}')
 def video_duration(content_id: str, chapter: str, request: Request):
     serie_dir = Path(ANIME_DOWNLOAD_DIR) / normalize_title(content_id)
     if not serie_dir.exists():
         raise HTTPException(status_code=404)
-    try:
-        chap_num = int(chapter)
-    except ValueError:
-        raise HTTPException(status_code=400)
-
-    files = list(serie_dir.glob(f"*_{chap_num:03d}.mp4"))
+    files = list(serie_dir.glob(f"*_{chapter}.mp4"))
+    if not files:
+        try:
+            chap_int = int(chapter)
+            files = list(serie_dir.glob(f"*_{chap_int:03d}.mp4"))
+        except (ValueError, TypeError):
+            pass
     if not files:
         raise HTTPException(status_code=404)
 
-    try:
-        result = subprocess.run(
-            ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
-             '-of', 'default=noprint_wrappers=1:nokey=1', str(files[0])],
-            capture_output=True, text=True, timeout=10
+    duration = _get_cached_duration(str(files[0]))
+    if duration is not None:
+        return JSONResponse(
+            content={'duration': duration},
+            headers={'Cache-Control': 'public, max-age=86400'},
         )
-        if result.returncode == 0:
-            duration = float(result.stdout.strip())
-            # Cachear duración por archivo (rara vez cambia)
-            return JSONResponse(
-                content={'duration': duration},
-                headers={'Cache-Control': 'public, max-age=86400'},
-            )
-    except Exception as exc:
-        logger.exception(f"Error obteniendo duración: {exc}")
-
     raise HTTPException(status_code=500, detail='Error al obtener duracion del video')

@@ -23,7 +23,25 @@ download_queue: Queue = Queue(maxsize=50)
 _active_jobs: dict[int, DownloadJob] = {}
 _active_jobs_lock = threading.Lock()
 
+_downloading_chapters: dict[str, set[str]] = {}
+_dl_lock = threading.Lock()
+
 _stop_event = threading.Event()
+
+
+def mark_downloading(folder: str, num: str) -> None:
+    with _dl_lock:
+        _downloading_chapters.setdefault(folder, set()).add(num)
+
+
+def unmark_downloading(folder: str, num: str) -> None:
+    with _dl_lock:
+        _downloading_chapters.get(folder, set()).discard(num)
+
+
+def is_downloading(folder: str, num: str) -> bool:
+    with _dl_lock:
+        return num in _downloading_chapters.get(folder, set())
 
 
 def _save_series_metadata(series_folder: str, title: str, source_name: str,
@@ -106,7 +124,7 @@ def _resolve_chapters(source, content_id: str, chapter_id: str | None,
 
     if excluded is not None:
         original = len(all_chapters)
-        all_chapters = [ch for ch in all_chapters if int(ch.number) not in excluded]
+        all_chapters = [ch for ch in all_chapters if ch.number not in excluded]
         if not all_chapters:
             raise Exception("Todos los capítulos están excluidos (ya vistos localmente)")
         logger.info(f"Excluidos {original - len(all_chapters)} capítulos ya vistos")
@@ -159,25 +177,29 @@ def _download_worker(worker_id: int) -> None:
                 chap_num = chapter.number
                 chap_id  = chapter.id
 
-                max_retries = 2
-                last_exc = None
-                for attempt in range(1 + max_retries):
-                    try:
-                        source.download_chapter_sync(content_id, chap_id, series_folder, chap_num)
-                        last_exc = None
-                        break
-                    except Exception as exc:
-                        last_exc = exc
-                        if attempt < max_retries:
-                            logger.warning(f"Job {job_id}: error en capítulo {chap_num} "
-                                           f"(intento {attempt + 1}/{max_retries + 1}): {exc}")
-                            time.sleep(2 ** attempt)  # backoff: 2s, 4s
-                        else:
-                            logger.exception(f"Job {job_id}: error definitivo en capítulo {chap_num} "
-                                             f"tras {max_retries + 1} intentos")
+                mark_downloading(series_folder, chap_num)
+                try:
+                    max_retries = 2
+                    last_exc = None
+                    for attempt in range(1 + max_retries):
+                        try:
+                            source.download_chapter_sync(content_id, chap_id, series_folder, chap_num)
+                            last_exc = None
+                            break
+                        except Exception as exc:
+                            last_exc = exc
+                            if attempt < max_retries:
+                                logger.warning(f"Job {job_id}: error en capítulo {chap_num} "
+                                               f"(intento {attempt + 1}/{max_retries + 1}): {exc}")
+                                time.sleep(2 ** attempt)  # backoff: 2s, 4s
+                            else:
+                                logger.exception(f"Job {job_id}: error definitivo en capítulo {chap_num} "
+                                                 f"tras {max_retries + 1} intentos")
 
-                if last_exc is not None:
-                    raise Exception(f"Error en capítulo {chap_num} tras {max_retries + 1} intentos: {last_exc}") from last_exc
+                    if last_exc is not None:
+                        raise Exception(f"Error en capítulo {chap_num} tras {max_retries + 1} intentos: {last_exc}") from last_exc
+                finally:
+                    unmark_downloading(series_folder, chap_num)
 
                 percent = int((idx / total) * 100)
                 if chapter_id:

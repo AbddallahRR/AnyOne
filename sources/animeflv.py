@@ -12,7 +12,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from core.disk_cache import search_cache
-from core.models import Chapter, EpisodeLink, EpisodeLinks, SearchResult, SeriesDetails
+from core.models import Chapter, EpisodeLink, EpisodeLinks, SearchResult, SeriesDetails, chapter_to_filename
 from core.throttle import rate_limiter
 
 from . import BaseSource
@@ -512,8 +512,8 @@ class AnimeflvSource(BaseSource):
         if not stream_url:
             raise Exception("No se encontró URL de stream para el episodio")
 
-        cap_num  = int(float(chapter_id)) if str(chapter_id).replace('.', '', 1).isdigit() else 0
-        filename = f"{content_id}_{cap_num:03d}.mp4"
+        cap_num  = chapter_to_filename(chapter_id, padding=3) if str(chapter_id).replace('.', '', 1).isdigit() else chapter_id
+        filename = f"{content_id}_{cap_num}.mp4"
         filepath = os.path.join(dest_folder, filename)
         os.makedirs(dest_folder, exist_ok=True)
 

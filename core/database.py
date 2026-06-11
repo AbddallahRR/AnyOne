@@ -37,7 +37,7 @@ def get_conn() -> sqlite3.Connection:
 # Migraciones versionadas
 # ---------------------------------------------------------------------------
 
-SCHEMA_VERSION = 7  # incrementar al agregar una migración nueva
+SCHEMA_VERSION = 9  # incrementar al agregar una migración nueva
 
 def _get_schema_version(conn: sqlite3.Connection) -> int:
     conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)")
@@ -166,6 +166,33 @@ def _run_migrations(conn: sqlite3.Connection, current: int) -> None:
                 ('ikigai', 'manga', 'Ikigai', 'https://visorikigai.yomod.xyz', 1, 1, '{}', strftime('%s','now'), strftime('%s','now'));
         ''')
 
+    if current < 8:
+        logger.info("Migracion 8: watched_chapters.chapter_number TEXT para soportar decimales")
+        existing = [r[1] for r in conn.execute("PRAGMA table_info(watched_chapters)")]
+        if existing and existing[2] == 'INTEGER':
+            conn.executescript('''
+                CREATE TABLE watched_chapters_new (
+                    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                    content_id     TEXT NOT NULL,
+                    chapter_number TEXT NOT NULL,
+                    watched_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(content_id, chapter_number)
+                );
+                INSERT INTO watched_chapters_new (id, content_id, chapter_number, watched_at)
+                    SELECT id, content_id, CAST(chapter_number AS TEXT), watched_at
+                    FROM watched_chapters;
+                DROP TABLE watched_chapters;
+                ALTER TABLE watched_chapters_new RENAME TO watched_chapters;
+                CREATE INDEX IF NOT EXISTS idx_watched_cid ON watched_chapters(content_id);
+            ''')
+
+    if current < 9:
+        logger.info("Migracion 9: indices faltantes para rendimiento")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_queue_content_ref_status ON download_queue(content_ref, status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_queue_status_created ON download_queue(status, created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_series_status_check ON series_status(status, last_checked_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_series_status_updates ON series_status(new_chapters_found)")
+
 
 # ---------------------------------------------------------------------------
 # Inicialización pública
@@ -238,21 +265,22 @@ def cleanup_download_queue() -> None:
             safe_title  = normalize_title(title)
             series_folder = os.path.join(base_folder, safe_title)
 
-            cap_num: int | None = None
+            cap_num: str | None = None
             if chapter_id:
                 raw = chapter_id.split('-')[-1] if '-' in chapter_id else chapter_id
-                cap_num = int(raw) if raw.isdigit() else None
+                if raw.replace('.', '', 1).isdigit():
+                    cap_num = raw
             elif current_chapter:
-                cap_num = int(current_chapter)
+                cap_num = str(current_chapter)
 
-            if cap_num and cap_num > 0:
+            if cap_num and float(cap_num) > 0:
                 if content_type == 'anime':
-                    filepath = os.path.join(series_folder, f"{safe_title}_{cap_num:03d}.mp4")
+                    filepath = os.path.join(series_folder, f"{safe_title}_{cap_num}.mp4")
                     if os.path.exists(filepath):
                         os.remove(filepath)
                         logger.info(f"[CLEANUP] Archivo parcial eliminado: {filepath}")
                 else:
-                    filepath = os.path.join(series_folder, f"cap_{cap_num:04d}")
+                    filepath = os.path.join(series_folder, f"cap_{cap_num}")
                     if os.path.exists(filepath):
                         shutil.rmtree(filepath)
                         logger.info(f"[CLEANUP] Carpeta parcial eliminada: {filepath}")
@@ -384,10 +412,10 @@ def get_series_to_check(min_interval_seconds: int = 86400) -> list[dict]:
         WHERE status IN ('watching', 'completed')
           AND (
             last_checked_at IS NULL
-            OR (strftime('%s','now') - strftime('%s', last_checked_at)) >= ?
+            OR last_checked_at <= datetime('now', ? || ' seconds')
           )
         """,
-        (min_interval_seconds,)
+        (f"-{min_interval_seconds}",)
     ).fetchall()
     return [{'content_ref': r[0], 'status': r[1]} for r in rows]
 
@@ -413,7 +441,7 @@ def get_last_checked(content_ref: str) -> str | None:
     return row[0] if row else None
 
 
-def set_series_updates(content_ref: str, new_chapters: list[int]) -> None:
+def set_series_updates(content_ref: str, new_chapters: list[str]) -> None:
     """
     Guarda la lista de capítulos nuevos detectados.
     Si la lista está vacía, limpia el campo.
@@ -430,7 +458,7 @@ def set_series_updates(content_ref: str, new_chapters: list[int]) -> None:
 def get_series_with_updates() -> list[dict]:
     """
     Devuelve todas las series que tienen capítulos nuevos pendientes.
-    Cada elemento: {'content_ref': str, 'new_chapters': list[int]}
+    Cada elemento: {'content_ref': str, 'new_chapters': list[str]}
     """
     conn = get_conn()
     rows = conn.execute(
@@ -441,6 +469,7 @@ def get_series_with_updates() -> list[dict]:
     for r in rows:
         try:
             chapters = json.loads(r[1])
+            chapters = [str(c) for c in chapters]
             if chapters:
                 result.append({'content_ref': r[0], 'new_chapters': chapters})
         except (json.JSONDecodeError, TypeError):
@@ -462,7 +491,7 @@ def clear_series_updates(content_ref: str) -> None:
 # Capítulos vistos
 # ---------------------------------------------------------------------------
 
-def mark_chapter_as_watched(content_ref: str, chapter_number: int) -> None:
+def mark_chapter_as_watched(content_ref: str, chapter_number: str) -> None:
     conn = get_conn()
     with conn:
         conn.execute(
@@ -471,7 +500,7 @@ def mark_chapter_as_watched(content_ref: str, chapter_number: int) -> None:
         )
 
 
-def is_chapter_watched(content_ref: str, chapter_number: int) -> bool:
+def is_chapter_watched(content_ref: str, chapter_number: str) -> bool:
     conn = get_conn()
     return conn.execute(
         'SELECT 1 FROM watched_chapters WHERE content_id = ? AND chapter_number = ?',
@@ -479,13 +508,13 @@ def is_chapter_watched(content_ref: str, chapter_number: int) -> bool:
     ).fetchone() is not None
 
 
-def get_watched_chapters(content_ref: str) -> list[int]:
+def get_watched_chapters(content_ref: str) -> list[str]:
     conn = get_conn()
     rows = conn.execute(
         'SELECT chapter_number FROM watched_chapters WHERE content_id = ?',
         (content_ref,)
     ).fetchall()
-    return [r[0] for r in rows]
+    return [str(r[0]) for r in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -523,10 +552,21 @@ def ensure_source_in_db(name: str, source_type: str) -> None:
     )
 
 
-def delete_watched_chapter(content_ref: str, chapter_number: int) -> None:
+def delete_watched_chapter(content_ref: str, chapter_number: str) -> None:
     conn = get_conn()
     with conn:
         conn.execute(
             'DELETE FROM watched_chapters WHERE content_id = ? AND chapter_number = ?',
             (content_ref, chapter_number)
+        )
+
+def delete_watched_chapters_batch(content_ref: str, chapter_numbers: list[str]) -> None:
+    if not chapter_numbers:
+        return
+    conn = get_conn()
+    placeholders = ','.join('?' * len(chapter_numbers))
+    with conn:
+        conn.execute(
+            f'DELETE FROM watched_chapters WHERE content_id = ? AND chapter_number IN ({placeholders})',
+            [content_ref] + chapter_numbers
         )

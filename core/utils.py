@@ -36,7 +36,7 @@ def normalize_for_comparison(text):
 _scan_cache: list | None = None
 _scan_cache_time: float = 0.0
 _scan_cache_lock = threading.Lock()
-_SCAN_CACHE_TTL = 60.0
+_SCAN_CACHE_TTL = 300.0
 
 def _invalidate_scan_cache() -> None:
     global _scan_cache
@@ -113,6 +113,7 @@ def scan_downloaded_series():
     with _scan_cache_lock:
         if _scan_cache is not None and now - _scan_cache_time < _SCAN_CACHE_TTL:
             return _scan_cache
+        _scan_cache = None  # invalidate while scanning
 
     series = []
     futures = []
@@ -135,30 +136,24 @@ def scan_downloaded_series():
             except Exception:
                 logger.debug('utils: error en future.result() para serie local')
 
-    # Enriquecer con BD (progreso + portada)
+    # Enriquecer con BD (progreso + portada) — JOIN único
     from core.database import get_conn
     conn = get_conn()
     refs = [f"local:{s['id']}" for s in series]
     if refs:
         placeholders = ','.join('?' * len(refs))
-        # Progreso desde user_progress directamente (content.id y user_progress.content_id
-        # tienen formatos distintos: "source:remote_id" vs "local:folder_name")
-        prog_rows = conn.execute(
-            f'SELECT content_id, chapter, progress FROM user_progress WHERE content_id IN ({placeholders})',
+        rows = conn.execute(
+            f'SELECT up.content_id, up.chapter, up.progress, c.cover '
+            f'FROM user_progress up LEFT JOIN content c ON c.id = up.content_id '
+            f'WHERE up.content_id IN ({placeholders})',
             refs
         ).fetchall()
-        progress_map = {r[0]: (r[1], r[2]) for r in prog_rows}
-
-        # Covers desde content table como fallback
-        cover_rows = conn.execute(
-            f'SELECT id, cover FROM content WHERE id IN ({placeholders})',
-            refs
-        ).fetchall()
-        cover_map = {r[0]: r[1] for r in cover_rows}
+        prog_map = {r[0]: (r[1], r[2]) for r in rows}
+        cover_map = {r[0]: r[3] for r in rows if r[3]}
 
         for s in series:
             ref = f"local:{s['id']}"
-            prog = progress_map.get(ref)
+            prog = prog_map.get(ref)
             if prog:
                 chapter, progress = prog
                 if chapter:

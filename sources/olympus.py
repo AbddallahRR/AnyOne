@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 import cloudscraper
 
 from core.disk_cache import search_cache
-from core.models import Chapter, SearchResult, SeriesDetails
+from core.models import Chapter, SearchResult, SeriesDetails, chapter_to_filename
 from core.throttle import rate_limiter
 
 from . import BaseSource
@@ -392,7 +392,7 @@ class OlympusSource(BaseSource):
                 cap_num = item
                 break
 
-        dir_name = (f"cap_{int(float(cap_num)):04d}"
+        dir_name = (f"cap_{chapter_to_filename(cap_num)}"
                     if cap_num.replace('.', '', 1).isdigit()
                     else f"cap_{cap_num}")
         cap_dir  = os.path.join(dest_folder, dir_name)

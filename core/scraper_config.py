@@ -98,6 +98,17 @@ def create_config(name: str, source_type: str, label: str,
     return get_config(name)
 
 
+def _reload_dynamic_source(name: str) -> None:
+    try:
+        from core.sources import SOURCES
+        for type_dict in SOURCES.values():
+            src = type_dict.get(name)
+            if src is not None and hasattr(src, 'reload_config'):
+                src.reload_config()
+    except Exception:
+        pass
+
+
 def update_config(name: str, label: str | None = None,
                   base_url: str | None = None,
                   enabled: bool | None = None,
@@ -116,6 +127,11 @@ def update_config(name: str, label: str | None = None,
         if enabled is not None:
             conn.execute('UPDATE scraper_configs SET enabled = ? WHERE name = ?',
                          (1 if enabled else 0, name))
+            try:
+                conn.execute('UPDATE source_settings SET enabled = ? WHERE name = ?',
+                             (1 if enabled else 0, name))
+            except Exception:
+                pass
         if config is not None:
             conn.execute('UPDATE scraper_configs SET config_json = ? WHERE name = ?',
                          (json.dumps(config), name))
@@ -132,6 +148,7 @@ def update_config(name: str, label: str | None = None,
         )
         _register_dynamic(name)
 
+    _reload_dynamic_source(name)
     logger.info(f"Scraper config updated: {name}")
     return get_config(name)
 
@@ -145,8 +162,24 @@ def delete_config(name: str) -> bool:
     with conn:
         conn.execute('DELETE FROM scraper_configs WHERE name = ?', (name,))
 
+    # Limpiar registros asociados
     _remove_source_file(name)
     _unregister_dynamic(name)
+    try:
+        from core.database import get_conn as _get_conn
+        _get_conn().execute('DELETE FROM source_settings WHERE name = ?', (name,))
+    except Exception:
+        pass
+    try:
+        from core.scraper_health import clear_source_health
+        clear_source_health(name)
+    except Exception:
+        pass
+    try:
+        from core.disk_cache import search_cache
+        search_cache.clear()
+    except Exception:
+        pass
     logger.info(f"Scraper config deleted: {name}")
     return True
 

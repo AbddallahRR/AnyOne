@@ -47,7 +47,7 @@ def api_download(data: DownloadRequest):
 
     ref = get_content_ref(data.source, data.content_id)
 
-    excluded_chapters: list[int] = []
+    excluded_chapters: list[str] = []
     if data.exclude_watched:
         safe_title = normalize_title(data.title)
         watched = get_watched_chapters(f"local:{safe_title}")

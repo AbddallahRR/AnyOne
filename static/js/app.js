@@ -330,21 +330,24 @@
     observeCovers(container);
     if (window.animateCards) window.animateCards(`#${type}-results`);
 
-    // [OPT-4] Event delegation — un listener por contenedor en vez de uno por card
-    container.addEventListener('click', e => {
-      const downloadBtn = e.target.closest('.download-btn');
-      const card        = e.target.closest('.media-card');
-      if (!card) return;
+    // Event delegation — un listener por contenedor
+    if (!container.dataset.listenerBound) {
+      container.addEventListener('click', e => {
+        const downloadBtn = e.target.closest('.download-btn');
+        const card        = e.target.closest('.media-card');
+        if (!card) return;
 
-      if (downloadBtn) {
-        e.stopPropagation();
-        const { id, title, source: src, type: typ } = card.dataset;
-        downloadSeries(typ, src, id, title);
-        return;
-      }
-      const { id, source: src, type: typ } = card.dataset;
-      window.location.href = `/serie/${typ}/${src}/${id}`;
-    }, { once: false }); // se reemplaza con cada render porque container.innerHTML se pisa
+        if (downloadBtn) {
+          e.stopPropagation();
+          const { id, title, source: src, type: typ } = card.dataset;
+          downloadSeries(typ, src, id, title);
+          return;
+        }
+        const { id, source: src, type: typ } = card.dataset;
+        window.location.href = `/serie/${typ}/${src}/${id}`;
+      });
+      container.dataset.listenerBound = '1';
+    }
   }
 
   // ── Descarga de serie completa ─────────────────────────────────────────

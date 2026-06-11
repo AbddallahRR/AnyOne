@@ -41,11 +41,13 @@ try:
     from rcssmin import cssmin as minify_css
 except ImportError:
     minify_css = lambda x: x
+    print("  [WARN] rcssmin no instalado — CSS no se minificará")
 
 try:
     from rjsmin import jsmin as minify_js
 except ImportError:
     minify_js = lambda x: x
+    print("  [WARN] rjsmin no instalado — JS no se minificará")
 
 def bundle_css(name: str, sources: list[str]) -> tuple[str, str, bytes]:
     parts = []

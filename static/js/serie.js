@@ -285,12 +285,23 @@
     const pill = chaptersContainer.querySelector(`.chapter-pill[data-chapter="${chapterNum}"]`);
     if (!pill) return;
 
-    // Reemplazar la pill con el HTML actualizado (mantenemos el nodo raíz
-    // para no mover el scroll)
-    const temp = document.createElement('div');
-    temp.innerHTML = buildPillHtml(ch);
-    const newPill = temp.firstElementChild;
-    pill.replaceWith(newPill);
+    pill.classList.toggle('watched', ch.is_watched);
+    pill.classList.toggle('downloaded', ch.is_downloaded);
+    const numEl = pill.querySelector('.pill-num');
+    if (numEl) numEl.classList.toggle('muted', ch.is_watched);
+    let dot = pill.querySelector('.watched-dot');
+    if (ch.is_watched && !dot) {
+      dot = document.createElement('span');
+      dot.className = 'watched-dot';
+      numEl?.after(dot);
+    } else if (!ch.is_watched && dot) {
+      dot.remove();
+    }
+    const toggleBtn = pill.querySelector('.watched-toggle-btn');
+    if (toggleBtn) {
+      toggleBtn.classList.toggle('is-watched', ch.is_watched);
+      toggleBtn.title = ch.is_watched ? 'Quitar visto' : 'Marcar visto';
+    }
   }
 
   // ── Confirm dialog ─────────────────────────────────────────────────────
@@ -619,20 +630,20 @@
 
     // Botones según contexto
     if (isLocal) {
-      if (downloadAllBtn)   downloadAllBtn.style.display   = 'none';
-      if (continueBtn)      continueBtn.style.display      = 'inline-flex';
-      if (deleteWatchedBtn) deleteWatchedBtn.style.display = 'inline-flex';
+      if (downloadAllBtn)   downloadAllBtn.classList.add('hidden');
+      if (continueBtn)      continueBtn.classList.remove('hidden');
+      if (deleteWatchedBtn) deleteWatchedBtn.classList.remove('hidden');
       if (checkUpdatesBtn) {
-        // Mostrar solo si la serie local tiene una fuente remota asociada
         if (originalSource) {
-          checkUpdatesBtn.style.display = 'inline-flex';
+          checkUpdatesBtn.classList.remove('hidden');
           checkUpdatesBtn.addEventListener('click', checkForUpdates);
         } else {
-          checkUpdatesBtn.style.display = 'none';
+          checkUpdatesBtn.classList.add('hidden');
         }
       }
     } else {
-      if (downloadAllBtn)   downloadAllBtn.style.display   = 'inline-flex';
+      if (downloadAllBtn)   downloadAllBtn.classList.remove('hidden');
+      if (continueBtn)      continueBtn.classList.remove('hidden');
     }
 
     continueBtn?.addEventListener('click', () => {

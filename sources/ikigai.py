@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup
 
 from core.disk_cache import search_cache
 from core.http_pool import HttpPool
-from core.models import Chapter, SearchResult, SeriesDetails
+from core.models import Chapter, SearchResult, SeriesDetails, chapter_to_filename
 from core.throttle import rate_limiter
 
 from . import BaseSource
@@ -428,13 +428,6 @@ class IkigaiSource(BaseSource):
                     logger.warning(f"Ikigai: no se pudo extraer número del capítulo "
                                    f"{chap_id} en '{content_id}', usando id como fallback")
 
-                try:
-                    if float(num) != int(float(num)):
-                        logger.debug(f"Ikigai: ignorando capítulo decimal {num!r} en '{content_id}'")
-                        continue
-                except (ValueError, TypeError):
-                    pass
-
                 chapters.append({'number': num, 'id': chap_id})
 
             if not self._has_next_page(soup, page + 1):
@@ -495,7 +488,7 @@ class IkigaiSource(BaseSource):
             raise Exception(f"Ikigai: no se encontraron imágenes en capítulo {chapter_id}")
 
         cap_num = chapter_number or chapter_id
-        dir_name = (f"cap_{int(float(cap_num)):04d}"
+        dir_name = (f"cap_{chapter_to_filename(cap_num)}"
                     if cap_num.replace('.', '', 1).isdigit()
                     else f"cap_{cap_num}")
         cap_dir  = os.path.join(dest_folder, dir_name)

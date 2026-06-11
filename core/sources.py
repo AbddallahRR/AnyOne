@@ -22,18 +22,19 @@ def _discover_sources():
         if modname == '__init__':
             continue
 
+        # Check IGNORE marker BEFORE importing (evita importar módulos muertos)
+        source_path = Path(sources_pkg.__path__[0]) / f'{modname}.py'
+        if source_path.exists():
+            content = source_path.read_text(encoding='utf-8')
+            if '--- IGNORE ---' in content:
+                logger.info(f'Fuente ignorada: sources.{modname} (marcada como IGNORE)')
+                continue
+
         try:
             module = importlib.import_module(f'sources.{modname}')
         except Exception as exc:
             logger.warning(f'Error importando sources.{modname}: {exc}')
             continue
-
-        source_file = Path(module.__file__) if module.__file__ else None
-        if source_file and source_file.exists():
-            content = source_file.read_text(encoding='utf-8')
-            if '--- IGNORE ---' in content:
-                logger.info(f'Fuente ignorada: sources.{modname} (marcada como IGNORE)')
-                continue
 
         from sources import BaseSource
 
@@ -100,11 +101,14 @@ def register_dynamic_source(name: str) -> bool:
 
 
 def sync_source_settings():
-    from core.database import ensure_source_in_db
+    from core.database import ensure_source_in_db, get_conn
+
+    valid_names = set()
 
     for src in ALL_SOURCES_META:
         try:
             ensure_source_in_db(src['name'], src['type'])
+            valid_names.add(src['name'])
         except Exception:
             logger.warning(f"No se pudo registrar {src['name']} en source_settings")
 
@@ -116,8 +120,22 @@ def sync_source_settings():
         for cfg in get_all_configs():
             if not cfg.get('built_in'):
                 ensure_source_in_db(cfg['name'], cfg['type'])
+                valid_names.add(cfg['name'])
     except Exception:
         pass
+
+    # Clean up orphaned entries (e.g. from sources deleted before
+    # delete_config() cleaned source_settings)
+    if valid_names:
+        try:
+            conn = get_conn()
+            placeholders = ",".join("?" * len(valid_names))
+            conn.execute(
+                f'DELETE FROM source_settings WHERE name NOT IN ({placeholders})',
+                list(valid_names)
+            )
+        except Exception:
+            pass
 
 
 _discover_sources()

@@ -8,6 +8,8 @@
   let currentChapterIndex = -1;
   let currentChapterNum   = current_chapter;
   let progressInterval    = null;
+  var _unloadSaveHandler  = null;
+  var _unloadClearHandler = null;
 
   // ── Elementos DOM ──────────────────────────────────────────────────────
   const mediaContainer  = document.getElementById('media-content');
@@ -458,14 +460,16 @@
 
       viewerDiv.addEventListener('scroll', onScroll, { passive: true });
 
-      window.addEventListener('beforeunload', () => {
+      if (_unloadSaveHandler) window.removeEventListener('beforeunload', _unloadSaveHandler);
+      _unloadSaveHandler = function() {
         clearTimeout(saveTimeout);
         fetch(`/api/progress/manga/${source}/${content_id}`, {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify({ chapter: currentChapterNum, progress: currentPage }),
         }).catch(() => {});
-      });
+      };
+      window.addEventListener('beforeunload', _unloadSaveHandler);
 
       // ── Restaurar posición guardada ────────────────────────────────────
       let savedIndex = 0;
@@ -505,9 +509,11 @@
       window.location.href = `/serie/${type}/${source}/${content_id}`;
     });
 
-    window.addEventListener('beforeunload', () => {
+    if (_unloadClearHandler) window.removeEventListener('beforeunload', _unloadClearHandler);
+    _unloadClearHandler = function() {
       if (progressInterval) clearInterval(progressInterval);
-    });
+    };
+    window.addEventListener('beforeunload', _unloadClearHandler);
 
     showUI();
   }

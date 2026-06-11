@@ -183,9 +183,6 @@ video,
   animation: spin 0.7s linear infinite;
 }
 
-/* ── Hide download indicator inside reader ── */
-.download-indicator { display: none !important; }
-
 /* ── Mobile ── */
 @media (max-width: 640px) {
   .controls-bar { padding: 8px 14px; gap: 10px; }

@@ -16,6 +16,10 @@ from . import api_router
 logger = logging.getLogger(__name__)
 
 
+def _enabled_fingerprint() -> str:
+    return ','.join(sorted(get_enabled_source_names()))
+
+
 @api_router.get('/search')
 async def api_search(qs: SearchQuery = Depends()):
     if not qs.source:
@@ -72,14 +76,16 @@ async def api_search(qs: SearchQuery = Depends()):
 
 @api_router.get('/search-all')
 async def api_search_all(qs: SearchQuery = Depends()):
-    cache_key = f"search_all:{qs.type}:{qs.q}"
+    sources_dict = get_enabled_sources(qs.type)
+    if not sources_dict:
+        raise HTTPException(status_code=400, detail='Tipo no soportado')
+
+    cache_key = f"search_all:{_enabled_fingerprint()}:{qs.type}:{qs.q}"
 
     if not qs.refresh:
         cached = await search_cache.aget(cache_key)
         if cached is not None:
             return cached
-
-    sources_dict = get_enabled_sources(qs.type)
     if not sources_dict:
         raise HTTPException(status_code=400, detail='Tipo no soportado')
 
@@ -118,7 +124,7 @@ async def api_search_all_stream(qs: SearchQuery = Depends()):
     if not sources_dict:
         raise HTTPException(status_code=400, detail='Tipo no soportado')
 
-    cache_key = f"search_all_stream:{qs.type}:{qs.q}"
+    cache_key = f"search_all_stream:{_enabled_fingerprint()}:{qs.type}:{qs.q}"
     cached = await search_cache.aget(cache_key)
     if cached is not None:
         async def _from_cache():
@@ -133,22 +139,36 @@ async def api_search_all_stream(qs: SearchQuery = Depends()):
 
         async def search_in_source(source_name: str, src) -> tuple[str, list]:
             try:
-                items = await src.search(qs.q)
+                items = await asyncio.wait_for(src.search(qs.q), timeout=_SSE_TIMEOUT)
                 for item in items:
                     item.source = source_name
                 record_success(source_name)
                 return source_name, [m.model_dump() for m in items]
+            except asyncio.TimeoutError:
+                logger.warning(f"SSE search-all timeout para '{source_name}' tras {_SSE_TIMEOUT}s")
+                error_msg = f"Timeout tras {_SSE_TIMEOUT}s"
+                record_failure(source_name, error_msg)
+                return source_name, []
             except Exception as exc:
                 logger.exception(f"Error buscando en {source_name}: {exc}")
                 error_msg = str(exc)[:200]
                 record_failure(source_name, error_msg)
                 return source_name, []
 
-        tasks = {name: search_in_source(name, src) for name, src in sources_dict.items()}
+        task_map = {
+            asyncio.create_task(search_in_source(name, src)): name
+            for name, src in sources_dict.items()
+        }
 
-        for name, coro in tasks.items():
-            try:
-                source_name, items = await asyncio.wait_for(coro, timeout=_SSE_TIMEOUT)
+        while task_map:
+            done_set, _ = await asyncio.wait(task_map.keys(), return_when=asyncio.FIRST_COMPLETED)
+            for task in done_set:
+                name = task_map.pop(task)
+                try:
+                    source_name, items = task.result()
+                except Exception:
+                    logger.exception(f"Error inesperado en {name}")
+                    continue
                 if not items:
                     status = get_status(source_name)
                     if status.get('temporarily_disabled'):
@@ -157,16 +177,6 @@ async def api_search_all_stream(qs: SearchQuery = Depends()):
                     continue
                 all_results[source_name] = items
                 yield f"event: results\ndata: {json.dumps({'source': source_name, 'results': items})}\n\n"
-            except asyncio.TimeoutError:
-                logger.warning(f"SSE search-all timeout para '{name}' tras {_SSE_TIMEOUT}s")
-                error_msg = f"Timeout tras {_SSE_TIMEOUT}s"
-                record_failure(name, error_msg)
-                disabled = get_status(name).get('temporarily_disabled', False)
-                payload = {'source': name, 'error': error_msg, 'disabled': disabled}
-                yield f"event: source_error\ndata: {json.dumps(payload)}\n\n"
-            except Exception:
-                logger.exception(f"Error inesperado en {name}")
-                continue
 
         if all_results:
             await search_cache.aset(cache_key, all_results)

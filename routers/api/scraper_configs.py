@@ -6,7 +6,17 @@ from urllib.parse import urljoin, urlparse, urlunparse, unquote
 from bs4 import BeautifulSoup
 from fastapi import HTTPException, Request
 
-from core.html_utils import extract_items_with_templates, normalize_url, validate_css_selector
+from core.html_utils import (
+    ATTR_PRIORITY,
+    extract_background_images,
+    extract_from_srcset,
+    extract_images_from_noscript,
+    extract_images_from_scripts,
+    extract_items_with_templates,
+    normalize_image_url,
+    normalize_url,
+    validate_css_selector,
+)
 from core.http_pool import HttpPool
 from core.models import ScraperConfigSchema
 from core.scraper_config import (
@@ -364,47 +374,106 @@ async def api_test_config(request: Request):
             img_sel = config.get('content_image_selector', '')
             img_attr = config.get('content_image_attr', 'src')
             images = []
-            try:
-                imgs = soup.select(img_sel) if img_sel else []
-            except Exception:
-                imgs = []
-            for img in imgs:
-                src = img.get(img_attr) or img.get('src')
-                if src:
-                    images.append(_normalize_url(src, base_url))
+            methods_tried = []
+            detected_pattern = None
+            suggested_attr = img_attr
 
-            # Fallback: extract from ts_reader.run() JS config
-            if not images:
-                for script in soup.find_all('script'):
-                    text = script.string or ''
-                    if 'ts_reader.run' in text or 'ts_reader_data' in text:
-                        match = re.search(r'(?:ts_reader\.run|ts_reader_data)\s*\(\s*(\{.+?\})\s*\)\s*;', text, re.DOTALL)
-                        if match:
-                            try:
-                                raw = _html.unescape(match.group(1)).replace('\\/', '/')
-                                data = json.loads(raw)
-                                for src_group in data.get('sources', []):
-                                    for img_url in src_group.get('images', []):
-                                        norm = _normalize_url(img_url, base_url)
-                                        if norm:
-                                            images.append(norm)
-                            except Exception:
-                                pass
-                        if images:
-                            break
-
-            # Fallback: extract from Qwik JSON (<script type="qwik/json">)
-            if not images:
-                for script in soup.find_all('script', type='qwik/json'):
-                    matches = re.findall(r'https://image3\.ikigaimangas\.cloud[^"\'\\\s]+\.webp', script.string or '')
-                    for u in matches:
-                        norm = _normalize_url(u, base_url)
+            # Strategy 1: CSS selector + configured attribute
+            if img_sel:
+                try:
+                    imgs = soup.select(img_sel)
+                except Exception:
+                    imgs = []
+                for img in imgs:
+                    src = img.get(img_attr) or img.get('src')
+                    if src:
+                        norm = _normalize_url(src, base_url)
                         if norm:
                             images.append(norm)
-                    if images:
+                methods_tried.append({
+                    'method': 'css_selector',
+                    'attr': img_attr,
+                    'count': len(images),
+                })
+                if images:
+                    detected_pattern = 'regular'
+
+            # Strategy 2: CSS selector + try all priority attrs
+            if not images and img_sel:
+                for attr_name in ATTR_PRIORITY:
+                    if attr_name == img_attr:
+                        continue
+                    batch = []
+                    try:
+                        imgs = soup.select(img_sel)
+                    except Exception:
+                        imgs = []
+                    for img in imgs:
+                        src = img.get(attr_name) or img.get('src')
+                        if src:
+                            norm = _normalize_url(src, base_url)
+                            if norm and norm not in images:
+                                batch.append(norm)
+                    if batch:
+                        images = batch
+                        suggested_attr = attr_name
+                        detected_pattern = 'data-src' if attr_name.startswith('data-') else attr_name
+                        methods_tried.append({
+                            'method': 'css_selector_all_attrs',
+                            'attr': attr_name,
+                            'count': len(images),
+                        })
                         break
 
-            extracted['images'] = images
+            # Strategy 3: <noscript> extraction
+            if not images:
+                noscript_imgs = extract_images_from_noscript(soup)
+                for entry in noscript_imgs:
+                    src = entry['src']
+                    norm = _normalize_url(src, base_url)
+                    if norm:
+                        images.append(norm)
+                if images:
+                    detected_pattern = 'noscript'
+                    suggested_attr = list(entry['attrs'].keys())[0] if noscript_imgs and entry['attrs'] else 'src'
+                methods_tried.append({
+                    'method': 'noscript',
+                    'count': len(images),
+                })
+
+            # Strategy 4: JS script extraction
+            if not images:
+                script_urls = extract_images_from_scripts(soup, base_url)
+                for u in script_urls:
+                    norm = _normalize_url(u, base_url)
+                    if norm:
+                        images.append(norm)
+                if images:
+                    detected_pattern = 'js_var'
+                methods_tried.append({
+                    'method': 'js_scripts',
+                    'count': len(images),
+                })
+
+            # Strategy 5: CSS background-image
+            if not images:
+                bg_urls = extract_background_images(soup, img_sel)
+                for u in bg_urls:
+                    norm = _normalize_url(u, base_url)
+                    if norm:
+                        images.append(norm)
+                if images:
+                    detected_pattern = 'background'
+                methods_tried.append({
+                    'method': 'background_image',
+                    'count': len(images),
+                })
+
+            extracted['images'] = images[:50]
+            extracted['methods_tried'] = methods_tried
+            extracted['detected_pattern'] = detected_pattern or 'none'
+            if suggested_attr != img_attr:
+                extracted['suggested_attr'] = suggested_attr
         else:
             vid_sel = config.get('content_video_selector', '')
             vid_attr = config.get('content_video_attr', 'src')
@@ -419,6 +488,26 @@ async def api_test_config(request: Request):
         return extracted
 
     raise HTTPException(status_code=400, detail=f'Unknown stage: {stage}')
+
+
+@api_router.post('/scraper-configs/check-url')
+async def api_check_url(request: Request):
+    """Check if a URL is reachable via HEAD request."""
+    body = await request.json()
+    url = body.get('url', '').strip()
+    if not url:
+        raise HTTPException(status_code=400, detail='URL es requerida')
+    try:
+        scraper = HttpPool.get_scraper()
+        resp = scraper.head(
+            url,
+            headers={'User-Agent': 'Mozilla/5.0'},
+            timeout=10,
+            allow_redirects=True,
+        )
+        return {'reachable': resp.status_code < 500, 'status': resp.status_code}
+    except Exception:
+        return {'reachable': False, 'status': 0}
 
 
 @api_router.post('/scraper-configs/auto-detect')

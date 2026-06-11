@@ -1,4 +1,5 @@
 import json
+import logging
 from pathlib import Path
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
@@ -10,17 +11,23 @@ router = APIRouter(tags=['pages'])
 templates = Jinja2Templates(directory='templates')
 
 _manifest_path = Path(__file__).resolve().parent.parent / 'static' / 'dist' / 'build.json'
+_manifest_cache: dict | None = None
 
 
 def _load_bundles() -> dict:
+    global _manifest_cache
+    if _manifest_cache is not None:
+        return _manifest_cache
     try:
         manifest = json.loads(_manifest_path.read_text())
         bundles = {}
         for key, filename in manifest.get('bundles', {}).items():
             bundles[key.replace(':', '_')] = f"dist/{filename}"
+        _manifest_cache = bundles
         return bundles
     except Exception:
-        logger.warning('pages: error cargando manifest.json')
+        logging.warning('pages: error cargando manifest.json')
+        _manifest_cache = {}
         return {}
 
 

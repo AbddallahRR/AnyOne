@@ -73,7 +73,7 @@ async def _warm_all_sources():
         for name, source in sources_dict.items():
             if hasattr(source, 'warm_cache'):
                 logger.info(f"Precargando catálogo de {name}...")
-                tasks.append(asyncio.wait_for(source.warm_cache(), timeout=30))
+                tasks.append(source.warm_cache())
                 names.append(name)
 
     if tasks:

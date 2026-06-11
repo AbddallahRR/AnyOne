@@ -120,3 +120,8 @@ def get_all_status() -> dict[str, dict]:
 def init_health_for_source(name: str):
     with _lock:
         _ensure(name)
+
+
+def clear_source_health(name: str):
+    with _lock:
+        _health.pop(name, None)

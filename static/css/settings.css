@@ -750,6 +750,134 @@
   overflow-y: auto;
 }
 
+/* ── URL Status Indicator ── */
+.input-with-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.input-with-status .input-field {
+  flex: 1;
+}
+.url-status {
+  flex-shrink: 0;
+  width: 20px;
+  text-align: center;
+  font-size: 16px;
+}
+.url-ok {
+  color: #4ade80;
+  font-weight: bold;
+}
+.url-err {
+  color: #f87171;
+  font-weight: bold;
+}
+
+/* ── Help Icon ── */
+.help-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(124,92,252,0.15);
+  color: var(--accent-lt);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: help;
+  margin-left: 4px;
+  vertical-align: middle;
+  transition: background 0.15s;
+}
+.help-icon:hover {
+  background: rgba(124,92,252,0.3);
+}
+
+/* ── Field Validation ── */
+.field-error {
+  border-color: #f87171 !important;
+  box-shadow: 0 0 0 2px rgba(248,113,113,0.15) !important;
+}
+.field-valid {
+  border-color: #4ade80 !important;
+}
+
+/* ── Health Dot ── */
+.health-dot {
+  font-size: 18px;
+  flex-shrink: 0;
+  width: 16px;
+  text-align: center;
+  cursor: default;
+}
+.health-good { color: #4ade80; }
+.health-warn { color: #fbbf24; }
+.health-bad { color: #f87171; }
+.health-unknown { color: var(--muted); font-size: 14px; }
+
+/* ── Spinner for buttons ── */
+.spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255,255,255,0.2);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+/* ── Button disabled state ── */
+.btn-primary:disabled,
+.btn-secondary:disabled,
+.btn-accent:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ── Use ID button (small) ── */
+.btn-xs {
+  padding: 4px 8px;
+  font-size: 10px;
+  margin-top: 4px;
+}
+
+/* ── Stub preview ── */
+.stub-preview {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(0,0,0,0.2);
+}
+.stub-preview summary {
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  user-select: none;
+}
+.stub-preview summary i {
+  margin-right: 6px;
+}
+.stub-preview summary:hover {
+  color: var(--text-dim);
+}
+.stub-preview-code {
+  padding: 16px;
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre;
+  color: var(--text-dim);
+  border-top: 1px solid var(--border);
+}
+
+/* ── Loading spinner for buttons ── */
+
 @media (max-width: 700px) {
   .settings-layout {
     flex-direction: column;

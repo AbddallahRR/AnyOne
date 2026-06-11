@@ -1,6 +1,27 @@
+import re
 from typing import Optional
 
 from pydantic import BaseModel, field_validator
+
+
+def chapter_to_filename(num: str, padding: int = 4) -> str:
+    parts = num.split('.')
+    int_part = parts[0].lstrip('0') or '0'
+    formatted = f"{int(int_part):0{padding}d}"
+    if len(parts) > 1:
+        formatted += f"_{parts[1]}"
+    return formatted
+
+
+def parse_chapter_from_filename(name: str) -> str | None:
+    m = re.search(r'(\d+(?:_\d+)?)$', name.replace('.mp4', ''))
+    if not m:
+        return None
+    raw = m.group(1).replace('_', '.')
+    parts = raw.split('.')
+    parts[0] = parts[0].lstrip('0') or '0'
+    return '.'.join(parts)
+
 
 # ---------------------------------------------------------------------------
 # Fase 2: Modelos de dominio (contratos de fuentes)
@@ -93,7 +114,7 @@ class StatusUpdateRequest(BaseModel):
 
 class WatchedToggleRequest(BaseModel):
     content_ref: str
-    chapter: int
+    chapter: str
 
 
 class ProgressRequest(BaseModel):
@@ -110,7 +131,7 @@ class DeleteWatchedRequest(BaseModel):
 class DeleteChapterRequest(BaseModel):
     content_ref: str
     type: str
-    chapter: int
+    chapter: str
 
 
 class AcknowledgeUpdatesRequest(BaseModel):
@@ -178,6 +199,9 @@ class ScraperConfigSchema(BaseModel):
     catalog_max_pages: int = 100
     catalog_cache_ttl: int = 259200
 
+    content_extra_attrs: list[str] = []
+    content_detected_pattern: str = ''
+
     extra_headers: dict = {}
     extra_cookies: dict = {}
     use_cloudscraper: bool = False
@@ -195,4 +219,4 @@ class DownloadJob(BaseModel):
     type: str
     title: str
     chapter_id: Optional[str] = None
-    excluded_chapters: list[int] = []
+    excluded_chapters: list[str] = []

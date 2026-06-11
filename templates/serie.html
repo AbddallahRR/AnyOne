@@ -129,9 +129,5 @@
     this.classList.toggle('expanded');
   });
 
-  // ── Stagger chapters when rendered ──────────────────────────────────
-  new MutationObserver(() => {
-    window.animateCards('#chapters-list', '.chapter-pill');
-  }).observe(document.getElementById('chapters-list'), { childList: true });
 </script>
 {% endblock %}

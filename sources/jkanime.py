@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup
 
 from core.disk_cache import search_cache
 from core.http_pool import HttpPool
-from core.models import Chapter, EpisodeLink, EpisodeLinks, SearchResult, SeriesDetails
+from core.models import Chapter, EpisodeLink, EpisodeLinks, SearchResult, SeriesDetails, chapter_to_filename
 from core.throttle import rate_limiter
 
 from . import BaseSource
@@ -550,12 +550,6 @@ class JkanimeSource(BaseSource):
         for ep in data.get('data', []):
             num = ep.get('number')
             if num is not None:
-                try:
-                    if float(num) != int(float(num)):
-                        logger.debug(f"Jkanime: ignorando capítulo decimal {num!r} en '{content_id}'")
-                        continue
-                except (ValueError, TypeError):
-                    pass
                 chapters.append(Chapter(number=str(num), id=str(num)))
 
         for page in range(2, last_page + 1):
@@ -572,15 +566,9 @@ class JkanimeSource(BaseSource):
             for ep in page_data.get('data', []):
                 num = ep.get('number')
                 if num is not None:
-                    try:
-                        if float(num) != int(float(num)):
-                            logger.debug(f"Jkanime: ignorando capítulo decimal {num!r} en '{content_id}'")
-                            continue
-                    except (ValueError, TypeError):
-                        pass
                     chapters.append(Chapter(number=str(num), id=str(num)))
 
-        chapters.sort(key=lambda x: int(x.number))
+        chapters.sort(key=lambda x: float(x.number))
         logger.info(f"Jkanime: {len(chapters)} capítulos para '{content_id}' (paginado)")
         search_cache.set(cache_key, [c.model_dump() for c in chapters])
         return chapters
@@ -602,9 +590,9 @@ class JkanimeSource(BaseSource):
             if s['server'] in _SERVER_PRIORITY else len(_SERVER_PRIORITY)
         ))
 
-        # Ruta de destino común — usar float primero para soportar decimales (ej. "12.5")
-        cap_num  = int(float(chapter_id)) if chapter_id.replace('.', '', 1).isdigit() else 0
-        filename = f"{content_id}_{cap_num:03d}.mp4"
+        # Ruta de destino común
+        cap_num  = chapter_to_filename(chapter_id, padding=3) if chapter_id.replace('.', '', 1).isdigit() else chapter_id
+        filename = f"{content_id}_{cap_num}.mp4"
         filepath = os.path.join(dest_folder, filename)
         os.makedirs(dest_folder, exist_ok=True)
 

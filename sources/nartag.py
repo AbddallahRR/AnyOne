@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup
 
 from core.disk_cache import search_cache
 from core.http_pool import HttpPool
-from core.models import Chapter, SearchResult, SeriesDetails
+from core.models import Chapter, SearchResult, SeriesDetails, chapter_to_filename
 from core.throttle import rate_limiter
 
 from . import BaseSource
@@ -362,12 +362,6 @@ class NartagSource(BaseSource):
         for slug in sorted(cap_slugs, key=_extract_num):
             m      = re.search(r'capitulo-(\d+(?:\.\d+)?)', slug)
             number = m.group(1) if m else slug
-            try:
-                if float(number) != int(float(number)):
-                    logger.debug(f"Nartag: ignorando capítulo decimal {number!r} en '{content_id}'")
-                    continue
-            except (ValueError, TypeError):
-                pass
             chapters.append({'number': number, 'id': slug})
 
         search_cache.set(cache_key, chapters)
@@ -392,7 +386,7 @@ class NartagSource(BaseSource):
         m       = re.search(r'capitulo-(\d+(?:\.\d+)?)', chapter_id)
         cap_num = m.group(1) if m else chapter_id
         dir_name = (
-            f"cap_{int(float(cap_num)):04d}"
+            f"cap_{chapter_to_filename(cap_num)}"
             if cap_num.replace('.', '', 1).isdigit()
             else f"cap_{cap_num}"
         )

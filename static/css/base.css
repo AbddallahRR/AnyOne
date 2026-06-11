@@ -490,26 +490,6 @@ select.input-field {
   .modal-header h3 { font-size: 15px; }
 }
 
-/* ── Download indicator (queue) ── */
-.download-indicator {
-  position: fixed;
-  top: 14px; right: 14px;
-  background: rgba(13,13,20,0.9);
-  color: var(--text);
-  border: 1px solid var(--border-hi);
-  border-radius: 12px;
-  padding: 7px 14px;
-  font-size: 12px;
-  z-index: 10000;
-  cursor: pointer;
-  backdrop-filter: blur(14px);
-  box-shadow: 0 4px 24px rgba(0,0,0,0.4);
-  transition: opacity 0.25s ease, transform 0.25s ease;
-}
-.download-indicator.hidden { opacity: 0; pointer-events: none; transform: translateY(-8px); display: flex; }
-.download-indicator .indicator-inner { display: flex; align-items: center; gap: 7px; }
-.download-indicator i { font-size: 13px; color: var(--accent); }
-
 .queue-progress-bar { transition: width 0.4s cubic-bezier(0.4,0,0.2,1); }
 
 /* ── Confirm Dialog ── */

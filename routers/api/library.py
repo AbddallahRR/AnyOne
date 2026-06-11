@@ -1,4 +1,5 @@
 import logging
+import re
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -6,7 +7,9 @@ from fastapi import HTTPException
 from core.database import (
     clear_series_updates,
     delete_watched_chapter,
+    delete_watched_chapters_batch,
     get_all_series_statuses,
+    get_conn,
     get_content_ref,
     get_progress,
     get_series_status,
@@ -24,7 +27,9 @@ from core.models import (
     ProgressRequest,
     StatusUpdateRequest,
     WatchedToggleRequest,
+    parse_chapter_from_filename,
 )
+from core.download_worker import is_downloading
 from core.utils import scan_downloaded_series
 
 from . import api_router
@@ -112,7 +117,6 @@ def api_delete_watched(data: DeleteWatchedRequest):
     _require_local(data.content_ref)
 
     last_chapter_str, _ = get_progress(data.content_ref)
-    last_chapter = int(last_chapter_str) if last_chapter_str else 0
 
     watched = get_watched_chapters(data.content_ref)
     if not watched:
@@ -124,17 +128,25 @@ def api_delete_watched(data: DeleteWatchedRequest):
         raise HTTPException(status_code=404, detail='Carpeta no encontrada')
 
     deleted = []
+    skipped = []
     for chap in watched:
-        if chap == last_chapter:
+        if chap == last_chapter_str:
+            continue
+        if is_downloading(str(serie_path), chap):
+            skipped.append(chap)
             continue
         try:
             _delete_chapter_files(serie_path, data.type, chap)
-            delete_watched_chapter(data.content_ref, chap)
             deleted.append(chap)
         except Exception as exc:
             logger.exception(f"Error borrando capítulo {chap} de '{data.content_ref}': {exc}")
+    if deleted:
+        delete_watched_chapters_batch(data.content_ref, deleted)
 
-    return {'deleted': deleted, 'message': f'Se eliminaron {len(deleted)} capítulos vistos'}
+    msg = f'Se eliminaron {len(deleted)} capítulos vistos'
+    if skipped:
+        msg += f', {len(skipped)} omitidos por estar en descarga'
+    return {'deleted': deleted, 'skipped': skipped, 'message': msg}
 
 
 @api_router.post('/delete-chapter')
@@ -146,6 +158,9 @@ def api_delete_chapter(data: DeleteChapterRequest):
     if not serie_path.exists():
         raise HTTPException(status_code=404, detail='Carpeta no encontrada')
 
+    if is_downloading(str(serie_path), data.chapter):
+        raise HTTPException(status_code=409, detail='Capítulo en descarga, no se puede borrar')
+
     try:
         _delete_chapter_files(serie_path, data.type, data.chapter)
     except Exception as exc:
@@ -153,15 +168,20 @@ def api_delete_chapter(data: DeleteChapterRequest):
 
     last_chapter_str, _ = get_progress(data.content_ref)
     try:
-        if int(last_chapter_str) == data.chapter:
+        if last_chapter_str == data.chapter:
             if data.type == 'anime':
-                remaining = sorted(int(f.stem.split('_')[-1]) for f in serie_path.glob("*.mp4"))
-            else:
                 remaining = sorted(
-                    int(d.name[4:]) for d in serie_path.iterdir()
-                    if d.is_dir() and d.name.startswith('cap_')
+                    (parse_chapter_from_filename(f.stem) or '0') for f in serie_path.glob("*.mp4")
                 )
-            new_last = str(max(remaining)) if remaining else '1'
+            else:
+                remaining = []
+                for d in serie_path.iterdir():
+                    if d.is_dir() and d.name.startswith('cap_'):
+                        m = re.search(r'cap_([\d._]+)', d.name)
+                        if m:
+                            remaining.append(m.group(1).replace('_', '.'))
+                remaining.sort(key=lambda x: float(x) if x.replace('.', '', 1).isdigit() else 0)
+            new_last = str(max(remaining, key=lambda x: float(x) if x.replace('.', '', 1).isdigit() else 0)) if remaining else '1'
             save_progress(data.content_ref, new_last, '0')
     except Exception as exc:
         logger.warning(f"No se pudo actualizar progreso tras eliminar capítulo {data.chapter}: {exc}")
@@ -172,16 +192,29 @@ def api_delete_chapter(data: DeleteChapterRequest):
 @api_router.get('/library/updates')
 def api_library_updates():
     series = get_series_with_updates()
+    if not series:
+        return {'total': 0, 'series': []}
+
+    refs = [s['content_ref'] for s in series]
+    conn = get_conn()
+    placeholders = ','.join('?' * len(refs))
+    rows = conn.execute(
+        f"SELECT id, title FROM content WHERE id IN ({placeholders})", refs
+    ).fetchall()
+    title_map = {r[0]: r[1] for r in rows}
+
     results = []
     for s in series:
-        parts = s['content_ref'].split(':', 1)
-        if len(parts) == 2:
-            source_name, content_id = parts
-            title = _resolve_series_title(source_name, content_id)
-        else:
-            title = s['content_ref']
+        ref = s['content_ref']
+        title = title_map.get(ref)
+        if not title:
+            parts = ref.split(':', 1)
+            if len(parts) == 2:
+                title = _resolve_series_title(parts[0], parts[1])
+            else:
+                title = ref
         results.append({
-            'content_ref': s['content_ref'],
+            'content_ref': ref,
             'title': title,
             'new_chapters': s['new_chapters'],
         })

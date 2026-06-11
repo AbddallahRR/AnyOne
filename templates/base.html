@@ -51,10 +51,11 @@
       setTimeout(() => m.classList.add('hidden'), 250);
     };
 
-    /* ── Animate cards with IntersectionObserver ── */
+    /* ── Animate cards with IntersectionObserver (reuses/disconnects per container) ── */
     window.animateCards = function(containerSelector, itemSelector) {
       const container = document.querySelector(containerSelector);
       if (!container) return;
+      if (container._cardsObserver) container._cardsObserver.disconnect();
       const items = container.querySelectorAll(itemSelector || '.media-card-wrapper, .chapter-pill');
       const observer = new IntersectionObserver((entries) => {
         entries.forEach(entry => {
@@ -68,6 +69,7 @@
         el.style.transitionDelay = `${Math.min(i * 30, 380)}ms`;
         observer.observe(el);
       });
+      container._cardsObserver = observer;
     };
   </script>
 </body>

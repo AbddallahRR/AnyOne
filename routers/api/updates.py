@@ -46,17 +46,32 @@ def _check_series_for_new_chapters(content_ref: str) -> dict:
             return {'content_ref': content_ref, 'new_chapters': [], 'error': f"Fuente '{source_name}' no disponible"}
 
         remote_chapters = src.get_chapters_sync(content_id)
-        remote_nums = {int(float(ch.number)) for ch in remote_chapters}
 
         if content_type == 'anime':
             local_list = _local_chapters_anime(local_dir)
         else:
             local_list = _local_chapters_manga(local_dir)
-        local_nums = {int(float(ch['number'])) for ch in local_list}
+        local_nums = {str(ch['number']) for ch in local_list}
 
-        new_nums = sorted(remote_nums - local_nums)
+        max_local: float | None = None
+        for ch in local_list:
+            n = ch['number']
+            if n.replace('.', '', 1).isdigit():
+                f = float(n)
+                if max_local is None or f > max_local:
+                    max_local = f
 
-        remote_by_num = {int(float(ch.number)): ch.id for ch in remote_chapters}
+        if max_local is not None:
+            new_chs = [ch for ch in remote_chapters
+                       if ch.number.replace('.', '', 1).isdigit()
+                       and float(ch.number) > max_local]
+        else:
+            new_chs = [ch for ch in remote_chapters
+                       if ch.number not in local_nums]
+
+        new_nums = sorted({ch.number for ch in new_chs},
+                          key=lambda x: float(x) if x.replace('.', '', 1).isdigit() else 0)
+        remote_by_num = {ch.number: ch.id for ch in new_chs}
         new_chapter_ids = [remote_by_num[n] for n in new_nums if n in remote_by_num]
 
         mark_series_checked(content_ref)
@@ -66,8 +81,8 @@ def _check_series_for_new_chapters(content_ref: str) -> dict:
             'content_ref': content_ref,
             'new_chapters': new_nums,
             'new_chapter_ids': new_chapter_ids,
-            'total_remote': len(remote_nums),
-            'total_local': len(local_nums),
+            'total_remote': len(remote_chapters),
+            'total_local': len(local_list),
             'error': None,
         }
 

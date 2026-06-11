@@ -154,11 +154,17 @@ Define todos los contratos de datos del proyecto usando Pydantic v2:
 - `WatchedToggleRequest`, `ProgressRequest`, `DeleteWatchedRequest`, `DeleteChapterRequest`
 - `AcknowledgeUpdatesRequest`, `SearchQuery`
 
+Nota: los campos `chapter` en `WatchedToggleRequest` y `DeleteChapterRequest`, y `excluded_chapters` en `DownloadJob` son de tipo `str` para soportar capítulos decimales (ej. `"5.5"`).
+
 **Modelos de scrapers dinámicos:**
 - `ScraperConfigSchema` — schema de configuración de scrapers dinámicos con campos para búsqueda (`search_url_template`, `search_result_selector`, etc.), detalles, capítulos, contenido (`content_type`, `content_image_selector`, `content_image_attr`, `content_video_selector`) y catálogo (`has_catalog`, `catalog_url_template`, `catalog_item_selector`, `catalog_max_pages`, `catalog_cache_ttl`, etc.)
 
 **Modelos internos:**
 - `DownloadJob` — job tipado para la cola de descarga
+
+**Helpers de capítulos decimales:**
+- `chapter_to_filename(chapter: str, padding: int = 4)` — convierte `"5.5"` → `"0005_5"` para nombres de archivo/carpeta
+- `parse_chapter_from_filename(filename: str)` — extrae `"5.5"` de `"serie_005_5.mp4"` o `"serie_005.mp4"` (compatible con enteros)
 
 Todos los endpoints usan `_parse_json_body(modelo)` que lanza `ValidationError`
 ante datos inválidos. El error handler global en `app.py` lo captura y retorna
@@ -249,7 +255,7 @@ Todos los endpoints son `async def` y hacen `await` a los métodos async de las 
 - `GET /api/chapters/local/<type>/<id>` — capítulos locales en disco
 - `GET /api/local-cover/<type>/<path:filename>` — sirve portada local (soporta `?thumb=1` para thumbnail WebP, con `Cache-Control` y `ETag` para caché HTTP)
 - `GET /api/play/<type>/<source>/<id>/<chapter>` — sirve video local (legacy)
-- `GET /api/play/local/<type>/<id>/<chapter>` — reproducción local (path traversal safe)
+- `GET /api/play/local/<type>/<id>/<chapter>` — reproducción local, soporta `chapter` como string para decimales (busca archivos con `_` como separador decimal, ej. `serie_005_5.mp4`)
 - `GET /api/play/remote/<type>/<source>/<id>/<chapter>` — streaming remoto: anime → redirect 307 a CDN, manga → JSON con URLs de imágenes
 - `GET /api/manga/images/<path:subpath>` — imágenes de manga (con `Cache-Control: max-age=86400` y `ETag` para 304 Not Modified)
 - `GET /api/video-duration/anime/<id>/<chapter>` — duración del video con ffprobe (cached 24 h)
@@ -264,8 +270,8 @@ Todos los endpoints son `async def` y hacen `await` a los métodos async de las 
 - `POST /api/watched` — marca capítulo visto
 - `GET /api/watched/<ref>` — lista de capítulos vistos
 - `POST /api/watched/toggle` — marca/desmarca
-- `POST /api/delete-watched` — elimina del disco capítulos vistos (excepto el último)
-- `POST /api/delete-chapter` — elimina un capítulo individual, retrocede progreso si era el último
+- `POST /api/delete-watched` — elimina del disco capítulos vistos (excepto el último). Salta capítulos en descarga activa (devuelve lista `skipped`) gracias al lock de `download_worker.py`
+- `POST /api/delete-chapter` — elimina un capítulo individual, retrocede progreso si era el último. Rechaza con 409 si el capítulo está siendo descargado
 - `GET /api/library/updates` — series con capítulos nuevos pendientes
 - `POST /api/library/acknowledge-updates` — limpia flag de novedades
 
@@ -286,7 +292,7 @@ Todos los endpoints son `async def` y hacen `await` a los métodos async de las 
 
 - `POST /api/library/check-updates/<ref>` — comprueba capítulos nuevos para una serie
 - `POST /api/library/check-all-updates` — comprueba todas las series en paralelo (max 4 workers)
-- `_check_series_for_new_chapters(ref)` — lógica central: compara capítulos remotos vs locales
+- `_check_series_for_new_chapters(ref)` — lógica central: obtiene capítulos remotos después del máximo capítulo local (optimización: no descarga toda la lista remota si ya tienes hasta el capítulo 50, solo pide los posteriores)
 - `_check_all_updates_core()` — wrapper sin dependencia Flask, reutilizado por el scheduler en `app.py`
 
 ---
@@ -324,8 +330,11 @@ El auto-detect funciona en 3 etapas (`search`, `details`, `chapters`) y devuelve
 
 Conexión por hilo (`threading.local()`) con WAL mode.
 
-**Migraciones versionadas** (versión actual: 6):
+**Migraciones versionadas** (versión actual: 9):
 - Tablas: `content`, `user_progress`, `download_queue`, `watched_chapters`, `series_status`, `schema_version`, `source_settings`
+- Migración #7: cambia `watched_chapters.chapter_number` de INTEGER a TEXT para soportar capítulos decimales (ej. 5.5)
+- Migración #8: elimina tablas/columnas huérfanas tras migración #7
+- Migración #9: índices `idx_queue_content_ref_status`, `idx_queue_status_created`, `idx_series_status_check`, `idx_series_status_updates` para eliminar full scans
 
 **Operaciones:**
 - `init_db()` — crea esquema y aplica migraciones
@@ -383,6 +392,11 @@ Cada worker:
 
 **Fix aplicado:** se eliminó el `try/except` que importaba `DOWNLOAD_NUM_WORKERS` con fallback a 3,
 ya que `config.py` ahora exporta correctamente la variable desde `core/settings.py`.
+
+**Lock de descargas activas:** `_downloading_chapters: dict[str, set[str]]` mapea serie → conjunto de capítulos
+en descarga. Funciones thread-safe `mark_downloading(series_folder, chapter)`, `unmark_downloading(...)`,
+`is_downloading(...)` previenen que `api_delete_watched` y `api_delete_chapter` eliminen archivos
+mientras el worker los está escribiendo. El lock es en memoria y se pierde al reiniciar.
 
 ---
 
@@ -504,6 +518,11 @@ sobrescribe a `True`. `DynamicSource` retorna `True` solo si `content_type == 'v
 Usado por `routers/pages.py` para decidir si mostrar el botón "Reproducir" en la
 página de serie para fuentes no locales.
 
+**Soporte de capítulos decimales:**
+- Todas las fuentes usan `chapter_to_filename(chapter.number)` para nombres de carpeta/archivo en vez de `int(float(...))`, permitiendo capítulos como `"5.5"` que se guardan como `0005_5`
+- Se eliminó el filtro `float(num) != int(float(num))` que descartaba capítulos decimales en ikigai, nartag, manhwaweb y jkanime
+- jkanime corrigió su clave de ordenamiento de `int(x.number)` a `float(x.number)`
+
 **Uso:**
 - La API FastAPI (async) llama a los métodos async (`await source.search(...)`)
 - Los download workers (hilos) llaman a los métodos sync (`source.search_sync(...)`)
@@ -616,7 +635,7 @@ El proyecto usa **build en dos modos**:
 ### JavaScript
 
 - **`app.js`**: tabs (Anime/Manga), búsqueda, biblioteca con filtros por estado, notificaciones toast, popup de estado, configuración de fuentes (icono engranaje → popup con checkboxes para activar/desactivar fuentes)
-- **`serie.js`**: carga de capítulos, descarga individual/completa, marcado como visto (watched), detección de actualizaciones. Progreso visible tanto para contenido local como remoto (ya no se oculta la sección de progreso para `source !== 'local'`). Botón "Continuar" navega a la URL correcta según la fuente. Determina si mostrar botón "Reproducir en streaming" mediante `window.serieData.canStream` (enviado desde `routers/pages.py`), eliminando la whitelist hardcodeada `STREAMABLE_SOURCES`.
+- **`serie.js`**: carga de capítulos, descarga individual/completa, marcado como visto (watched), detección de actualizaciones. Progreso visible tanto para contenido local como remoto (ya no se oculta la sección de progreso para `source !== 'local'`). Botón "Continuar" navega a la URL correcta según la fuente, y se muestra también para series remotas (no solo locales). Determina si mostrar botón "Reproducir en streaming" mediante `window.serieData.canStream` (enviado desde `routers/pages.py`), eliminando la whitelist hardcodeada `STREAMABLE_SOURCES`. Usa `classList.remove('hidden')` en vez de `style.display` para mostrar/ocultar botones (CSS define `.hidden` con `!important`).
 - **`reader.js`**: reproductor de video con guardado de progreso cada 5s, visor de manga con scroll virtual, atajos de teclado, precarga proactiva de imágenes (`_prefetchNextBatch`) — carga hasta 3 imágenes más allá de la ventana actual con `new Image()` y delay progresivo de 200ms. Guarda progreso en BD tanto para contenido local como remoto mediante `POST /api/progress/{type}/{source}/{content_id}`.
 - **`settings.js`**: wizard de 6 pasos para crear/editar scrapers dinámicos. Incluye: campos de texto de muestra + botón "Detectar" por cada paso (usa `detectByText()` que llama a `/api/scraper-configs/detect-selectors`), toggle de catálogo con campos específicos, `getCatalogConfig()`, `toggleCatalogSection()`. Maneja la creación, edición y guardado de configuraciones.
 - **`queue-indicator.js`**: indicador flotante de descargas activas con popup de progreso. Usa `fa-arrow-down` en vez de `fa-arrow-down-to-line` (no existente en FA6).
@@ -654,7 +673,7 @@ Usuario hace clic en "Descargar serie completa"
 Scheduler (daemon thread, cada 24h):
   → POST /api/library/check-all-updates
     → api/updates.py consulta series con status 'watching'/'completed'
-    → Por cada serie: compara capítulos remotos vs locales
+    → Por cada serie: obtiene solo capítulos remotos posteriores al máximo local (optimización)
     → Si hay nuevos: guarda en series_status.new_chapters_found
     → El frontend muestra badge en la serie
 ```

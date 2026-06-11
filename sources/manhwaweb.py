@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup
 
 from core.disk_cache import search_cache
 from core.http_pool import HttpPool
-from core.models import Chapter, SearchResult, SeriesDetails
+from core.models import Chapter, SearchResult, SeriesDetails, chapter_to_filename
 from core.throttle import rate_limiter
 
 from . import BaseSource
@@ -116,19 +116,10 @@ class ManhwawebSource(BaseSource):
 
     @staticmethod
     def _dedup_sort_chapters(chapters: list[dict]) -> list[dict]:
-        """Elimina duplicados por número, filtra decimales y ordena ascendentemente."""
         seen: set[str] = set()
         result: list[dict] = []
-        _log = logging.getLogger(__name__)
         for ch in chapters:
             num = ch['number']
-            san = num.replace('_', '')
-            try:
-                if float(san) != int(float(san)):
-                    _log.debug(f"ManhwaWeb: ignorando capítulo decimal {num!r}")
-                    continue
-            except (ValueError, TypeError):
-                pass
             if num not in seen:
                 seen.add(num)
                 result.append(ch)
@@ -424,7 +415,7 @@ class ManhwawebSource(BaseSource):
         if '_' in num:
             dir_name = f"cap_{num}"
         elif num.replace('.', '', 1).isdigit():
-            dir_name = f"cap_{int(float(num)):04d}"
+            dir_name = f"cap_{chapter_to_filename(num)}"
         else:
             dir_name = f"cap_{num}"
         cap_dir     = os.path.join(dest_folder, dir_name)

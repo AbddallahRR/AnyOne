@@ -4,6 +4,18 @@
   let _wizardData = {};
   let _editingName = null;
   let _currentStep = 1;
+  let _isSaving = false;
+
+  const STORAGE_KEY = 'anyone_wizard_draft';
+  const REQUIRED_FIELDS = {
+    1: ['wiz-name', 'wiz-label', 'wiz-base-url'],
+    2: () => $('wiz-has-catalog').checked
+      ? ['wiz-catalog-url']
+      : ['wiz-search-url'],
+    3: ['wiz-details-url'],
+    4: ['wiz-chapters-url'],
+    5: ['wiz-content-url'],
+  };
 
   const $ = id => document.getElementById(id);
   const sourcesList = $('sources-list');
@@ -22,15 +34,25 @@
   async function loadSources() {
     sourcesList.innerHTML = '<div class="loading-spinner"></div>';
     try {
-      const res = await fetch('/api/scraper-configs');
-      const configs = await res.json();
-      renderSources(configs);
+      const [configsRes, healthRes] = await Promise.all([
+        fetch('/api/scraper-configs'),
+        fetch('/api/scraper-health').catch(() => ({ json: () => ({}) })),
+      ]);
+      const configs = await configsRes.json();
+      const healthData = await healthRes.json();
+      const healthMap = {};
+      if (healthData && typeof healthData === 'object') {
+        for (const [name, status] of Object.entries(healthData)) {
+          healthMap[name] = status;
+        }
+      }
+      renderSources(configs, healthMap);
     } catch (err) {
       sourcesList.innerHTML = `<p style="color:var(--danger);font-size:13px;">Error: ${err.message}</p>`;
     }
   }
 
-  function renderSources(configs) {
+  function renderSources(configs, healthMap) {
     if (!configs.length) {
       sourcesList.innerHTML = '<p style="color:var(--muted);font-size:13px;">No hay fuentes configuradas.</p>';
       return;
@@ -38,9 +60,19 @@
     sourcesList.innerHTML = configs.map(cfg => {
       const isBuiltIn = cfg.built_in;
       const typeIcon = cfg.type === 'anime' ? 'fa-film' : 'fa-book';
+      const health = healthMap && healthMap[cfg.name];
+      let healthIcon = '<span class="health-dot health-unknown" title="Estado desconocido">◌</span>';
+      if (health) {
+        const failures = health.failures || 0;
+        const disabled = health.disabled || false;
+        if (disabled) healthIcon = '<span class="health-dot health-bad" title="Deshabilitada por errores">●</span>';
+        else if (failures >= 2) healthIcon = '<span class="health-dot health-warn" title="Errores recientes">●</span>';
+        else healthIcon = '<span class="health-dot health-good" title="Funcionando">●</span>';
+      }
       return `
         <div class="source-card${isBuiltIn ? ' built-in' : ''}" data-name="${cfg.name}">
           <div class="source-icon ${cfg.type}"><i class="fas ${typeIcon}"></i></div>
+          ${healthIcon}
           <div class="source-info">
             <span class="source-label">${cfg.label}</span>
             <span class="source-meta">
@@ -131,6 +163,9 @@
               <button class="btn-icon edit-btn" title="Editar" data-name="${c.name}">
                 <i class="fas fa-pen"></i>
               </button>
+              <button class="btn-icon duplicate-btn" title="Duplicar" data-name="${c.name}">
+                <i class="fas fa-copy"></i>
+              </button>
               <button class="btn-icon danger delete-btn" title="Eliminar" data-name="${c.name}">
                 <i class="fas fa-trash-alt"></i>
               </button>
@@ -140,6 +175,9 @@
 
       dynamicList.querySelectorAll('.edit-btn').forEach(btn => {
         btn.addEventListener('click', () => openWizardFor(btn.dataset.name));
+      });
+      dynamicList.querySelectorAll('.duplicate-btn').forEach(btn => {
+        btn.addEventListener('click', () => openWizardFor(btn.dataset.name, true));
       });
       dynamicList.querySelectorAll('.delete-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
@@ -164,11 +202,11 @@
     }
   }
 
-  async function openWizardFor(name) {
+  async function openWizardFor(name, duplicate = false) {
     _editingName = name;
     _currentStep = 1;
 
-    if (name) {
+    if (name && !duplicate) {
       const cfg = await fetchConfig(name);
       if (!cfg) return;
 
@@ -190,7 +228,47 @@
       $('wiz-label').value = cfg.label;
       $('wiz-base-url').value = cfg.base_url;
       fillWizardFromData(_wizardData);
+    } else if (name && duplicate) {
+      const cfg = await fetchConfig(name);
+      if (!cfg) return;
+      _editingName = null;
+      _wizardData = JSON.parse(JSON.stringify(cfg.config || {}));
+      $('wiz-type').value = cfg.type;
+      $('wiz-name').value = '';
+      $('wiz-name').readOnly = false;
+      $('wiz-label').value = `${cfg.label} (copia)`;
+      $('wiz-base-url').value = cfg.base_url;
+      fillWizardFromData(_wizardData);
     } else {
+      // Check for draft restore
+      const draftName = getVal('wiz-name') || 'new';
+      const draft = restoreDraft(draftName);
+      if (draft && draft.data && Object.keys(draft.data).length > 0) {
+        const restore = await window.showConfirm(
+          'Borrador encontrado',
+          `Se encontró un borrador guardado hace ${Math.round((Date.now() - draft.savedAt) / 60000)} minutos. ¿Restaurarlo?`
+        );
+        if (restore) {
+          _wizardData = draft.data;
+          const draftCfgName = draft.editingName;
+          if (draftCfgName) {
+            _editingName = draftCfgName;
+            const cfg = await fetchConfig(draftCfgName);
+            if (cfg) {
+              $('wiz-type').value = cfg.type;
+              $('wiz-name').value = cfg.name;
+              $('wiz-name').readOnly = true;
+              $('wiz-label').value = cfg.label;
+              $('wiz-base-url').value = cfg.base_url;
+            }
+          }
+          fillWizardFromData(_wizardData);
+          showStep(draft.step || 1);
+          wizard.classList.remove('hidden');
+          wizard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          return;
+        }
+      }
       _editingName = null;
       _wizardData = {};
       resetWizard();
@@ -287,6 +365,77 @@
     return el ? el.value : '';
   }
 
+  function translateError(msg) {
+    if (!msg) return 'Ocurrió un error inesperado.';
+    if (msg.includes('502') || msg.includes('502')) {
+      return 'No se pudo conectar con el sitio. Verifica que la URL base sea correcta y que el sitio esté accesible.';
+    }
+    if (msg.includes('timeout') || msg.includes('Timeout') || msg.includes('timed out')) {
+      return 'El sitio tardó demasiado en responder. Puede estar caído o ser muy lento.';
+    }
+    if (msg.includes('Invalid CSS selector') || msg.includes('CSS selector')) {
+      return 'El selector CSS no es válido. Revisa la sintaxis (ej: .clase, #id, div > a).';
+    }
+    if (msg.includes('not found') || msg.includes('404')) {
+      return 'La página no fue encontrada (error 404). Verifica la URL.';
+    }
+    if (msg.includes('already exists') || msg.includes('ya existe')) {
+      return 'Ya existe una fuente con ese nombre. Usa un nombre diferente.';
+    }
+    if (msg.includes('Name must start with a letter')) {
+      return 'El nombre debe empezar con una letra y usar solo minúsculas, números, guiones.';
+    }
+    if (msg.includes('No se encontraron') || msg.includes('no encont')) {
+      return msg;
+    }
+    return msg;
+  }
+
+  function markField(id, valid) {
+    const el = $(id);
+    if (!el) return;
+    el.classList.toggle('field-error', !valid);
+    el.classList.toggle('field-valid', valid);
+  }
+
+  function validateStep(step) {
+    const fieldIds = typeof REQUIRED_FIELDS[step] === 'function'
+      ? REQUIRED_FIELDS[step]()
+      : REQUIRED_FIELDS[step] || [];
+    let firstInvalid = null;
+    for (const id of fieldIds) {
+      const el = $(id);
+      if (!el) continue;
+      const val = el.value.trim();
+      if (!val) {
+        markField(id, false);
+        if (!firstInvalid) firstInvalid = el;
+      } else {
+        markField(id, true);
+      }
+    }
+    if (firstInvalid) {
+      firstInvalid.focus();
+      firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      showToast('Completa todos los campos requeridos antes de continuar.', 'error');
+      return false;
+    }
+    return true;
+  }
+
+  function setLoading(btnId, loading) {
+    const btn = $(btnId);
+    if (!btn) return;
+    if (loading) {
+      btn.dataset.origHtml = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Cargando…';
+    } else {
+      btn.disabled = false;
+      btn.innerHTML = btn.dataset.origHtml || btn.innerHTML;
+    }
+  }
+
   function showStep(step) {
     _currentStep = step;
     document.querySelectorAll('.wizard-step').forEach(s => s.classList.add('hidden'));
@@ -303,15 +452,19 @@
 
   document.querySelectorAll('.wiz-next').forEach(btn => {
     btn.addEventListener('click', () => {
-      const next = parseInt(btn.dataset.next);
+      if (!validateStep(_currentStep)) return;
       collectStepData(_currentStep);
+      saveDraft();
+      const next = parseInt(btn.dataset.next);
       showStep(next);
     });
   });
 
   document.querySelectorAll('.wiz-prev').forEach(btn => {
     btn.addEventListener('click', () => {
-      showStep(parseInt(btn.dataset.prev));
+      collectStepData(_currentStep);
+      const prev = parseInt(btn.dataset.prev);
+      showStep(prev);
     });
   });
 
@@ -328,6 +481,53 @@
     const isCatalog = $('wiz-has-catalog').checked;
     $('wiz-search-section').classList.toggle('hidden', isCatalog);
     $('wiz-catalog-section').classList.toggle('hidden', !isCatalog);
+  }
+
+  function saveDraft() {
+    try {
+      const name = _editingName || getVal('wiz-name') || 'new';
+      const key = `${STORAGE_KEY}_${name}`;
+      const draft = { data: _wizardData, step: _currentStep, editingName: _editingName, savedAt: Date.now() };
+      localStorage.setItem(key, JSON.stringify(draft));
+    } catch (e) { /* ignore quota errors */ }
+  }
+
+  function restoreDraft(name) {
+    try {
+      const key = `${STORAGE_KEY}_${name || 'new'}`;
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (e) { return null; }
+  }
+
+  function clearDraft(name) {
+    try {
+      const key = `${STORAGE_KEY}_${name || 'new'}`;
+      localStorage.removeItem(key);
+    } catch (e) { /* ignore */ }
+  }
+
+  async function checkUrlReachability(url) {
+    if (!url) return;
+    const indicator = $('wiz-url-status');
+    if (!indicator) return;
+    indicator.innerHTML = '<span class="spinner" style="display:inline-block;width:12px;height:12px;"></span>';
+    try {
+      const res = await fetch('/api/scraper-configs/check-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      const data = await res.json();
+      if (data.reachable) {
+        indicator.innerHTML = '<span class="url-ok" title="Sitio accesible">✓</span>';
+      } else {
+        indicator.innerHTML = '<span class="url-err" title="Sitio no accesible">✗</span>';
+      }
+    } catch (err) {
+      indicator.innerHTML = '<span class="url-err" title="Error al verificar">✗</span>';
+    }
   }
 
   function collectStepData(step) {
@@ -400,6 +600,7 @@
       showToast('Completa la URL base y el query de prueba', 'error');
       return;
     }
+    setLoading('wiz-search-test-btn', true);
     const config = getSearchConfig();
     const results = $('wiz-search-test-results');
     results.innerHTML = '<div class="loading-spinner"></div>';
@@ -420,9 +621,16 @@
         html += '<div class="test-card-grid">';
         data.extracted.forEach(item => {
           const coverHtml = item.cover
-            ? `<img src="${item.cover}" class="test-thumb" onerror="this.style.display='none'" alt="">`
+            ? `<img src="${item.cover}" class="test-thumb" onerror="this.style.display='none'" alt="" loading="lazy">`
             : '';
-          html += `<div class="test-card-visual">${coverHtml}<div class="test-card-body"><span class="tt">${escHtml(item.title || '?')}</span><code>${escHtml(item.url || '')}</code></div></div>`;
+          // Extract content_id from URL
+          const urlParts = (item.url || '').split('/').filter(Boolean);
+          const contentId = urlParts[urlParts.length - 1] || '';
+          html += `<div class="test-card-visual">${coverHtml}<div class="test-card-body"><span class="tt">${escHtml(item.title || '?')}</span><code>${escHtml(item.url || '')}</code>`;
+          if (contentId) {
+            html += `<button class="btn-accent btn-xs use-id-btn" data-content-id="${escHtml(contentId)}" title="Usar este ID en los siguientes pasos">Usar este ID</button>`;
+          }
+          html += `</div></div>`;
         });
         html += '</div>';
       }
@@ -430,9 +638,20 @@
         html += `<details class="test-details"><summary>HTML preview</summary><pre>${escHtml(data.html_preview.substring(0, 3000))}</pre></details>`;
       }
       results.innerHTML = html;
+      // Handle "Use this ID" buttons
+      results.querySelectorAll('.use-id-btn').forEach(btn => {
+        btn.addEventListener('click', function () {
+          const cid = this.dataset.contentId;
+          $('wiz-details-test-id').value = cid;
+          $('wiz-chapters-test-id').value = cid;
+          $('wiz-content-test-chapter').focus();
+          showToast(`ID "${cid}" copiado a los pasos siguientes`, 'success');
+        });
+      });
     } catch (err) {
-      results.innerHTML = `<p style="color:var(--danger);">Error: ${err.message}</p>`;
+      results.innerHTML = `<p style="color:var(--danger);">${escHtml(translateError(err.message))}</p>`;
     }
+    setLoading('wiz-search-test-btn', false);
   });
 
   $('wiz-details-test-btn').addEventListener('click', async () => {
@@ -442,6 +661,7 @@
       showToast('Completa la URL base y el ID de contenido', 'error');
       return;
     }
+    setLoading('wiz-details-test-btn', true);
     const config = getDetailsConfig();
     const results = $('wiz-details-test-results');
     results.innerHTML = '<div class="loading-spinner"></div>';
@@ -455,7 +675,7 @@
       const data = await res.json();
       let html = `<div class="test-url"><strong>URL:</strong> <code>${escHtml(data.url)}</code></div>`;
       html += '<div class="test-details-visual">';
-      if (data.cover) html += `<div class="test-cover-wrap"><img src="${data.cover}" class="test-cover-img" onerror="this.style.display='none'" alt=""></div>`;
+      if (data.cover) html += `<div class="test-cover-wrap"><img src="${data.cover}" class="test-cover-img" onerror="this.style.display='none'" alt="" loading="lazy"></div>`;
       html += '<div class="test-details-body">';
       if (data.title) html += `<h4 class="test-details-title">${escHtml(data.title)}</h4>`;
       if (data.synopsis) html += `<p class="test-details-synopsis">${escHtml(data.synopsis.substring(0, 500))}</p>`;
@@ -465,8 +685,9 @@
       }
       results.innerHTML = html;
     } catch (err) {
-      results.innerHTML = `<p style="color:var(--danger);">Error: ${err.message}</p>`;
+      results.innerHTML = `<p style="color:var(--danger);">${escHtml(translateError(err.message))}</p>`;
     }
+    setLoading('wiz-details-test-btn', false);
   });
 
   $('wiz-chapters-test-btn').addEventListener('click', async () => {
@@ -476,6 +697,7 @@
       showToast('Completa la URL base y el ID de contenido', 'error');
       return;
     }
+    setLoading('wiz-chapters-test-btn', true);
     const config = getChaptersConfig();
     const results = $('wiz-chapters-test-results');
     results.innerHTML = '<div class="loading-spinner"></div>';
@@ -507,8 +729,9 @@
       }
       results.innerHTML = html;
     } catch (err) {
-      results.innerHTML = `<p style="color:var(--danger);">Error: ${err.message}</p>`;
+      results.innerHTML = `<p style="color:var(--danger);">${escHtml(translateError(err.message))}</p>`;
     }
+    setLoading('wiz-chapters-test-btn', false);
   });
 
   $('wiz-content-test-btn').addEventListener('click', async () => {
@@ -519,6 +742,7 @@
       showToast('Completa URL base, contenido de prueba y chapter_id', 'error');
       return;
     }
+    setLoading('wiz-content-test-btn', true);
     const config = getContentConfig();
     const results = $('wiz-content-test-results');
     results.innerHTML = '<div class="loading-spinner"></div>';
@@ -531,13 +755,38 @@
       if (!res.ok) throw new Error((await res.json()).detail || 'HTTP error');
       const data = await res.json();
       let html = `<div class="test-url"><strong>URL:</strong> <code>${escHtml(data.url)}</code></div>`;
+
+      // Show detected pattern badge
+      if (data.detected_pattern && data.detected_pattern !== 'none') {
+        const patternLabels = {
+          'regular': 'Selector CSS',
+          'noscript': '&lt;noscript&gt;',
+          'js_var': 'JavaScript',
+          'background': 'CSS background',
+          'data-src': 'data-* attrs',
+          'fallback': 'Fallback',
+        };
+        const label = patternLabels[data.detected_pattern] || data.detected_pattern;
+        html += `<div class="detect-success" style="margin-bottom:8px;"><strong>Método de detección:</strong> <code>${label}</code>`;
+        if (data.suggested_attr) {
+          html += ` &middot; <strong>Atributo:</strong> <code>${escHtml(data.suggested_attr)}</code>`;
+        }
+        html += '</div>';
+      }
+
       if (data.images && data.images.length) {
         html += `<div class="test-stat"><strong>Imágenes encontradas:</strong> ${data.images.length}</div>`;
         html += '<div class="test-image-grid">';
-        data.images.forEach((url, i) => {
-          html += `<div class="test-image-item"><img src="${url}" onerror="this.style.display='none'" alt=""><code>${escHtml(url)}</code></div>`;
+        const maxPreview = 10;
+        data.images.slice(0, maxPreview).forEach((url, i) => {
+          html += `<div class="test-image-item"><img src="${url}" onerror="this.style.display='none'" alt="" loading="lazy"><code>${escHtml(url)}</code></div>`;
         });
+        if (data.images.length > maxPreview) {
+          html += `<div class="test-more">... y ${data.images.length - maxPreview} imágenes más (solo se muestran las primeras ${maxPreview})</div>`;
+        }
         html += '</div>';
+      } else if (data.detected_pattern === 'none' || !data.images) {
+        html += '<div style="color:var(--danger);font-size:12px;padding:8px 0;">No se encontraron imágenes con ninguna estrategia. Prueba configurar el selector CSS manualmente en la sección avanzada.</div>';
       }
       if (data.video_url) {
         html += `<div class="test-card-visual" style="padding:12px;"><strong>Video URL:</strong> <code>${escHtml(data.video_url)}</code></div>`;
@@ -547,8 +796,9 @@
       }
       results.innerHTML = html;
     } catch (err) {
-      results.innerHTML = `<p style="color:var(--danger);">Error: ${err.message}</p>`;
+      results.innerHTML = `<p style="color:var(--danger);">${escHtml(translateError(err.message))}</p>`;
     }
+    setLoading('wiz-content-test-btn', false);
   });
 
   // ── Helper: fill URL templates ──
@@ -561,11 +811,12 @@
   }
 
   // ── Text-based detect helpers ──
-  async function detectByText(url, stage, text, baseUrl, resultsEl) {
+  async function detectByText(url, stage, text, baseUrl, resultsEl, btnId) {
     if (!url || !text) {
       showToast('Completa la URL y el texto de muestra', 'error');
       return;
     }
+    if (btnId) setLoading(btnId, true);
     resultsEl.innerHTML = '<div class="loading-spinner"></div>';
     try {
       const res = await fetch('/api/scraper-configs/detect-selectors', {
@@ -595,9 +846,11 @@
       resultsEl.innerHTML = html;
       return d;
     } catch (err) {
-      resultsEl.innerHTML = `<p style="color:var(--danger);">Error: ${err.message}</p>`;
+      resultsEl.innerHTML = `<p style="color:var(--danger);">${escHtml(translateError(err.message))}</p>`;
+      if (btnId) setLoading(btnId, false);
       return null;
     }
+    if (btnId) setLoading(btnId, false);
   }
 
   // ── Auto-detect search (magic wand in step 2) ──
@@ -609,6 +862,7 @@
       showToast('Completa URL base, URL de búsqueda y query de prueba', 'error');
       return;
     }
+    setLoading('wiz-search-detect-btn', true);
     const url = urlTemplate.replace('{base}', baseUrl).replace('{query}', encodeURIComponent(query)).replace('{page}', '1');
     const resultsEl = $('wiz-search-test-results');
     resultsEl.innerHTML = '<div class="loading-spinner"></div>';
@@ -647,8 +901,9 @@
         resultsEl.innerHTML = '<p style="color:var(--warning);">No se pudieron detectar selectores automáticamente. Verifica la URL de búsqueda.</p>';
       }
     } catch (err) {
-      resultsEl.innerHTML = `<p style="color:var(--danger);">Error: ${err.message}</p>`;
+      resultsEl.innerHTML = `<p style="color:var(--danger);">${escHtml(translateError(err.message))}</p>`;
     }
+    setLoading('wiz-search-detect-btn', false);
   });
 
   // ── Detect by text: Search (step 2) ──
@@ -663,7 +918,7 @@
     }
     const url = fillUrl(urlTemplate, { base: baseUrl, query: encodeURIComponent(query), page: '1' });
     const resultsEl = $('wiz-search-test-results');
-    const d = await detectByText(url, 'search', sampleText, baseUrl, resultsEl);
+    const d = await detectByText(url, 'search', sampleText, baseUrl, resultsEl, 'wiz-search-detect-text-btn');
     if (d) {
       if (d.result_selector) setVal('wiz-search-result', d.result_selector);
       if (d.title_selector) setVal('wiz-search-title', d.title_selector);
@@ -836,6 +1091,7 @@
   }
 
   $('wiz-save-btn').addEventListener('click', async () => {
+    if (_isSaving) return;
     collectStepData(5);
     const name = _editingName || getVal('wiz-name');
     const type = getVal('wiz-type');
@@ -863,23 +1119,50 @@
       ? JSON.stringify({ label, base_url: baseUrl, config })
       : JSON.stringify({ name, type, label, base_url: baseUrl, config });
 
+    _isSaving = true;
+    setLoading('wiz-save-btn', true);
     try {
       const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body });
       if (!res.ok) {
         const data = await res.json();
         throw new Error(data.detail || 'HTTP error');
       }
+      clearDraft(name);
+      clearDraft('new');
       showToast(isEdit ? 'Fuente actualizada!' : 'Fuente creada!', 'success');
       wizard.classList.add('hidden');
       _editingName = null;
       loadSources();
       loadDynamicSources();
     } catch (err) {
-      showToast(`Error: ${err.message}`, 'error');
+      showToast(translateError(err.message), 'error');
     }
+    setLoading('wiz-save-btn', false);
+    _isSaving = false;
   });
 
-  $('new-scraper-btn').addEventListener('click', () => openWizardFor(null));
+  $('new-scraper-btn').addEventListener('click', () => {
+    clearDraft('new');
+    openWizardFor(null);
+  });
+
+  // URL reachability check on blur
+  $('wiz-base-url').addEventListener('blur', () => {
+    const url = getVal('wiz-base-url').trim();
+    if (url) checkUrlReachability(url);
+  });
+
+  // Clear field validation on input
+  document.querySelectorAll('#scraper-wizard .input-field').forEach(el => {
+    el.addEventListener('input', function () {
+      this.classList.remove('field-error');
+      if (this.value.trim()) {
+        this.classList.add('field-valid');
+      } else {
+        this.classList.remove('field-valid');
+      }
+    });
+  });
 
   document.querySelector('.wiz-next[data-next="6"]').addEventListener('click', () => {
     collectStepData(5);
@@ -909,6 +1192,24 @@
     $('wiz-summary').innerHTML = items.map(([label, value]) =>
       `<div class="summary-row"><span class="summary-label">${label}</span><span class="summary-value">${value}</span></div>`
     ).join('');
+
+    // Generate stub preview
+    const className = (name || 'unnamed').split(/[-_]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('') + 'Source';
+    const stub = `# -*- coding: utf-8 -*-
+# Generated by AnyOne Scraper Generator
+# Source : ${label || 'Unknown'}
+# Base URL : ${baseUrl || ''}
+
+from .dynamic import DynamicSource
+
+
+class ${className}(DynamicSource):
+    type = '${type || 'manga'}'
+    label = '${label || ''}'
+    CONFIG_NAME = '${name || ''}'
+`;
+    const stubEl = $('wiz-stub-preview');
+    if (stubEl) stubEl.textContent = stub;
   }
 
   // ── Confirm Dialog ──

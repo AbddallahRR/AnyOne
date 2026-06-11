@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 from config import ANIME_DOWNLOAD_DIR, MANGA_DOWNLOAD_DIR
 from core.database import get_conn
+from core.models import chapter_to_filename, parse_chapter_from_filename
 from core.utils import _normalize_path_name
 
 logger = logging.getLogger(__name__)
@@ -160,10 +161,9 @@ def _find_local_serie_dir(base_dir: Path, content_id: str) -> Path | None:
 def _local_chapters_anime(serie_dir: Path) -> list[dict]:
     chapters = []
     for f in sorted(serie_dir.glob("*.mp4")):
-        m = re.search(r'_(\d+)\.mp4$', f.name)
-        if m:
-            num = int(m.group(1))
-            chapters.append({'number': num, 'id': str(num)})
+        num = parse_chapter_from_filename(f.stem)
+        if num:
+            chapters.append({'number': num, 'id': num})
     return chapters
 
 
@@ -172,19 +172,21 @@ def _local_chapters_manga(serie_dir: Path) -> list[dict]:
     for d in sorted(d for d in serie_dir.iterdir() if d.is_dir() and d.name.startswith('cap_')):
         m = re.search(r'cap_([\d._]+)', d.name)
         if m:
-            num = m.group(1)
-            parts = num.split('.')
+            raw = m.group(1).replace('_', '.')
+            parts = raw.split('.')
             parts[0] = parts[0].lstrip('0') or '0'
-            chapters.append({'number': '.'.join(parts), 'id': '.'.join(parts)})
+            num = '.'.join(parts)
+            chapters.append({'number': num, 'id': num})
     return chapters
 
 
-def _delete_chapter_files(serie_path: Path, content_type: str, chapter: int) -> None:
+def _delete_chapter_files(serie_path: Path, content_type: str, chapter: str) -> None:
+    chap_str = chapter_to_filename(chapter, padding=3 if content_type == 'anime' else 4)
     if content_type == 'anime':
-        for f in serie_path.glob(f"*_{chapter:03d}.mp4"):
+        for f in serie_path.glob(f"*_{chap_str}.mp4"):
             f.unlink()
     else:
-        cap_dir = serie_path / f"cap_{chapter:04d}"
+        cap_dir = serie_path / f"cap_{chap_str}"
         if cap_dir.exists() and cap_dir.is_dir():
             shutil.rmtree(cap_dir)
 

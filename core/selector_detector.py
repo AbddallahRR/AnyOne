@@ -3,6 +3,15 @@ import re
 
 from bs4 import BeautifulSoup, Tag
 
+from core.html_utils import (
+    ATTR_PRIORITY,
+    extract_background_images,
+    extract_from_srcset,
+    extract_images_from_noscript,
+    extract_images_from_scripts,
+    normalize_image_url,
+)
+
 logger = logging.getLogger(__name__)
 
 _CSS_CLASS_RE = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_-]*$')
@@ -329,36 +338,130 @@ def detect_selector_by_text(html: str, text: str,
     # ── content ─────────────────────────────────────────────────────────
     if stage == 'content':
         text_lower = text.lower().strip()
-        # Also try matching just the core text (before common separators like page number)
         core_text = text_lower.split(' — ')[0].split(' | ')[0].split(' – ')[0].strip()
+
+        result = {}
+        detected_pattern = None
+
+        # Strategy 1: Search regular <img> elements (with expanded attr checking)
         for img in soup.find_all('img'):
             alt = (img.get('alt', '') or '').lower()
-            src = (img.get('src', '') or '').lower()
+            src_val = (img.get('src', '') or '').lower()
             title_attr = (img.get('title', '') or '').lower()
-            data_attrs = [img.get(a, '') for a in ('data-src', 'data-lazy', 'data-original', 'data-lm-orig-src')]
-            joined_data = ' '.join(v.lower() for v in data_attrs if v)
-            if (text_lower in alt or text_lower in src or text_lower in title_attr or text_lower in joined_data
+            # Check all priority attrs
+            joined_data = ''
+            for attr_name in ATTR_PRIORITY:
+                val = img.get(attr_name, '') or ''
+                if val:
+                    joined_data += val.lower() + ' '
+            if (text_lower in alt or text_lower in src_val or text_lower in title_attr or text_lower in joined_data
                     or (core_text and (core_text in alt or core_text in title_attr or core_text in joined_data))):
-                # Determine which attribute has the actual image
-                lm_orig = img.get('data-lm-orig-src')
-                lazy_src = img.get('data-src')
-                lazy_alt = img.get('data-lazy')
-                orig = img.get('data-original')
-                if lm_orig:
-                    attr = 'data-lm-orig-src'
-                elif lazy_src and (not src or any(c in (img.get('class') or []) for c in ('page-img-lazy', 'lazy', 'lozad'))):
-                    attr = 'data-src'
-                elif orig:
-                    attr = 'data-original'
-                elif lazy_alt and not src:
-                    attr = 'data-lazy'
-                else:
-                    attr = 'src'
-                return {
+                # Pick best attribute
+                best_attr = 'src'
+                for attr_name in ATTR_PRIORITY:
+                    if img.get(attr_name):
+                        best_attr = attr_name
+                        break
+                # Try srcset for larger version
+                srcset_url = extract_from_srcset(img)
+                if srcset_url and srcset_url != img.get('src', ''):
+                    result['srcset_url'] = srcset_url
+                result.update({
                     'selector': _make_selector(img),
-                    'attr': attr,
+                    'attr': best_attr,
                     'confidence': 2.0,
-                }
+                    'detected_pattern': 'regular',
+                })
+                detected_pattern = 'regular'
+                break
+
+        # Strategy 2: Search inside <noscript> (images hidden behind JS)
+        if not result:
+            noscript_imgs = extract_images_from_noscript(soup)
+            for entry in noscript_imgs:
+                img = entry['element']
+                alt = (img.get('alt', '') or '').lower()
+                if text_lower in alt or core_text in alt:
+                    best_attr = 'src'
+                    for attr_name in ATTR_PRIORITY:
+                        if img.get(attr_name):
+                            best_attr = attr_name
+                            break
+                    result.update({
+                        'selector': _make_selector(img),
+                        'attr': best_attr,
+                        'confidence': 2.5,
+                        'detected_pattern': 'noscript',
+                    })
+                    detected_pattern = 'noscript'
+                    break
+            # If no text match in noscript, still return the first real image found
+            if not result and noscript_imgs:
+                entry = noscript_imgs[0]
+                img = entry['element']
+                best_attr = 'src'
+                for attr_name in ATTR_PRIORITY:
+                    if img.get(attr_name):
+                        best_attr = attr_name
+                        break
+                result.update({
+                    'selector': _make_selector(img),
+                    'attr': best_attr,
+                    'confidence': 1.5,
+                    'detected_pattern': 'noscript',
+                })
+                detected_pattern = 'noscript'
+
+        # Strategy 3: Extract from JS scripts
+        if not result:
+            script_urls = extract_images_from_scripts(soup, base_url)
+            if script_urls:
+                # Return first URL as reference, mark as JS-detected
+                result.update({
+                    'script_urls': script_urls[:5],
+                    'total_script_urls': len(script_urls),
+                    'confidence': 2.0,
+                    'detected_pattern': 'js_var',
+                    'attr': 'src',  # JS-extracted URLs are direct
+                })
+                detected_pattern = 'js_var'
+
+        # Strategy 4: CSS background-image
+        if not result:
+            bg_urls = extract_background_images(soup, '')
+            for url in bg_urls:
+                norm = normalize_image_url(url, base_url)
+                if norm:
+                    result.update({
+                        'selector': '[style*="background-image"]',
+                        'attr': 'style',
+                        'confidence': 1.0,
+                        'detected_pattern': 'background',
+                    })
+                    detected_pattern = 'background'
+                    break
+
+        # Strategy 5: Fallback — first <img> with a real URL (no text match needed)
+        if not result:
+            for img in soup.find_all('img'):
+                for attr_name in ATTR_PRIORITY:
+                    val = img.get(attr_name) or ''
+                    norm = normalize_image_url(val, base_url)
+                    if norm:
+                        result.update({
+                            'selector': _make_selector(img),
+                            'attr': attr_name,
+                            'confidence': 0.8,
+                            'detected_pattern': 'fallback',
+                        })
+                        detected_pattern = 'fallback'
+                        break
+                if result:
+                    break
+
+        if result:
+            result['detected_pattern'] = result.get('detected_pattern', detected_pattern or 'unknown')
+            return result
         return {}
 
     return {}
