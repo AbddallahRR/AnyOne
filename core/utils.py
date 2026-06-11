@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import threading
 import time
@@ -8,6 +9,8 @@ from pathlib import Path
 from urllib.parse import quote
 
 from config import ANIME_DOWNLOAD_DIR, MANGA_DOWNLOAD_DIR
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_title(raw_title):
@@ -32,15 +35,18 @@ def normalize_for_comparison(text):
     text = unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore').decode('ASCII')
     text = re.sub(r'[^a-z0-9]+', ' ', text)
     return re.sub(r'\s+', ' ', text).strip()
-
 _scan_cache: list | None = None
 _scan_cache_time: float = 0.0
 _scan_cache_lock = threading.Lock()
+_scan_cache_gen = 0
 _SCAN_CACHE_TTL = 300.0
 
+
 def _invalidate_scan_cache() -> None:
-    global _scan_cache
-    _scan_cache = None
+    global _scan_cache, _scan_cache_gen
+    with _scan_cache_lock:
+        _scan_cache = None
+        _scan_cache_gen += 1
 
 def _scan_series_dir(serie_dir: Path, content_type: str) -> dict | None:
     """Escanea un directorio de serie y devuelve sus metadatos, o None si no es válido."""
@@ -60,7 +66,7 @@ def _scan_series_dir(serie_dir: Path, content_type: str) -> dict | None:
             return None
         chapters = []
         for d in cap_dirs:
-            match = re.search(r'cap_([\d._]+)', d.name)
+            match = re.search(r'cap_(\d[\d._]*)', d.name)
             if match:
                 raw = match.group(1)
                 parts = raw.split('.')
@@ -108,12 +114,13 @@ def _scan_series_dir(serie_dir: Path, content_type: str) -> dict | None:
 
 
 def scan_downloaded_series():
-    global _scan_cache, _scan_cache_time
+    global _scan_cache, _scan_cache_time, _scan_cache_gen
     now = time.time()
     with _scan_cache_lock:
         if _scan_cache is not None and now - _scan_cache_time < _SCAN_CACHE_TTL:
             return _scan_cache
         _scan_cache = None  # invalidate while scanning
+        start_gen = _scan_cache_gen
 
     series = []
     futures = []
@@ -167,6 +174,7 @@ def scan_downloaded_series():
                 s['last_chapter'] = '1'
 
     with _scan_cache_lock:
-        _scan_cache = series
-        _scan_cache_time = time.time()
+        if _scan_cache_gen == start_gen:
+            _scan_cache = series
+            _scan_cache_time = time.time()
     return series
