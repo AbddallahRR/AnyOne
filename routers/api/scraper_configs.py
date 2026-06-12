@@ -341,6 +341,8 @@ async def api_test_config(request: Request):
                 elif item.name == 'a':
                     ch['url'] = item.get('href', '')
                 if ch:
+                    href = ch.get('url', '')
+                    ch['id'] = href.rstrip('/').split('/')[-1] if href else ch.get('number', '')
                     chapters.append(ch)
             extracted['chapters'] = chapters[:50]
 

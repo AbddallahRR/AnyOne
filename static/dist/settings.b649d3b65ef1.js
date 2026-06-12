@@ -809,9 +809,16 @@
       }
       if (data.chapters && data.chapters.length) {
         html += `<div class="test-stat"><strong>Capítulos encontrados:</strong> ${data.chapters.length}</div>`;
-        html += '<div class="test-chapter-table"><table><thead><tr><th>#</th><th>Número</th><th>URL</th></tr></thead><tbody>';
+        html += '<div class="test-chapter-table"><table><thead><tr><th>#</th><th>Número</th><th>URL</th><th>Acción</th></tr></thead><tbody>';
         data.chapters.slice(0, 20).forEach((ch, i) => {
-          html += `<tr><td>${i + 1}</td><td><span class="tt">${escHtml(ch.number || '?')}</span></td><td><code>${escHtml(ch.url || '')}</code></td></tr>`;
+          const chapId = ch.id || '';
+          html += `<tr><td>${i + 1}</td><td><span class="tt">${escHtml(ch.number || '?')}</span></td><td><code>${escHtml(ch.url || '')}</code></td>`;
+          if (chapId) {
+            html += `<td><button class="btn-accent btn-xs use-chapter-id-btn" data-chapter-id="${escHtml(chapId)}">Usar este ID</button></td>`;
+          } else {
+            html += '<td></td>';
+          }
+          html += '</tr>';
         });
         html += '</tbody></table></div>';
         if (data.chapters.length > 20) html += `<div class="test-more">... y ${data.chapters.length - 20} más</div>`;
@@ -822,6 +829,14 @@
         html += `<details class="test-details"><summary>HTML preview</summary><pre>${escHtml(data.html_preview.substring(0, 3000))}</pre></details>`;
       }
       results.innerHTML = html;
+      results.querySelectorAll('.use-chapter-id-btn').forEach(btn => {
+        btn.addEventListener('click', function () {
+          const cid = this.dataset.chapterId;
+          $('wiz-content-test-chapter').value = cid;
+          $('wiz-content-test-chapter').focus();
+          showToast(`ID "${cid}" copiado al paso de contenido`, 'success');
+        });
+      });
     } catch (err) {
       results.innerHTML = `<p style="color:var(--danger);">${escHtml(translateError(err.message))}</p>`;
     }
