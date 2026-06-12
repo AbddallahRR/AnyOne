@@ -2,6 +2,9 @@
 (function () {
   if (window.location.pathname.startsWith('/reader/')) return;
 
+  const HIDE_KEY = 'anyone_hide_scraper_errors';
+  function isHidden() { return localStorage.getItem(HIDE_KEY) === 'true'; }
+
   // ── Estilos ─────────────────────────────────────────────────────────────
   if (!document.getElementById('sh-styles')) {
     const style = document.createElement('style');
@@ -316,7 +319,7 @@
       const listDiv = document.getElementById('sh-list');
 
       // ── Indicador ──
-      if (hasIssues) {
+      if (hasIssues && !isHidden()) {
         const disabledCount = withErrors.filter(([_, s]) => s.temporarily_disabled).length;
         const errorCount = withErrors.length - disabledCount;
         let text = '';
@@ -361,7 +364,7 @@
                 }
               } catch (err) {
                 console.error('scraper-health: error re-enabling', err);
-                showNotification('Error al reactivar fuente', 'error');
+                if (!isHidden()) showNotification('Error al reactivar fuente', 'error');
               }
             });
           });
@@ -371,7 +374,7 @@
       }
 
       // ── Polling ──
-      if (hasIssues) {
+      if (hasIssues && !isHidden()) {
         forceUntil = Date.now() + 30000;
         scheduleNext(5000);
       } else if (Date.now() < forceUntil) {
@@ -382,7 +385,7 @@
 
     } catch (err) {
       console.error('scraper-health:', err);
-      showNotification('Error al consultar estado de fuentes', 'error');
+      if (!isHidden()) showNotification('Error al consultar estado de fuentes', 'error');
       scheduleNext(10000);
     }
   }

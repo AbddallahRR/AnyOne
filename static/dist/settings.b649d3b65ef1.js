@@ -1341,6 +1341,14 @@ class ${className}(DynamicSource):
       .replace(/"/g, '&quot;').replace(/'/g, '&#x27;');
   }
 
+  const hideErrorsToggle = $('hide-scraper-errors');
+  if (hideErrorsToggle) {
+    hideErrorsToggle.checked = localStorage.getItem('anyone_hide_scraper_errors') === 'true';
+    hideErrorsToggle.addEventListener('change', () => {
+      localStorage.setItem('anyone_hide_scraper_errors', hideErrorsToggle.checked);
+    });
+  }
+
   loadSources();
   loadDynamicSources();
 

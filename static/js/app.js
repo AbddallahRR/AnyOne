@@ -234,6 +234,7 @@
 
     es.addEventListener('source_error', e => {
       const data = JSON.parse(e.data);
+      if (localStorage.getItem('anyone_hide_scraper_errors') === 'true') return;
       const msg = data.disabled
         ? `${data.source} desactivada temporalmente: ${data.error}`
         : `${data.source}: ${data.error}`;
