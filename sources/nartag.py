@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 
 from core.disk_cache import search_cache
-from core.http_pool import HttpPool
+from core.http_pool import HTTPHTTP_TIMEOUT, HttpPool
 from core.models import Chapter, SearchResult, SeriesDetails, chapter_to_filename
 from core.throttle import rate_limiter
 
@@ -20,7 +20,7 @@ from . import BaseSource
 
 logger = logging.getLogger(__name__)
 
-_TIMEOUT = 30
+
 
 
 class NartagSource(BaseSource):
@@ -43,7 +43,7 @@ class NartagSource(BaseSource):
 
     def _get(self, url: str, **kwargs):
         rate_limiter.wait(url)
-        kwargs.setdefault('timeout', _TIMEOUT)
+        kwargs.setdefault('timeout', HTTP_TIMEOUT)
         headers = self._headers.copy()
         if 'headers' in kwargs:
             headers.update(kwargs.pop('headers'))
@@ -159,7 +159,7 @@ class NartagSource(BaseSource):
                     'Origin':       self.BASE_URL,
                     'Content-Type': 'application/x-www-form-urlencoded',
                 },
-                timeout=_TIMEOUT,
+                timeout=HTTP_TIMEOUT,
                 allow_redirects=True,
             )
             resp.raise_for_status()
@@ -186,7 +186,7 @@ class NartagSource(BaseSource):
             resp = self.scraper.get(
                 reader_url,
                 headers={**self._headers, 'Referer': referer},
-                timeout=_TIMEOUT,
+                timeout=HTTP_TIMEOUT,
             )
             resp.raise_for_status()
             html = resp.text
@@ -337,7 +337,7 @@ class NartagSource(BaseSource):
         }
         try:
             rate_limiter.wait(ajax_url)
-            resp = self.scraper.post(ajax_url, headers=headers, timeout=_TIMEOUT)
+            resp = self.scraper.post(ajax_url, headers=headers, timeout=HTTP_TIMEOUT)
             resp.raise_for_status()
             html = resp.text
         except Exception as exc:

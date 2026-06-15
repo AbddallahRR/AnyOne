@@ -17,7 +17,7 @@ from core.html_utils import (
     normalize_url,
     validate_css_selector,
 )
-from core.http_pool import HttpPool
+from core.http_pool import HTTP_TIMEOUT, HttpPool
 from core.models import ScraperConfigSchema
 from core.scraper_config import (
     create_config,
@@ -37,6 +37,14 @@ logger = logging.getLogger(__name__)
 
 def _normalize_url(url: str, base_url: str) -> str:
     return normalize_url(url, base_url)
+
+
+def _fetch_url(url: str, timeout: int = HTTP_TIMEOUT) -> str:
+    rate_limiter.wait(url)
+    scraper = HttpPool.get_scraper()
+    resp = scraper.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=timeout)
+    resp.raise_for_status()
+    return resp.text
 
 
 def _fill_template(template: str, **kwargs) -> str:
@@ -70,8 +78,6 @@ def _validate_config_selectors(config: dict) -> list[str]:
         if sel and not validate_css_selector(sel):
             errors.append(f'Invalid CSS selector for "{field}": {sel}')
     return errors
-
-_TIMEOUT = 30
 
 
 @api_router.get('/scraper-configs')
@@ -198,11 +204,7 @@ async def api_test_config(request: Request):
             raise HTTPException(status_code=400, detail='search_url_template is required')
         url = _fill_template(url_template, base=base_url, query=query, page='1')
         try:
-            rate_limiter.wait(url)
-            scraper = HttpPool.get_scraper()
-            resp = scraper.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=_TIMEOUT)
-            resp.raise_for_status()
-            html = resp.text
+            html = _fetch_url(url)
         except Exception as exc:
             logger.exception(f'Fetch error en test_search_selectors: {exc}')
             raise HTTPException(status_code=502, detail='Error al obtener la pagina de busqueda')
@@ -278,11 +280,7 @@ async def api_test_config(request: Request):
 
         url = _fill_template(url_template, base=base_url, content_id=content_id, page='1')
         try:
-            rate_limiter.wait(url)
-            scraper = HttpPool.get_scraper()
-            resp = scraper.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=_TIMEOUT)
-            resp.raise_for_status()
-            html = resp.text
+            html = _fetch_url(url)
         except Exception as exc:
             logger.exception(f'Fetch error en test_details_selectors: {exc}')
             raise HTTPException(status_code=502, detail='Error al obtener la pagina de detalles')
@@ -359,11 +357,7 @@ async def api_test_config(request: Request):
 
         url = _fill_template(tmpl, base=base_url, content_id=content_id, chapter_id=chapter_id)
         try:
-            rate_limiter.wait(url)
-            scraper = HttpPool.get_scraper()
-            resp = scraper.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=_TIMEOUT)
-            resp.raise_for_status()
-            html = resp.text
+            html = _fetch_url(url)
         except Exception as exc:
             logger.exception(f'Fetch error en test_content_selectors: {exc}')
             raise HTTPException(status_code=502, detail='Error al obtener la pagina de contenido')
@@ -522,11 +516,7 @@ async def api_auto_detect(request: Request):
         raise HTTPException(status_code=400, detail='url is required')
 
     try:
-        rate_limiter.wait(url)
-        scraper = HttpPool.get_scraper()
-        resp = scraper.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=_TIMEOUT)
-        resp.raise_for_status()
-        html = resp.text
+        html = _fetch_url(url)
     except Exception as exc:
         logger.exception(f'Fetch error en auto_detect_selectors: {exc}')
         raise HTTPException(status_code=502, detail='Error al obtener la pagina para deteccion automatica')
@@ -574,11 +564,7 @@ async def api_detect_selectors(request: Request):
     url = urlunparse((parsed.scheme, parsed.netloc, unquote(parsed.path), parsed.params, parsed.query, parsed.fragment))
 
     try:
-        rate_limiter.wait(url)
-        scraper = HttpPool.get_scraper()
-        resp = scraper.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=_TIMEOUT)
-        resp.raise_for_status()
-        html = resp.text
+        html = _fetch_url(url)
     except Exception as exc:
         logger.exception(f'Fetch error en detect_selector: {exc}')
         raise HTTPException(status_code=502, detail='Error al obtener la pagina para deteccion de selector')
@@ -614,11 +600,8 @@ async def api_auto_configure(request: Request):
 
     search_url = _fill_template(search_url_template, base=base_url, query=search_query, page='1')
     try:
-        rate_limiter.wait(search_url)
-        scraper = HttpPool.get_scraper()
-        resp = scraper.get(search_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=_TIMEOUT)
-        resp.raise_for_status()
-        suggestions = detect_search_selectors(resp.text, base_url)
+        html = _fetch_url(search_url)
+        suggestions = detect_search_selectors(html, base_url)
         if suggestions:
             best = suggestions[0]
             config['search_url_template'] = search_url_template
@@ -642,21 +625,18 @@ async def api_auto_configure(request: Request):
                 continue
             stage_url = _fill_template(stage_url_template, base=base_url, content_id=sample_content_id)
             try:
-                rate_limiter.wait(stage_url)
-                scraper = HttpPool.get_scraper()
-                resp = scraper.get(stage_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=_TIMEOUT)
-                resp.raise_for_status()
+                html = _fetch_url(stage_url)
                 if stage == 'details':
-                    result = detect_search_selectors(resp.text, base_url)
+                    result = detect_search_selectors(html, base_url)
                     # Just detect title and cover on the page
-                    soup = BeautifulSoup(resp.text, 'html.parser')
+                    soup = BeautifulSoup(html, 'html.parser')
                     for field, text_hint in [('title', body.get('sample_title', '')), ('cover', '')]:
                         if text_hint:
-                            detected = detect_selector_by_text(resp.text, text_hint, 'details', base_url)
+                            detected = detect_selector_by_text(html, text_hint, 'details', base_url)
                             if detected:
                                 config[f'details_{field}_selector'] = detected.get('selector', '')
                 else:
-                    detected = detect_selector_by_text(resp.text, body.get('sample_chapter_num', '1'), 'chapters', base_url)
+                    detected = detect_selector_by_text(html, body.get('sample_chapter_num', '1'), 'chapters', base_url)
                     if detected:
                         config['chapters_url_template'] = stage_url_template
                         if 'item_selector' in detected:

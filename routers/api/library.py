@@ -4,6 +4,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
+from core.chapter_utils import chapter_float_key, normalize_chapter_number
 from core.database import (
     clear_series_updates,
     delete_watched_chapter,
@@ -179,9 +180,9 @@ def api_delete_chapter(data: DeleteChapterRequest):
                     if d.is_dir() and d.name.startswith('cap_'):
                         m = re.search(r'cap_([\d._]+)', d.name)
                         if m:
-                            remaining.append(m.group(1).replace('_', '.'))
-                remaining.sort(key=lambda x: float(x) if x.replace('.', '', 1).isdigit() else 0)
-            new_last = str(max(remaining, key=lambda x: float(x) if x.replace('.', '', 1).isdigit() else 0)) if remaining else '1'
+                            remaining.append(normalize_chapter_number(m.group(1).replace('_', '.')))
+                remaining.sort(key=chapter_float_key)
+            new_last = str(max(remaining, key=chapter_float_key)) if remaining else '1'
             save_progress(data.content_ref, new_last, '0')
     except Exception as exc:
         logger.warning(f"No se pudo actualizar progreso tras eliminar capítulo {data.chapter}: {exc}")

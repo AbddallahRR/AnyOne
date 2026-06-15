@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 from config import ANIME_DOWNLOAD_DIR, MANGA_DOWNLOAD_DIR
 from core.database import get_conn
+from core.chapter_utils import chapter_float_key, normalize_chapter_number
 from core.models import chapter_to_filename, parse_chapter_from_filename
 from core.utils import _normalize_path_name
 
@@ -172,10 +173,7 @@ def _local_chapters_manga(serie_dir: Path) -> list[dict]:
     for d in sorted(d for d in serie_dir.iterdir() if d.is_dir() and d.name.startswith('cap_')):
         m = re.search(r'cap_([\d._]+)', d.name)
         if m:
-            raw = m.group(1).replace('_', '.')
-            parts = raw.split('.')
-            parts[0] = parts[0].lstrip('0') or '0'
-            num = '.'.join(parts)
+            num = normalize_chapter_number(m.group(1).replace('_', '.'))
             chapters.append({'number': num, 'id': num})
     return chapters
 

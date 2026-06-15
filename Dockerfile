@@ -28,10 +28,15 @@ COPY --from=builder /install /usr/local
 WORKDIR /app
 COPY . .
 
+RUN python3 scripts/build.py
+
 RUN mkdir -p /data/descargas/Anime /data/descargas/Manga /data/config
 
 ENV BASE_DOWNLOAD_DIR=/data/descargas
 ENV DB_DIR=/data/config
 
+COPY entrypoint.py /entrypoint.py
+
 EXPOSE 5000
+ENTRYPOINT ["python3", "/entrypoint.py"]
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000"]

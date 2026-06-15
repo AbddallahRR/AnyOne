@@ -2,6 +2,7 @@ import copy
 import html as _html
 import json as _json
 import logging
+import os
 import re
 from urllib.parse import urljoin, urlparse
 
@@ -342,3 +343,12 @@ def normalize_url(url: str, base_url: str) -> str:
         root = f'{parsed.scheme}://{parsed.netloc}'
         return root.rstrip('/') + '/' + url.lstrip('/')
     return urljoin(base_url.rstrip('/') + '/', url)
+
+
+def url_ext(url: str, default: str = 'jpg') -> str:
+    path = urlparse(url).path
+    ext = os.path.splitext(path)[1].lstrip('.')
+    if ext not in {'jpg', 'jpeg', 'png', 'webp'}:
+        m = re.search(r'[?&]format=(jpg|jpeg|png|webp)', url, re.I)
+        ext = m.group(1) if m else default
+    return ext

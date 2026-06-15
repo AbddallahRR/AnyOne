@@ -1,26 +1,8 @@
-import re
 from typing import Optional
 
 from pydantic import BaseModel, field_validator
 
-
-def chapter_to_filename(num: str, padding: int = 4) -> str:
-    parts = num.split('.')
-    int_part = parts[0].lstrip('0') or '0'
-    formatted = f"{int(int_part):0{padding}d}"
-    if len(parts) > 1:
-        formatted += f"_{parts[1]}"
-    return formatted
-
-
-def parse_chapter_from_filename(name: str) -> str | None:
-    m = re.search(r'(\d+(?:_\d+)?)$', name.replace('.mp4', ''))
-    if not m:
-        return None
-    raw = m.group(1).replace('_', '.')
-    parts = raw.split('.')
-    parts[0] = parts[0].lstrip('0') or '0'
-    return '.'.join(parts)
+from core.chapter_utils import chapter_to_filename, parse_chapter_from_filename  # noqa: F401
 
 
 # ---------------------------------------------------------------------------
@@ -55,9 +37,8 @@ class Chapter(BaseModel):
     @field_validator('number')
     @classmethod
     def normalize_number(cls, v: str) -> str:
-        parts = v.split('.')
-        parts[0] = parts[0].lstrip('0') or '0'
-        return '.'.join(parts)
+        from core.chapter_utils import normalize_chapter_number
+        return normalize_chapter_number(v)
 
 
 class EpisodeLink(BaseModel):

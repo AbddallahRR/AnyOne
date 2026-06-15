@@ -6,6 +6,8 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+HTTP_TIMEOUT = 30
+
 
 class HttpPool:
     _local = threading.local()

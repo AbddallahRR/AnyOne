@@ -7,12 +7,12 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from urllib.parse import urlparse
-
 from bs4 import BeautifulSoup
 
+from core.chapter_utils import chapter_float_key
 from core.disk_cache import search_cache
-from core.http_pool import HttpPool
+from core.html_utils import normalize_image_url, url_ext
+from core.http_pool import HTTP_TIMEOUT, HttpPool
 from core.models import Chapter, SearchResult, SeriesDetails, chapter_to_filename
 from core.throttle import rate_limiter
 
@@ -20,7 +20,6 @@ from . import BaseSource
 
 logger = logging.getLogger(__name__)
 
-_TIMEOUT      = 30
 _MAX_PAGES    = 500
 _CATALOG_TTL  = 60 * 60 * 24 * 3   # 3 días  — el catálogo cambia poco
 _PAGE_TTL     = 60 * 60 * 24 * 7   # 7 días  — páginas individuales, más estables
@@ -52,7 +51,7 @@ class IkigaiSource(BaseSource):
 
     def _get(self, url: str, **kwargs):
         rate_limiter.wait(url)
-        kwargs.setdefault('timeout', _TIMEOUT)
+        kwargs.setdefault('timeout', HTTP_TIMEOUT)
         extra_headers = kwargs.pop('headers', {})
         headers = {**self._headers, **extra_headers}
         resp = self.scraper.get(url, headers=headers, **kwargs)
@@ -80,31 +79,6 @@ class IkigaiSource(BaseSource):
     # -----------------------------------------------------------------------
     # URL helpers
     # -----------------------------------------------------------------------
-
-    @staticmethod
-    def _normalize_url(src: str, base_url: str) -> str | None:
-        if not src or src.startswith('data:'):
-            return None
-        if src.startswith('//'):
-            src = 'https:' + src
-        elif src.startswith('/'):
-            src = base_url + src
-        # Filtrar solo placeholders obvios, no por extensión
-        # (muchos CDNs sirven imágenes sin extensión o con params)
-        lower = src.lower()
-        if any(x in lower for x in ('loading', 'placeholder', 'blank.', 'spinner')):
-            return None
-        return src
-
-    @staticmethod
-    def _url_ext(url: str) -> str:
-        path = urlparse(url).path
-        ext  = os.path.splitext(path)[1].lstrip('.')
-        # También detectar extensión en query params (ej. ?format=webp)
-        if ext not in {'jpg', 'jpeg', 'png', 'webp'}:
-            m = re.search(r'[?&]format=(jpg|jpeg|png|webp)', url, re.I)
-            ext = m.group(1) if m else 'jpg'
-        return ext
 
     # -----------------------------------------------------------------------
     # Catálogo
@@ -220,7 +194,7 @@ class IkigaiSource(BaseSource):
                 try:
                     rate_limiter.wait(url)
                     sc   = HttpPool.get_scraper()
-                    resp = sc.get(url, headers=self._headers, timeout=_TIMEOUT)
+                    resp = sc.get(url, headers=self._headers, timeout=HTTP_TIMEOUT)
                     resp.raise_for_status()
                     soup       = BeautifulSoup(resp.text, 'html.parser')
                     items      = self._parse_page_links(soup)
@@ -438,10 +412,7 @@ class IkigaiSource(BaseSource):
             logger.warning(f"Ikigai: límite de {_MAX_PAGES} páginas alcanzado en capítulos "
                            f"de '{content_id}'")
 
-        chapters.sort(
-            key=lambda x: float(x['number'])
-            if x['number'].replace('.', '', 1).isdigit() else 0
-        )
+        chapters.sort(key=lambda x: chapter_float_key(x['number']))
         search_cache.set(cache_key, chapters)
         return [Chapter(**c) for c in chapters]
 
@@ -462,7 +433,7 @@ class IkigaiSource(BaseSource):
             src = (img.get('data-src') or img.get('data-lazy') or
                    img.get('data-original') or img.get('data-url') or
                    img.get('src'))
-            url = self._normalize_url(src, self.BASE_URL)
+            url = normalize_image_url(src, self.BASE_URL)
             if url and url not in seen:
                 seen.add(url)
                 img_urls.append(url)
@@ -472,7 +443,7 @@ class IkigaiSource(BaseSource):
             for script in soup.find_all('script', type='qwik/json'):
                 urls = re.findall(r'https://image3\.ikigaimangas\.cloud[^"\'\\\s]+\.webp', script.string or '')
                 for u in urls:
-                    norm = self._normalize_url(u, self.BASE_URL)
+                    norm = normalize_image_url(u, self.BASE_URL)
                     if norm and norm not in seen:
                         seen.add(norm)
                         img_urls.append(norm)
@@ -498,7 +469,7 @@ class IkigaiSource(BaseSource):
         dl_headers       = {**self._headers, 'Referer': cap_url}
         downloaded_count = 0
         for i, img_url in enumerate(img_urls, start=1):
-            ext      = self._url_ext(img_url)
+            ext      = url_ext(img_url)
             filepath = os.path.join(cap_dir, f"{i:04d}.{ext}")
             if os.path.exists(filepath):
                 downloaded_count += 1

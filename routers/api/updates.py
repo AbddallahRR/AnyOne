@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from config import ANIME_DOWNLOAD_DIR, MANGA_DOWNLOAD_DIR
+from core.chapter_utils import chapter_float_key
 from core.database import (
     get_series_to_check,
     mark_series_checked,
@@ -53,24 +54,17 @@ def _check_series_for_new_chapters(content_ref: str) -> dict:
             local_list = _local_chapters_manga(local_dir)
         local_nums = {str(ch['number']) for ch in local_list}
 
-        max_local: float | None = None
-        for ch in local_list:
-            n = ch['number']
-            if n.replace('.', '', 1).isdigit():
-                f = float(n)
-                if max_local is None or f > max_local:
-                    max_local = f
+        local_floats = [chapter_float_key(ch['number']) for ch in local_list]
+        max_local = max(local_floats) if local_floats else None
 
         if max_local is not None:
             new_chs = [ch for ch in remote_chapters
-                       if ch.number.replace('.', '', 1).isdigit()
-                       and float(ch.number) > max_local]
+                       if chapter_float_key(ch.number) > max_local]
         else:
             new_chs = [ch for ch in remote_chapters
                        if ch.number not in local_nums]
 
-        new_nums = sorted({ch.number for ch in new_chs},
-                          key=lambda x: float(x) if x.replace('.', '', 1).isdigit() else 0)
+        new_nums = sorted({ch.number for ch in new_chs}, key=chapter_float_key)
         remote_by_num = {ch.number: ch.id for ch in new_chs}
         new_chapter_ids = [remote_by_num[n] for n in new_nums if n in remote_by_num]
 

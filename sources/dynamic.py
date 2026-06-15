@@ -6,7 +6,7 @@ import re
 import threading
 import time
 import urllib.parse
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
@@ -19,16 +19,16 @@ from core.html_utils import (
     extract_images_from_scripts,
     extract_items_with_templates,
     normalize_image_url,
+    url_ext,
 )
-from core.http_pool import HttpPool
+from core.http_pool import HTTP_TIMEOUT, HttpPool
+from core.chapter_utils import chapter_float_key, normalize_chapter_number
 from core.models import Chapter, SearchResult, SeriesDetails, chapter_to_filename
 from core.throttle import rate_limiter
 
 from . import BaseSource
 
 logger = logging.getLogger(__name__)
-
-_TIMEOUT = 30
 
 _REFRESH_COOLDOWN = 86400  # 24 h
 _refresh_locks: dict[str, threading.Lock] = {}
@@ -116,7 +116,7 @@ class DynamicSource(BaseSource):
 
     def _get(self, url: str, **kwargs):
         rate_limiter.wait(url)
-        kwargs.setdefault('timeout', _TIMEOUT)
+        kwargs.setdefault('timeout', HTTP_TIMEOUT)
         headers = self._headers.copy()
         if 'headers' in kwargs:
             headers.update(kwargs.pop('headers'))
@@ -169,6 +169,15 @@ class DynamicSource(BaseSource):
             url = url.replace(f'{{{key}}}', str(value))
         return url
 
+    def _apply_pagination(self, url: str, param_name: str, page: int) -> str:
+        if not param_name or '{page}' in url:
+            return url
+        parsed = list(urllib.parse.urlparse(url))
+        qs = dict(urllib.parse.parse_qsl(parsed[4]))
+        qs[param_name] = str(page)
+        parsed[4] = urllib.parse.urlencode(qs)
+        return urllib.parse.urlunparse(parsed)
+
     # ── Catalog / warm cache ────────────────────────────────────────────
 
     def warm_cache_sync(self) -> None:
@@ -204,13 +213,10 @@ class DynamicSource(BaseSource):
         all_items: list[dict] = []
         page = 1
         while page <= max_pages:
-            url = self._build_url(url_template, page=str(page))
-            if pagination_param and '{page}' not in url_template:
-                parsed = list(urllib.parse.urlparse(url))
-                qs = dict(urllib.parse.parse_qsl(parsed[4]))
-                qs[pagination_param] = str(page)
-                parsed[4] = urllib.parse.urlencode(qs)
-                url = urllib.parse.urlunparse(parsed)
+            url = self._apply_pagination(
+                self._build_url(url_template, page=str(page)),
+                pagination_param, page,
+            )
             try:
                 html = self._get(url).text
             except Exception as exc:
@@ -269,7 +275,7 @@ class DynamicSource(BaseSource):
                     k, v = pair.split('=', 1)
                     data[k] = v.replace('{query}', '')
             data = {k: (v.replace('{query}', '') if isinstance(v, str) else v) for k, v in data.items()}
-            resp = self.scraper.post(url, headers=self._headers, data=data, timeout=_TIMEOUT)
+            resp = self.scraper.post(url, headers=self._headers, data=data, timeout=HTTP_TIMEOUT)
             resp.raise_for_status()
             return resp.text
         return self._get(url).text
@@ -295,13 +301,10 @@ class DynamicSource(BaseSource):
         if cfg.get('search_has_pagination'):
             part_name = cfg.get('search_pagination_param', 'page')
             for page in range(1, 101):
-                url = self._build_url(url_template, query=query, page=str(page))
-                if '{page}' not in url_template:
-                    parsed = list(urllib.parse.urlparse(url))
-                    qs = dict(urllib.parse.parse_qsl(parsed[4]))
-                    qs[part_name] = str(page)
-                    parsed[4] = urllib.parse.urlencode(qs)
-                    url = urllib.parse.urlunparse(parsed)
+                url = self._apply_pagination(
+                    self._build_url(url_template, query=query, page=str(page)),
+                    part_name, page,
+                )
                 urls.append(url)
         else:
             urls.append(self._build_url(url_template, query=query, page='1'))
@@ -453,13 +456,10 @@ class DynamicSource(BaseSource):
         all_chapters = []
         page = 1
         while True:
-            url = self._build_url(url_template, content_id=content_id, page=str(page))
-            if part_name and '{page}' not in url_template:
-                parsed = list(urllib.parse.urlparse(url))
-                qs = dict(urllib.parse.parse_qsl(parsed[4]))
-                qs[part_name] = str(page)
-                parsed[4] = urllib.parse.urlencode(qs)
-                url = urllib.parse.urlunparse(parsed)
+            url = self._apply_pagination(
+                self._build_url(url_template, content_id=content_id, page=str(page)),
+                part_name, page,
+            )
             try:
                 html = self._get(url).text
             except Exception as exc:
@@ -479,10 +479,7 @@ class DynamicSource(BaseSource):
                 if not num:
                     continue
                 nums = re.findall(r'\d+(?:\.\d+)?', num)
-                num = nums[0] if nums else num
-                parts = num.split('.')
-                parts[0] = parts[0].lstrip('0') or '0'
-                num = '.'.join(parts)
+                num = normalize_chapter_number(nums[0]) if nums else num
                 chap_id = href.rstrip('/').split('/')[-1] if href else num
                 key = (num, chap_id)
                 if key in seen:
@@ -495,7 +492,7 @@ class DynamicSource(BaseSource):
                 break
             page += 1
 
-        all_chapters.sort(key=lambda x: float(x.number) if x.number.replace('.', '', 1).isdigit() else 0)
+        all_chapters.sort(key=lambda x: chapter_float_key(x.number))
         return all_chapters
 
     def get_chapter_images_sync(self, content_id: str, chapter_id: str) -> list[str]:
@@ -532,7 +529,7 @@ class DynamicSource(BaseSource):
             for img in soup.select(img_sel):
                 src = img.get(img_attr) or img.get('src')
                 if src:
-                    _add(self._normalize_url(src))
+                    _add(normalize_image_url(src, base_url))
             if urls:
                 return urls
 
@@ -545,7 +542,7 @@ class DynamicSource(BaseSource):
                 for img in soup.select(img_sel):
                     src = img.get(attr_name) or img.get('src')
                     if src:
-                        norm = self._normalize_url(src)
+                        norm = normalize_image_url(src, base_url)
                         if norm:
                             batch.append(norm)
                 if batch:
@@ -584,7 +581,7 @@ class DynamicSource(BaseSource):
             for attr_name in ATTR_PRIORITY:
                 src = img.get(attr_name)
                 if src:
-                    norm = self._normalize_url(src)
+                    norm = normalize_image_url(src, base_url)
                     if norm:
                         _add(norm)
                         break
@@ -643,7 +640,7 @@ class DynamicSource(BaseSource):
         os.makedirs(cap_dir, exist_ok=True)
 
         for i, img_url in enumerate(img_urls, start=1):
-            ext = self._url_ext(img_url)
+            ext = url_ext(img_url)
             filepath = os.path.join(cap_dir, f"{i:04d}.{ext}")
             if os.path.exists(filepath):
                 continue
@@ -652,7 +649,7 @@ class DynamicSource(BaseSource):
                 with HttpPool.get_session().get(
                     img_url,
                     headers={**self._headers, 'Referer': self.BASE_URL},
-                    timeout=_TIMEOUT,
+                    timeout=HTTP_TIMEOUT,
                     stream=True,
                 ) as resp:
                     resp.raise_for_status()
@@ -663,25 +660,3 @@ class DynamicSource(BaseSource):
                 logger.warning(f"{self.CONFIG_NAME}: error downloading image {i}: {exc}")
 
         return cap_dir
-
-    def _normalize_url(self, src: str) -> str | None:
-        if not src or src.startswith('data:'):
-            return None
-        if src.startswith('//'):
-            src = 'https:' + src
-        elif src.startswith('/'):
-            base = self.BASE_URL.rstrip('/')
-            src = base + '/' + src.lstrip('/')
-        lower = src.lower()
-        if any(x in lower for x in ('loading', 'placeholder', 'blank.', 'spinner')):
-            return None
-        return src
-
-    @staticmethod
-    def _url_ext(url: str) -> str:
-        path = urlparse(url).path
-        ext = os.path.splitext(path)[1].lstrip('.')
-        if ext not in {'jpg', 'jpeg', 'png', 'webp'}:
-            m = re.search(r'[?&]format=(jpg|jpeg|png|webp)', url, re.I)
-            ext = m.group(1) if m else 'jpg'
-        return ext

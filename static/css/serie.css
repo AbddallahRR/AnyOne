@@ -271,3 +271,51 @@
 @media (max-width: 480px) {
   .chapters-grid { grid-template-columns: 1fr; }
 }
+
+/* ── Download progress on serie page ── */
+#serie-dl-progress {
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: rgba(124, 92, 252, 0.08);
+  border: 1px solid rgba(124, 92, 252, 0.2);
+  border-radius: var(--card-r-xs);
+}
+#serie-dl-progress.hidden {
+  display: none;
+}
+.dl-progress-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.dl-progress-info .dl-chapter-count {
+  font-weight: 600;
+  color: var(--accent-lt);
+}
+.dl-progress-bar {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.dl-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--accent), #a78bfa);
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+
+/* ── Compactar botones hero en mobile ── */
+@media (max-width: 600px) {
+  .hero-actions {
+    gap: 6px;
+  }
+  .hero-actions .btn-ghost {
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+}

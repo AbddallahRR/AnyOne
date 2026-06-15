@@ -12,7 +12,7 @@ from urllib.parse import quote as _url_quote
 from bs4 import BeautifulSoup
 
 from core.disk_cache import search_cache
-from core.http_pool import HttpPool
+from core.http_pool import HTTP_TIMEOUT, HttpPool
 from core.models import Chapter, EpisodeLink, EpisodeLinks, SearchResult, SeriesDetails, chapter_to_filename
 from core.throttle import rate_limiter
 
@@ -30,7 +30,6 @@ _SERVER_PRIORITY = [
 _STREAM_SERVERS = {'streamwish', 'voe', 'vidhide', 'mixdrop', 'streamtape', 'doodstream'}
 
 # Timeouts
-_TIMEOUT_HTTP = 30
 _TIMEOUT_CURL = 1800   # 30 min por intento de descarga
 
 
@@ -56,7 +55,7 @@ class JkanimeSource(BaseSource):
         headers = {**self._headers}
         if referer:
             headers['Referer'] = referer
-        kwargs.setdefault('timeout', _TIMEOUT_HTTP)
+        kwargs.setdefault('timeout', HTTP_TIMEOUT)
         resp = self.scraper.get(url, headers=headers, **kwargs)
         resp.raise_for_status()
         return resp
@@ -70,7 +69,7 @@ class JkanimeSource(BaseSource):
         }
         if referer:
             headers['Referer'] = referer
-        resp = self.scraper.post(url, headers=headers, data=data, timeout=_TIMEOUT_HTTP)
+        resp = self.scraper.post(url, headers=headers, data=data, timeout=HTTP_TIMEOUT)
         resp.raise_for_status()
         return resp
 
@@ -241,7 +240,7 @@ class JkanimeSource(BaseSource):
         # Tamaño esperado (para verificar integridad)
         expected: int | None = None
         try:
-            head = self.scraper.head(url, headers=self._headers, timeout=_TIMEOUT_HTTP)
+            head = self.scraper.head(url, headers=self._headers, timeout=HTTP_TIMEOUT)
             if head.status_code == 200:
                 expected = int(head.headers.get('content-length', 0)) or None
         except Exception:
@@ -306,7 +305,7 @@ class JkanimeSource(BaseSource):
         candidate = f"https://c1.jkplayers.com/d/{slug}/"
         rate_limiter.wait(candidate)
         resp = self.scraper.get(
-            candidate, headers=self._headers, timeout=_TIMEOUT_HTTP, allow_redirects=True
+            candidate, headers=self._headers, timeout=HTTP_TIMEOUT, allow_redirects=True
         )
         final_url = resp.url
         ct = resp.headers.get('content-type', '')

@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from config import ANIME_DOWNLOAD_DIR, MANGA_DOWNLOAD_DIR
+from core.chapter_utils import chapter_float_key, normalize_chapter_number
 
 logger = logging.getLogger(__name__)
 
@@ -68,12 +69,9 @@ def _scan_series_dir(serie_dir: Path, content_type: str) -> dict | None:
         for d in cap_dirs:
             match = re.search(r'cap_(\d[\d._]*)', d.name)
             if match:
-                raw = match.group(1)
-                parts = raw.split('.')
-                parts[0] = parts[0].lstrip('0') or '0'
-                chapters.append('.'.join(parts))
+                chapters.append(normalize_chapter_number(match.group(1)))
         if chapters:
-            last_chapter = max(chapters, key=lambda c: float(c.split('_')[0]))
+            last_chapter = max(chapters, key=lambda c: chapter_float_key(c.split('_')[0]))
         else:
             last_chapter = 0
 

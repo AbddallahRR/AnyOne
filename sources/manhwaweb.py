@@ -12,7 +12,7 @@ from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 
 from core.disk_cache import search_cache
-from core.http_pool import HttpPool
+from core.http_pool import HTTPHTTP_TIMEOUT, HttpPool
 from core.models import Chapter, SearchResult, SeriesDetails, chapter_to_filename
 from core.throttle import rate_limiter
 
@@ -20,7 +20,7 @@ from . import BaseSource
 
 logger = logging.getLogger(__name__)
 
-_TIMEOUT   = 30
+HTTP_TIMEOUT   = 30
 
 
 class ManhwawebSource(BaseSource):
@@ -43,7 +43,7 @@ class ManhwawebSource(BaseSource):
 
     def _get(self, url: str, **kwargs):
         rate_limiter.wait(url)
-        kwargs.setdefault('timeout', _TIMEOUT)
+        kwargs.setdefault('timeout', HTTP_TIMEOUT)
         headers = self._headers.copy()
         if 'headers' in kwargs:
             headers.update(kwargs.pop('headers'))

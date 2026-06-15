@@ -694,6 +694,37 @@
       _teardownObserver();
       renderChapters();
     });
+
+    // ── Download progress polling ──
+    const contentRef = isLocal ? `local:${id}` : `${source}:${id}`;
+    const dlProgress    = document.getElementById('serie-dl-progress');
+    const dlLabel       = document.getElementById('serie-dl-label');
+    const dlCount       = document.getElementById('serie-dl-count');
+    const dlFill        = document.getElementById('serie-dl-fill');
+
+    async function pollSerieDownloadProgress() {
+      try {
+        const res  = await fetch('/api/queue/status');
+        const data = await res.json();
+        const all   = [...(data.active || []), ...(data.queue || [])];
+        const match = all.filter(j => j.content_ref === contentRef && (j.status === 'downloading' || j.status === 'pending'));
+
+        if (match.length === 0) {
+          dlProgress?.classList.add('hidden');
+          return;
+        }
+
+        dlProgress?.classList.remove('hidden');
+
+        const activeJob = match.find(j => j.status === 'downloading') || match[0];
+        if (dlLabel) dlLabel.textContent = activeJob.status === 'downloading' ? 'Descargando…' : 'En cola';
+        if (dlCount) dlCount.textContent = activeJob.total_chapters > 0 ? `${activeJob.current_chapter || 0}/${activeJob.total_chapters}` : '';
+        if (dlFill) dlFill.style.width = `${activeJob.progress || 0}%`;
+      } catch { /* ignore polling errors */ }
+    }
+
+    pollSerieDownloadProgress();
+    setInterval(pollSerieDownloadProgress, 3000);
   }
 
   init();

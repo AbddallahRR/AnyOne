@@ -868,59 +868,6 @@
     if (btnId) setLoading(btnId, false);
   }
 
-  // ── Auto-detect search (magic wand in step 2) ──
-  $('wiz-search-detect-btn').addEventListener('click', async () => {
-    const query = getVal('wiz-search-test-query');
-    const baseUrl = getVal('wiz-base-url');
-    const urlTemplate = getVal('wiz-search-url');
-    if (!query || !baseUrl || !urlTemplate) {
-      showToast('Completa URL base, URL de búsqueda y query de prueba', 'error');
-      return;
-    }
-    setLoading('wiz-search-detect-btn', true);
-    const url = urlTemplate.replace('{base}', baseUrl).replace('{query}', encodeURIComponent(query)).replace('{page}', '1');
-    const resultsEl = $('wiz-search-test-results');
-    resultsEl.innerHTML = '<div class="loading-spinner"></div>';
-
-    try {
-      const res = await fetch('/api/scraper-configs/auto-detect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, stage: 'search', base_url: baseUrl }),
-      });
-      if (!res.ok) throw new Error((await res.json()).detail || 'HTTP error');
-      const data = await res.json();
-
-      if (data.suggestions && data.suggestions.length) {
-        const best = data.suggestions[0];
-        setVal('wiz-search-result', best.result_selector);
-        setVal('wiz-search-title', best.title_selector);
-        setVal('wiz-search-title-attr', best.title_attr);
-        setVal('wiz-search-url-sel', best.url_selector);
-        setVal('wiz-search-url-attr', best.url_attr);
-        setVal('wiz-search-cover', best.cover_selector);
-        setVal('wiz-search-cover-attr', best.cover_attr);
-        openAdvanced();
-        resultsEl.innerHTML = `
-          <div class="detect-success">
-            <strong>Selectores detectados:</strong>
-            <div class="detect-grid">
-              <span>Resultado:</span><code>${escHtml(best.result_selector)}</code>
-              <span>Título:</span><code>${escHtml(best.title_selector)} (${best.title_attr})</code>
-              <span>Enlace:</span><code>${escHtml(best.url_selector)} (${best.url_attr})</code>
-              <span>Portada:</span><code>${escHtml(best.cover_selector)} (${best.cover_attr})</code>
-            </div>
-            <small>Confianza: ${best.confidence} &middot; ${data.suggestions.length} sugerencia(s)</small>
-          </div>`;
-      } else {
-        resultsEl.innerHTML = '<p style="color:var(--warning);">No se pudieron detectar selectores automáticamente. Verifica la URL de búsqueda.</p>';
-      }
-    } catch (err) {
-      resultsEl.innerHTML = `<p style="color:var(--danger);">${escHtml(translateError(err.message))}</p>`;
-    }
-    setLoading('wiz-search-detect-btn', false);
-  });
-
   // ── Detect by text: Search (step 2) ──
   $('wiz-search-detect-text-btn').addEventListener('click', async () => {
     const sampleText = getVal('wiz-search-sample-text');
