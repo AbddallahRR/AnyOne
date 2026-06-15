@@ -306,8 +306,7 @@
 
   async function fetchHealth() {
     try {
-      const res = await fetch('/api/scraper-health');
-      const data = await res.json();
+      const data = await api.get('/api/scraper-health');
       _lastStatus = data;
 
       const entries = Object.entries(data);
@@ -354,14 +353,8 @@
             btn.addEventListener('click', async function () {
               const sourceName = this.dataset.source;
               try {
-                const res = await fetch('/api/scraper-health/re-enable', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ name: sourceName }),
-                });
-                if (res.ok) {
-                  fetchHealth();
-                }
+                await api.post('/api/scraper-health/re-enable', { name: sourceName });
+                fetchHealth();
               } catch (err) {
                 console.error('scraper-health: error re-enabling', err);
                 if (!isHidden()) showNotification('Error al reactivar fuente', 'error');

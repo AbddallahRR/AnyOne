@@ -9,8 +9,8 @@ import time
 from pathlib import Path
 from queue import Queue
 
-from config import ANIME_DOWNLOAD_DIR, DOWNLOAD_NUM_WORKERS, MANGA_DOWNLOAD_DIR
 from core.database import update_queue_status
+from core.settings import settings
 from core.http_pool import HttpPool
 from core.models import DownloadJob
 from core.sources import get_source
@@ -163,7 +163,7 @@ def _download_worker(worker_id: int) -> None:
             update_queue_status(job_id, status='downloading',
                                 total_chapters=total, current_chapter=0, current_progress=0)
 
-            base_folder   = ANIME_DOWNLOAD_DIR if content_type == 'anime' else MANGA_DOWNLOAD_DIR
+            base_folder   = str(settings.anime_download_dir) if content_type == 'anime' else str(settings.manga_download_dir)
             safe_title    = normalize_title(title)
             series_folder = os.path.join(base_folder, safe_title)
             os.makedirs(series_folder, exist_ok=True)
@@ -216,7 +216,7 @@ def _download_worker(worker_id: int) -> None:
 
             try:
                 from routers.api.common import _invalidate_series_index
-                base = Path(ANIME_DOWNLOAD_DIR if content_type == 'anime' else MANGA_DOWNLOAD_DIR)
+                base = Path(str(settings.anime_download_dir) if content_type == 'anime' else str(settings.manga_download_dir))
                 _invalidate_series_index(base)
             except Exception:
                 pass
@@ -234,7 +234,9 @@ def _download_worker(worker_id: int) -> None:
             download_queue.task_done()
 
 
-def start_workers(n: int = DOWNLOAD_NUM_WORKERS) -> None:
+def start_workers(n: int | None = None) -> None:
+    if n is None:
+        n = settings.download_num_workers
     for i in range(n):
         t = threading.Thread(target=_download_worker, args=(i,), daemon=True)
         t.start()

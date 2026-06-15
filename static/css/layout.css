@@ -52,11 +52,6 @@
   text-decoration: none;
 }
 
-#queue-hint {
-  font-size: 12px;
-  color: var(--muted);
-}
-
 .tab-btn i {
   margin-right: 5px;
   font-size: 11px;

@@ -12,11 +12,11 @@ from urllib.parse import quote as _url_quote
 from bs4 import BeautifulSoup
 
 from core.disk_cache import search_cache
-from core.http_pool import HTTP_TIMEOUT, HttpPool
+from core.http_pool import HTTP_TIMEOUT
 from core.models import Chapter, EpisodeLink, EpisodeLinks, SearchResult, SeriesDetails, chapter_to_filename
-from core.throttle import rate_limiter
 
 from . import BaseSource
+from .common import HttpClientMixin
 
 logger = logging.getLogger(__name__)
 
@@ -33,45 +33,10 @@ _STREAM_SERVERS = {'streamwish', 'voe', 'vidhide', 'mixdrop', 'streamtape', 'doo
 _TIMEOUT_CURL = 1800   # 30 min por intento de descarga
 
 
-class JkanimeSource(BaseSource):
+class JkanimeSource(HttpClientMixin, BaseSource):
     type = 'anime'
     label = 'JKanime'
     BASE_URL = "https://jkanime.net"
-    UA       = "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0"
-
-    def __init__(self):
-        self.scraper = HttpPool.get_scraper()
-
-    # -----------------------------------------------------------------------
-    # HTTP helpers
-    # -----------------------------------------------------------------------
-
-    @property
-    def _headers(self) -> dict:
-        return {'User-Agent': self.UA}
-
-    def _get(self, url: str, referer: str | None = None, **kwargs):
-        rate_limiter.wait(url)
-        headers = {**self._headers}
-        if referer:
-            headers['Referer'] = referer
-        kwargs.setdefault('timeout', HTTP_TIMEOUT)
-        resp = self.scraper.get(url, headers=headers, **kwargs)
-        resp.raise_for_status()
-        return resp
-
-    def _post(self, url: str, data=None, referer: str | None = None):
-        rate_limiter.wait(url)
-        headers = {
-            **self._headers,
-            'X-Requested-With': 'XMLHttpRequest',
-            'Content-Type':     'application/x-www-form-urlencoded',
-        }
-        if referer:
-            headers['Referer'] = referer
-        resp = self.scraper.post(url, headers=headers, data=data, timeout=HTTP_TIMEOUT)
-        resp.raise_for_status()
-        return resp
 
     # -----------------------------------------------------------------------
     # Parsing helpers

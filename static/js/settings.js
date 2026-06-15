@@ -34,12 +34,10 @@
   async function loadSources() {
     sourcesList.innerHTML = '<div class="loading-spinner"></div>';
     try {
-      const [configsRes, healthRes] = await Promise.all([
-        fetch('/api/scraper-configs'),
-        fetch('/api/scraper-health').catch(() => ({ json: () => ({}) })),
+      const [configs, healthData] = await Promise.all([
+        api.get('/api/scraper-configs'),
+        api.get('/api/scraper-health').catch(() => ({})),
       ]);
-      const configs = await configsRes.json();
-      const healthData = await healthRes.json();
       const healthMap = {};
       if (healthData && typeof healthData === 'object') {
         for (const [name, status] of Object.entries(healthData)) {
@@ -101,15 +99,7 @@
       input.addEventListener('change', async function () {
         const name = this.dataset.name;
         try {
-          const res = await fetch(`/api/scraper-configs/${name}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ enabled: this.checked }),
-          });
-          if (!res.ok) {
-            this.checked = !this.checked;
-            showToast('Error al cambiar estado', 'error');
-          }
+          await api.put(`/api/scraper-configs/${name}`, { enabled: this.checked });
         } catch (err) {
           this.checked = !this.checked;
           showToast(`Error: ${err.message}`, 'error');
@@ -125,15 +115,10 @@
       btn.addEventListener('click', async () => {
         if (!confirm('Eliminar esta fuente?')) return;
         try {
-          const res = await fetch(`/api/scraper-configs/${btn.dataset.name}`, { method: 'DELETE' });
-          if (res.ok) {
-            showToast('Fuente eliminada', 'success');
-            loadSources();
-            loadDynamicSources();
-          } else {
-            const data = await res.json();
-            showToast(data.detail || 'Error al eliminar', 'error');
-          }
+          await api.del(`/api/scraper-configs/${btn.dataset.name}`);
+          showToast('Fuente eliminada', 'success');
+          loadSources();
+          loadDynamicSources();
         } catch (err) {
           showToast(`Error: ${err.message}`, 'error');
         }
@@ -143,8 +128,7 @@
 
   async function loadDynamicSources() {
     try {
-      const res = await fetch('/api/scraper-configs');
-      const all = await res.json();
+      const all = await api.get('/api/scraper-configs');
       const dyn = all.filter(c => !c.built_in);
       if (!dyn.length) {
         dynamicList.innerHTML = '<p style="color:var(--muted);font-size:13px;">No hay fuentes generadas aun. Crea una nueva!</p>';
@@ -182,19 +166,14 @@
       dynamicList.querySelectorAll('.delete-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
           if (!confirm('Eliminar esta fuente?')) return;
-          try {
-            const res = await fetch(`/api/scraper-configs/${btn.dataset.name}`, { method: 'DELETE' });
-            if (res.ok) {
-              showToast('Fuente eliminada', 'success');
-              loadDynamicSources();
-              loadSources();
-            } else {
-              const data = await res.json();
-              showToast(data.detail || 'Error al eliminar', 'error');
-            }
-          } catch (err) {
-            showToast(`Error: ${err.message}`, 'error');
-          }
+        try {
+          await api.del(`/api/scraper-configs/${btn.dataset.name}`);
+          showToast('Fuente eliminada', 'success');
+          loadDynamicSources();
+          loadSources();
+        } catch (err) {
+          showToast(`Error: ${err.message}`, 'error');
+        }
         });
       });
     } catch (err) {
@@ -211,7 +190,7 @@
       if (!cfg) return;
 
       if (cfg.built_in) {
-        const ok = await showConfirm(
+        const ok = await window.showConfirm(
           'Fuente incorporada',
           'Esta es una fuente incorporada. Al editarla se convertirá en fuente personalizada. ¿Continuar?'
         );
@@ -281,8 +260,7 @@
 
   async function fetchConfig(name) {
     try {
-      const res = await fetch(`/api/scraper-configs/${name}`);
-      return await res.json();
+      return await api.get(`/api/scraper-configs/${name}`);
     } catch (err) {
       showToast(`Error al cargar config: ${err.message}`, 'error');
       return null;
@@ -514,12 +492,7 @@
     if (!indicator) return;
     indicator.innerHTML = '<span class="spinner" style="display:inline-block;width:12px;height:12px;"></span>';
     try {
-      const res = await fetch('/api/scraper-configs/check-url', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
-      });
-      const data = await res.json();
+      const data = await api.post('/api/scraper-configs/check-url', { url });
       if (data.reachable) {
         indicator.innerHTML = '<span class="url-ok" title="Sitio accesible">✓</span>';
       } else {
@@ -594,24 +567,7 @@
 
   // ── Search test with improved preview ──
   $('wiz-search-test-btn').addEventListener('click', async () => {
-    const query = getVal('wiz-search-test-query');
-    const baseUrl = getVal('wiz-base-url');
-    if (!query || !baseUrl) {
-      showToast('Completa la URL base y el query de prueba', 'error');
-      return;
-    }
-    setLoading('wiz-search-test-btn', true);
-    const config = getSearchConfig();
-    const results = $('wiz-search-test-results');
-    results.innerHTML = '<div class="loading-spinner"></div>';
-    try {
-      const res = await fetch('/api/scraper-configs/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config, base_url: baseUrl, query, stage: 'search' }),
-      });
-      if (!res.ok) throw new Error((await res.json()).detail || 'HTTP error');
-      const data = await res.json();
+    await runTest('search', getSearchConfig, (data, results) => {
       let html = `<div class="test-url"><strong>URL:</strong> <code>${escHtml(data.url)}</code></div>`;
       if (data.warning) {
         html += `<div class="test-warning">${escHtml(data.warning)}</div>`;
@@ -623,7 +579,6 @@
           const coverHtml = item.cover
             ? `<img src="${item.cover}" class="test-thumb" onerror="this.style.display='none'" alt="" loading="lazy">`
             : '';
-          // Extract content_id from URL
           const urlParts = (item.url || '').split('/').filter(Boolean);
           const contentId = urlParts[urlParts.length - 1] || '';
           html += `<div class="test-card-visual">${coverHtml}<div class="test-card-body"><span class="tt">${escHtml(item.title || '?')}</span><code>${escHtml(item.url || '')}</code>`;
@@ -638,7 +593,6 @@
         html += `<details class="test-details"><summary>HTML preview</summary><pre>${escHtml(data.html_preview.substring(0, 3000))}</pre></details>`;
       }
       results.innerHTML = html;
-      // Handle "Use this ID" buttons
       results.querySelectorAll('.use-id-btn').forEach(btn => {
         btn.addEventListener('click', function () {
           const cid = this.dataset.contentId;
@@ -648,31 +602,11 @@
           showToast(`ID "${cid}" copiado a los pasos siguientes`, 'success');
         });
       });
-    } catch (err) {
-      results.innerHTML = `<p style="color:var(--danger);">${escHtml(translateError(err.message))}</p>`;
-    }
-    setLoading('wiz-search-test-btn', false);
+    });
   });
 
   $('wiz-details-test-btn').addEventListener('click', async () => {
-    const contentId = getVal('wiz-details-test-id');
-    const baseUrl = getVal('wiz-base-url');
-    if (!contentId || !baseUrl) {
-      showToast('Completa la URL base y el ID de contenido', 'error');
-      return;
-    }
-    setLoading('wiz-details-test-btn', true);
-    const config = getDetailsConfig();
-    const results = $('wiz-details-test-results');
-    results.innerHTML = '<div class="loading-spinner"></div>';
-    try {
-      const res = await fetch('/api/scraper-configs/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config, base_url: baseUrl, content_id: contentId, stage: 'details' }),
-      });
-      if (!res.ok) throw new Error((await res.json()).detail || 'HTTP error');
-      const data = await res.json();
+    await runTest('details', getDetailsConfig, (data, results) => {
       let html = `<div class="test-url"><strong>URL:</strong> <code>${escHtml(data.url)}</code></div>`;
       html += '<div class="test-details-visual">';
       if (data.cover) html += `<div class="test-cover-wrap"><img src="${data.cover}" class="test-cover-img" onerror="this.style.display='none'" alt="" loading="lazy"></div>`;
@@ -684,31 +618,11 @@
         html += `<details class="test-details"><summary>HTML preview</summary><pre>${escHtml(data.html_preview.substring(0, 3000))}</pre></details>`;
       }
       results.innerHTML = html;
-    } catch (err) {
-      results.innerHTML = `<p style="color:var(--danger);">${escHtml(translateError(err.message))}</p>`;
-    }
-    setLoading('wiz-details-test-btn', false);
+    });
   });
 
   $('wiz-chapters-test-btn').addEventListener('click', async () => {
-    const contentId = getVal('wiz-chapters-test-id');
-    const baseUrl = getVal('wiz-base-url');
-    if (!contentId || !baseUrl) {
-      showToast('Completa la URL base y el ID de contenido', 'error');
-      return;
-    }
-    setLoading('wiz-chapters-test-btn', true);
-    const config = getChaptersConfig();
-    const results = $('wiz-chapters-test-results');
-    results.innerHTML = '<div class="loading-spinner"></div>';
-    try {
-      const res = await fetch('/api/scraper-configs/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config, base_url: baseUrl, content_id: contentId, stage: 'chapters' }),
-      });
-      if (!res.ok) throw new Error((await res.json()).detail || 'HTTP error');
-      const data = await res.json();
+    await runTest('chapters', getChaptersConfig, (data, results) => {
       let html = `<div class="test-url"><strong>URL:</strong> <code>${escHtml(data.url)}</code></div>`;
       if (data.warning) {
         html += `<div class="test-warning">${escHtml(data.warning)}</div>`;
@@ -743,35 +657,13 @@
           showToast(`ID "${cid}" copiado al paso de contenido`, 'success');
         });
       });
-    } catch (err) {
-      results.innerHTML = `<p style="color:var(--danger);">${escHtml(translateError(err.message))}</p>`;
-    }
-    setLoading('wiz-chapters-test-btn', false);
+    });
   });
 
   $('wiz-content-test-btn').addEventListener('click', async () => {
-    const chapterId = getVal('wiz-content-test-chapter');
-    const baseUrl = getVal('wiz-base-url');
-    const contentId = getVal('wiz-details-test-id') || getVal('wiz-chapters-test-id') || '';
-    if (!chapterId || !baseUrl || !contentId) {
-      showToast('Completa URL base, contenido de prueba y chapter_id', 'error');
-      return;
-    }
-    setLoading('wiz-content-test-btn', true);
-    const config = getContentConfig();
-    const results = $('wiz-content-test-results');
-    results.innerHTML = '<div class="loading-spinner"></div>';
-    try {
-      const res = await fetch('/api/scraper-configs/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config, base_url: baseUrl, content_id: contentId, chapter_id: chapterId, stage: 'content' }),
-      });
-      if (!res.ok) throw new Error((await res.json()).detail || 'HTTP error');
-      const data = await res.json();
+    await runTest('content', getContentConfig, (data, results) => {
       let html = `<div class="test-url"><strong>URL:</strong> <code>${escHtml(data.url)}</code></div>`;
 
-      // Show detected pattern badge
       if (data.detected_pattern && data.detected_pattern !== 'none') {
         const patternLabels = {
           'regular': 'Selector CSS',
@@ -810,10 +702,7 @@
         html += `<details class="test-details"><summary>HTML preview</summary><pre>${escHtml(data.html_preview.substring(0, 3000))}</pre></details>`;
       }
       results.innerHTML = html;
-    } catch (err) {
-      results.innerHTML = `<p style="color:var(--danger);">${escHtml(translateError(err.message))}</p>`;
-    }
-    setLoading('wiz-content-test-btn', false);
+    });
   });
 
   // ── Helper: fill URL templates ──
@@ -834,13 +723,7 @@
     if (btnId) setLoading(btnId, true);
     resultsEl.innerHTML = '<div class="loading-spinner"></div>';
     try {
-      const res = await fetch('/api/scraper-configs/detect-selectors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, stage, text, base_url: baseUrl }),
-      });
-      if (!res.ok) throw new Error((await res.json()).detail || 'HTTP error');
-      const data = await res.json();
+      const data = await api.post('/api/scraper-configs/detect-selectors', { url, stage, text, base_url: baseUrl });
       if (!data.detected || !Object.keys(data.detected).length) {
         resultsEl.innerHTML = `<p style="color:var(--warning);">${escHtml(data.warning || 'No se pudieron detectar selectores con ese texto.')}</p>`;
         return;
@@ -866,6 +749,41 @@
       return null;
     }
     if (btnId) setLoading(btnId, false);
+  }
+
+  async function runTest(stage, getConfig, render) {
+    const fieldMap = {
+      search:   { id: 'wiz-search-test-id',    query: 'wiz-search-test-query',  contentId: null,        chapterId: null },
+      details:  { id: 'wiz-details-test-id',    query: null,                    contentId: 'wiz-details-test-id', chapterId: null },
+      chapters: { id: 'wiz-chapters-test-id',   query: null,                    contentId: 'wiz-chapters-test-id', chapterId: null },
+      content:  { id: 'wiz-content-test-chapter', query: null,                  contentId: null,        chapterId: 'wiz-content-test-chapter' },
+    };
+    const f = fieldMap[stage];
+    const baseUrl = getVal('wiz-base-url');
+    const query = f.query ? getVal(f.query) : undefined;
+    const contentId = f.contentId ? getVal(f.contentId) : (getVal('wiz-details-test-id') || getVal('wiz-chapters-test-id') || '');
+    const chapterId = f.chapterId ? getVal(f.chapterId) : undefined;
+    if (!baseUrl || (f.query && !query) || (f.contentId && !getVal(f.contentId)) || (f.chapterId && !getVal(f.chapterId))) {
+      showToast('Completa los campos requeridos', 'error');
+      return;
+    }
+    const btnId = `wiz-${stage}-test-btn`;
+    const resultsId = `wiz-${stage}-test-results`;
+    setLoading(btnId, true);
+    const config = getConfig();
+    const results = $(resultsId);
+    results.innerHTML = '<div class="loading-spinner"></div>';
+    try {
+      const body = { config, base_url: baseUrl, stage };
+      if (query) body.query = query;
+      if (contentId) body.content_id = contentId;
+      if (chapterId) body.chapter_id = chapterId;
+      const data = await api.post('/api/scraper-configs/test', body);
+      render(data, results);
+    } catch (err) {
+      results.innerHTML = `<p style="color:var(--danger);">${escHtml(translateError(err.message))}</p>`;
+    }
+    setLoading(btnId, false);
   }
 
   // ── Detect by text: Search (step 2) ──
@@ -903,7 +821,7 @@
       showToast('Completa URL base, URL de detalles y content ID', 'error');
       return;
     }
-    const url = fillUrl(urlTemplate, { base: baseUrl, content_id: encodeURI(contentId) });
+    const url = fillUrl(urlTemplate, { base: baseUrl, content_id: encodeURIComponent(contentId) });
     const resultsEl = $('wiz-details-test-results');
     const d = await detectByText(url, 'details', sampleText, baseUrl, resultsEl);
     if (d) {
@@ -925,7 +843,7 @@
       showToast('Completa URL base, URL de capítulos y content ID', 'error');
       return;
     }
-    const url = fillUrl(urlTemplate, { base: baseUrl, content_id: encodeURI(contentId) });
+    const url = fillUrl(urlTemplate, { base: baseUrl, content_id: encodeURIComponent(contentId) });
     const resultsEl = $('wiz-chapters-test-results');
     const d = await detectByText(url, 'chapters', sampleText, baseUrl, resultsEl);
     if (d) {
@@ -951,8 +869,8 @@
     }
     const url = fillUrl(urlTemplate, {
       base: baseUrl,
-      content_id: encodeURI(contentId),
-      chapter_id: encodeURI(chapterId),
+      content_id: encodeURIComponent(contentId),
+      chapter_id: encodeURIComponent(chapterId),
     });
     const resultsEl = $('wiz-content-test-results');
     const d = await detectByText(url, 'content', sampleText, baseUrl, resultsEl);
@@ -1078,16 +996,16 @@
     const url = isEdit ? `/api/scraper-configs/${name}` : '/api/scraper-configs';
     const method = isEdit ? 'PUT' : 'POST';
     const body = isEdit
-      ? JSON.stringify({ label, base_url: baseUrl, config })
-      : JSON.stringify({ name, type, label, base_url: baseUrl, config });
+      ? { label, base_url: baseUrl, config }
+      : { name, type, label, base_url: baseUrl, config };
 
     _isSaving = true;
     setLoading('wiz-save-btn', true);
     try {
-      const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || 'HTTP error');
+      if (isEdit) {
+        await api.put(url, body);
+      } else {
+        await api.post(url, body);
       }
       clearDraft(name);
       clearDraft('new');
@@ -1172,11 +1090,6 @@ class ${className}(DynamicSource):
 `;
     const stubEl = $('wiz-stub-preview');
     if (stubEl) stubEl.textContent = stub;
-  }
-
-  // ── Confirm Dialog ──
-  function showConfirm(title, message) {
-    return window.showConfirm(title, message);
   }
 
   var showToast = window.showNotification;

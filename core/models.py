@@ -194,6 +194,29 @@ class ScraperConfigSchema(BaseModel):
 # Fase 4: Modelos de job de descarga
 # ---------------------------------------------------------------------------
 
+class SourceSettingsRequest(BaseModel):
+    model_config = {'extra': 'forbid'}
+
+
+class ReEnableRequest(BaseModel):
+    name: str
+
+
+class CreateScraperConfigRequest(BaseModel):
+    name: str
+    type: str
+    label: str
+    base_url: str
+    config: dict = {}
+
+
+class UpdateScraperConfigRequest(BaseModel):
+    label: str | None = None
+    base_url: str | None = None
+    enabled: bool | None = None
+    config: dict | None = None
+
+
 class DownloadJob(BaseModel):
     id: int
     content_ref: str

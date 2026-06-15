@@ -8,8 +8,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import quote
 
-from config import ANIME_DOWNLOAD_DIR, MANGA_DOWNLOAD_DIR
 from core.chapter_utils import chapter_float_key, normalize_chapter_number
+from core.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +124,7 @@ def scan_downloaded_series():
     futures = []
 
     with ThreadPoolExecutor(max_workers=8) as executor:
-        for content_type, base_path in [('anime', ANIME_DOWNLOAD_DIR), ('manga', MANGA_DOWNLOAD_DIR)]:
+        for content_type, base_path in [('anime', str(settings.anime_download_dir)), ('manga', str(settings.manga_download_dir))]:
             base = Path(base_path)
             if not base.exists():
                 continue
@@ -176,3 +176,15 @@ def scan_downloaded_series():
             _scan_cache = series
             _scan_cache_time = time.time()
     return series
+
+
+def count_images_in_dir(cap_dir: str) -> int:
+    from pathlib import Path
+    exts = {'.jpg', '.jpeg', '.png', '.webp'}
+    try:
+        return sum(
+            1 for f in Path(cap_dir).iterdir()
+            if f.is_file() and f.suffix.lower() in exts
+        )
+    except FileNotFoundError:
+        return 0

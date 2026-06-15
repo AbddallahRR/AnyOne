@@ -432,18 +432,6 @@
   word-break: break-word;
   color: var(--text-dim);
 }
-.test-results .test-card {
-  padding: 8px 12px;
-  margin-bottom: 4px;
-  border-radius: 6px;
-  background: rgba(255,255,255,0.03);
-  border-left: 3px solid var(--accent);
-}
-.test-results .test-card .tt {
-  font-weight: 600;
-  color: var(--text);
-}
-
 /* ── Advanced Section (collapsible) ── */
 .advanced-section {
   margin: 16px 0;

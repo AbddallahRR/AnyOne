@@ -23,7 +23,6 @@
 
   const UI_ELS = [controlsDiv, fullscreenBtn, backBtn].filter(Boolean);
   function showUI() { UI_ELS.forEach(el => el.classList.add('show')); }
-  function hideUI() { UI_ELS.forEach(el => el.classList.remove('show')); }
 
   // ── Label del capítulo ─────────────────────────────────────────────────
   function updateChapterLabel() {
@@ -37,11 +36,7 @@
   async function markCurrentAsWatched() {
     const ref = source === 'local' ? `local:${content_id}` : `${source}:${content_id}`;
     try {
-      await fetch('/api/watched', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ content_ref: ref, chapter: currentChapterNum }),
-      });
+      await api.post('/api/watched', { content_ref: ref, chapter: currentChapterNum });
     } catch (e) { 
       console.warn('markCurrentAsWatched:', e); 
       showNotification('Error al marcar como visto', 'error');
@@ -54,9 +49,7 @@
       const url = source === 'local'
         ? `/api/chapters/local/${type}/${content_id}`
         : `/api/chapters/${type}/${source}/${content_id}`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error('No se pudo obtener la lista de capítulos');
-      chaptersList = await res.json();
+      chaptersList = await api.get(url);
 
       currentChapterIndex = chaptersList.findIndex(
         ch => String(ch.number) === String(current_chapter)
@@ -130,15 +123,11 @@
 
     // [OPT-1] Progreso + duración en paralelo (eran secuenciales)
     const fetches = [
-      fetch(`/api/progress/${type}/${source}/${content_id}`)
-        .then(r => r.ok ? r.json() : null)
-        .catch(() => null),
+      api.get(`/api/progress/${type}/${source}/${content_id}`).catch(() => null),
     ];
     if (source === 'local') {
       fetches.push(
-        fetch(`/api/video-duration/anime/${content_id}/${currentChapterNum}`)
-          .then(r => r.ok ? r.json() : null)
-          .catch(() => null)
+        api.get(`/api/video-duration/anime/${content_id}/${currentChapterNum}`).catch(() => null)
       );
     }
 
@@ -171,11 +160,7 @@
       progressInterval = setInterval(() => {
         if (document.hidden || video.paused) return; // no gastar fetches en pausa
         const t = Math.floor(video.currentTime);
-        fetch(`/api/progress/${type}/${source}/${content_id}`, {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ chapter: currentChapterNum, progress: t }),
-        }).catch(console.error);
+        api.post(`/api/progress/${type}/${source}/${content_id}`, { chapter: currentChapterNum, progress: t }).catch(console.error);
 
         if (!hasMarked && duration > 0 && t >= duration * 0.99) {
           hasMarked = true;
@@ -233,9 +218,7 @@
       const imgUrl  = isRemote
         ? `/api/play/remote/manga/${source}/${content_id}/${chapterArg}`
         : `/api/play/local/manga/${content_id}/${chapterArg}`;
-      const imgRes = await fetch(imgUrl);
-      if (!imgRes.ok) throw new Error('No se pudieron cargar las imágenes');
-      const rawData = await imgRes.json();
+      const rawData = await api.get(imgUrl);
 
       if (!rawData.length) {
         if (chapterWrapper) chapterWrapper.innerHTML =
@@ -444,11 +427,7 @@
 
           clearTimeout(saveTimeout);
           saveTimeout = setTimeout(() => {
-            fetch(`/api/progress/manga/${source}/${content_id}`, {
-              method:  'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body:    JSON.stringify({ chapter: currentChapterNum, progress: idx }),
-            }).catch(console.error);
+            api.post(`/api/progress/manga/${source}/${content_id}`, { chapter: currentChapterNum, progress: idx }).catch(console.error);
           }, 500);
 
           if (!hasMarked) {
@@ -463,11 +442,7 @@
       if (_unloadSaveHandler) window.removeEventListener('beforeunload', _unloadSaveHandler);
       _unloadSaveHandler = function() {
         clearTimeout(saveTimeout);
-        fetch(`/api/progress/manga/${source}/${content_id}`, {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ chapter: currentChapterNum, progress: currentPage }),
-        }).catch(() => {});
+        api.post(`/api/progress/manga/${source}/${content_id}`, { chapter: currentChapterNum, progress: currentPage }).catch(() => {});
       };
       window.addEventListener('beforeunload', _unloadSaveHandler);
 
@@ -477,8 +452,7 @@
         const progUrl = isRemote
           ? `/api/progress/manga/${source}/${content_id}`
           : `/api/progress/local/manga/${content_id}`;
-        const res  = await fetch(progUrl);
-        const prog = await res.json();
+        const prog = await api.get(progUrl);
         if (String(prog.chapter) === String(currentChapterNum) && prog.progress) {
           const idx = parseInt(prog.progress);
           if (!isNaN(idx) && idx < total) savedIndex = idx;

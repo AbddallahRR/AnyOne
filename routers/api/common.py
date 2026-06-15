@@ -8,8 +8,8 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
-from config import ANIME_DOWNLOAD_DIR, MANGA_DOWNLOAD_DIR
 from core.database import get_conn
+from core.settings import settings
 from core.chapter_utils import chapter_float_key, normalize_chapter_number
 from core.models import chapter_to_filename, parse_chapter_from_filename
 from core.utils import _normalize_path_name
@@ -85,54 +85,12 @@ def _safe_path(base: str, untrusted: str) -> Path | None:
 
 
 def _base_folder(content_type: str) -> str:
-    return ANIME_DOWNLOAD_DIR if content_type == 'anime' else MANGA_DOWNLOAD_DIR
+    return str(settings.anime_download_dir) if content_type == 'anime' else str(settings.manga_download_dir)
 
 
 def _require_local(content_ref: str):
     if not content_ref.startswith('local:'):
         raise HTTPException(status_code=400, detail='Solo funciona con contenido local')
-
-
-def _queue_find_active(content_ref: str, chapter_id: str | None = None) -> tuple | None:
-    conn = get_conn()
-    if chapter_id is not None:
-        return conn.execute(
-            'SELECT id, status FROM download_queue '
-            'WHERE content_ref = ? AND chapter_id = ? AND status IN ("pending","downloading")',
-            (content_ref, chapter_id)
-        ).fetchone()
-    return conn.execute(
-        'SELECT id, status FROM download_queue '
-        'WHERE content_ref = ? AND status IN ("pending","downloading")',
-        (content_ref,)
-    ).fetchone()
-
-
-def _queue_insert(content_ref: str, content_type: str, title: str,
-                  chapter_id: str | None = None) -> int:
-    conn = get_conn()
-    with conn:
-        cur = conn.execute(
-            'INSERT INTO download_queue (content_ref, type, title, chapter_id, status) '
-            "VALUES (?, ?, ?, ?, 'pending')",
-            (content_ref, content_type, title, chapter_id)
-        )
-    return cur.lastrowid
-
-
-def _queue_get_status() -> tuple[list, list]:
-    conn = get_conn()
-    active = [dict(r) for r in conn.execute(
-        'SELECT id, content_ref, type, title, status, total_chapters, '
-        'current_chapter, current_progress AS progress, error '
-        'FROM download_queue WHERE status = "downloading" ORDER BY created_at ASC'
-    ).fetchall()]
-    pending = [dict(r) for r in conn.execute(
-        'SELECT id, content_ref, type, title, status, total_chapters, '
-        'current_chapter, current_progress AS progress '
-        'FROM download_queue WHERE status = "pending" ORDER BY created_at ASC'
-    ).fetchall()]
-    return active, pending
 
 
 def _content_title_by_ref(ref: str) -> str | None:
@@ -197,7 +155,7 @@ def _resolve_series_title(source_name: str, content_id: str) -> str:
     ).fetchone()
     if row:
         return row[0]
-    for ct, base in [('anime', ANIME_DOWNLOAD_DIR), ('manga', MANGA_DOWNLOAD_DIR)]:
+    for ct, base in [('anime', str(settings.anime_download_dir)), ('manga', str(settings.manga_download_dir))]:
         base_path = Path(base)
         serie_dir = _find_local_serie_dir(base_path, content_id)
         if serie_dir:

@@ -2,85 +2,33 @@
 # -*- coding: utf-8 -*-
 
 import logging
-import os
 import re
-import time
-from pathlib import Path
 from urllib.parse import quote as _url_quote
 from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 
 from core.disk_cache import search_cache
-from core.http_pool import HTTPHTTP_TIMEOUT, HttpPool
-from core.models import Chapter, SearchResult, SeriesDetails, chapter_to_filename
-from core.throttle import rate_limiter
+from core.models import Chapter, SearchResult, SeriesDetails
+from core.utils import count_images_in_dir
 
 from . import BaseSource
+from .common import HttpClientMixin, MangaDownloadHelper
 
 logger = logging.getLogger(__name__)
 
 
 
 
-class NartagSource(BaseSource):
+class NartagSource(HttpClientMixin, BaseSource):
     type = 'manga'
     label = 'Nartag'
     BASE_URL   = "https://nartag.com"
     READER_URL = "https://lector.nartag.com"
-    UA         = "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0"
-
-    def __init__(self):
-        self.scraper = HttpPool.get_scraper()
 
     # -----------------------------------------------------------------------
-    # HTTP helpers
+    # Image URL helpers
     # -----------------------------------------------------------------------
-
-    @property
-    def _headers(self) -> dict:
-        return {'User-Agent': self.UA}
-
-    def _get(self, url: str, **kwargs):
-        rate_limiter.wait(url)
-        kwargs.setdefault('timeout', HTTP_TIMEOUT)
-        headers = self._headers.copy()
-        if 'headers' in kwargs:
-            headers.update(kwargs.pop('headers'))
-        resp = self.scraper.get(url, headers=headers, **kwargs)
-        resp.raise_for_status()
-        return resp
-
-    def _get_with_retry(self, url: str, retries: int = 3,
-                        backoff: float = 1.0, **kwargs):
-        last_exc = None
-        for attempt in range(retries):
-            try:
-                return self._get(url, **kwargs)
-            except Exception as exc:
-                last_exc = exc
-                if attempt < retries - 1:
-                    wait = backoff * (2 ** attempt)
-                    logger.warning(
-                        f"Nartag: reintento {attempt + 1}/{retries - 1} "
-                        f"para {url[:80]}… (espera {wait:.1f}s): {exc}"
-                    )
-                    time.sleep(wait)
-        raise last_exc
-
-    # -----------------------------------------------------------------------
-    # URL helpers
-    # -----------------------------------------------------------------------
-
-    @staticmethod
-    def _url_ext(url: str) -> str:
-        path = urlparse(url).path
-        ext  = os.path.splitext(path)[1].lstrip('.')
-        # También detectar extensión en query params (ej. ?format=webp)
-        if ext not in {'jpg', 'jpeg', 'png', 'webp'}:
-            m = re.search(r'[?&]format=(jpg|jpeg|png|webp)', url, re.I)
-            ext = m.group(1) if m else 'jpg'
-        return ext
 
     @staticmethod
     def _best_cover_url(img_tag, base_url: str = '') -> str:
@@ -101,14 +49,6 @@ class NartagSource(BaseSource):
                 return re.sub(r'-\d+x\d+(\.\w+)$', r'\1', best)
         src = img_tag.get('data-src') or img_tag.get('src', '')
         return re.sub(r'-\d+x\d+(\.\w+)$', r'\1', src) if src else ''
-
-    @staticmethod
-    def _count_images(cap_dir: str) -> int:
-        exts = {'.jpg', '.jpeg', '.png', '.webp'}
-        return sum(
-            1 for f in Path(cap_dir).iterdir()
-            if f.is_file() and f.suffix.lower() in exts
-        )
 
     # -----------------------------------------------------------------------
     # Lector: hacer POST al authorize y extraer imágenes del manga
@@ -173,27 +113,8 @@ class NartagSource(BaseSource):
         return final_url, fields
 
     def _extract_manga_images(self, reader_url: str, referer: str) -> list[str]:
-        """
-        Descarga la página del lector (ya autenticada vía cookie de sesión
-        en self.scraper) y extrae las imágenes reales del manga.
-
-        Las imágenes del manga están en:
-          nartag.com/wp-content/uploads/WP-manga/data/...
-        y NO tienen sufijo de thumbnail WordPress (-NNNxNNN).
-        """
-        try:
-            rate_limiter.wait(reader_url)
-            resp = self.scraper.get(
-                reader_url,
-                headers={**self._headers, 'Referer': referer},
-                timeout=HTTP_TIMEOUT,
-            )
-            resp.raise_for_status()
-            html = resp.text
-        except Exception as exc:
-            raise Exception(
-                f"Nartag: error al obtener lector '{reader_url}': {exc}"
-            ) from exc
+        resp = self._get(reader_url, headers={'Referer': referer})
+        html = resp.text
 
         soup     = BeautifulSoup(html, 'html.parser')
         img_urls: list[str] = []
@@ -330,16 +251,11 @@ class NartagSource(BaseSource):
             return [Chapter(**c) for c in cached]
 
         ajax_url = f"{self.BASE_URL}/manga/{content_id}/ajax/chapters/"
-        headers  = {
-            **self._headers,
-            'X-Requested-With': 'XMLHttpRequest',
-            'Referer': f"{self.BASE_URL}/manga/{content_id}/",
-        }
         try:
-            rate_limiter.wait(ajax_url)
-            resp = self.scraper.post(ajax_url, headers=headers, timeout=HTTP_TIMEOUT)
-            resp.raise_for_status()
-            html = resp.text
+            html = self._post(ajax_url, headers={
+                'X-Requested-With': 'XMLHttpRequest',
+                'Referer': f"{self.BASE_URL}/manga/{content_id}/",
+            }).text
         except Exception as exc:
             logger.exception(
                 f"Nartag: error obteniendo capítulos para '{content_id}': {exc}"
@@ -383,15 +299,11 @@ class NartagSource(BaseSource):
 
     def download_chapter_sync(self, content_id: str, chapter_id: str,
                          dest_folder: str, chapter_number: str | None = None) -> str:
+        from core.html_utils import url_ext
+        from core.models import chapter_to_filename
         m       = re.search(r'capitulo-(\d+(?:\.\d+)?)', chapter_id)
-        cap_num = m.group(1) if m else chapter_id
-        dir_name = (
-            f"cap_{chapter_to_filename(cap_num)}"
-            if cap_num.replace('.', '', 1).isdigit()
-            else f"cap_{cap_num}"
-        )
-        cap_dir = os.path.join(dest_folder, dir_name)
-        os.makedirs(cap_dir, exist_ok=True)
+        cap_num = m.group(1) if m else (chapter_number or chapter_id)
+        cap_dir = MangaDownloadHelper.make_chapter_dir(dest_folder, cap_num)
 
         img_urls = self.get_chapter_images_sync(content_id, chapter_id)
         if not img_urls:
@@ -399,32 +311,23 @@ class NartagSource(BaseSource):
                 f"Nartag: no se encontraron imágenes del manga para '{chapter_id}'"
             )
 
-        # ── Saltar si ya está completo ─────────────────────────────────────
         reader_url = f"{self.BASE_URL}/manga/{content_id}/capitulos/{chapter_id}/"
-        existing = self._count_images(cap_dir)
+        existing = count_images_in_dir(cap_dir)
         if existing >= len(img_urls):
             logger.debug(
                 f"Nartag: capítulo ya completo ({existing} imágenes): {cap_dir}"
             )
             return cap_dir
 
-        # ── Descargar ─────────────────────────────────────────────────────
         dl_headers = {'User-Agent': self.UA, 'Referer': reader_url}
-        for i, img_url in enumerate(img_urls, start=1):
-            ext      = self._url_ext(img_url)
-            filepath = os.path.join(cap_dir, f"{i:04d}.{ext}")
-            if os.path.exists(filepath):
-                continue
-            try:
-                with self._get_with_retry(img_url, headers=dl_headers, stream=True) as resp:
-                    with open(filepath, 'wb') as f:
-                        for chunk in resp.iter_content(8192):
-                            f.write(chunk)
-            except Exception as exc:
-                raise Exception(
-                    f"Nartag: error descargando imagen {i}/{len(img_urls)} "
-                    f"del capítulo '{chapter_id}': {exc}"
-                ) from exc
+        failures = MangaDownloadHelper.download_images(
+            img_urls, cap_dir, dl_headers, self._get_with_retry,
+        )
+        if failures:
+            raise Exception(
+                f"Nartag: {failures}/{len(img_urls)} imágenes fallaron "
+                f"en el capítulo '{chapter_id}'"
+            )
 
         logger.info(
             f"Nartag: capítulo '{chapter_id}' descargado ({len(img_urls)} imágenes)"

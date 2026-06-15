@@ -196,6 +196,7 @@ def _generate_source_file(name: str, source_type: str, label: str, base_url: str
     )
     filepath = SOURCES_DIR / f"{name}.py"
     SOURCES_DIR.mkdir(parents=True, exist_ok=True)
+    filepath.unlink(missing_ok=True)
     filepath.write_text(content, encoding='utf-8')
     logger.info(f"Generated source file: {filepath}")
 

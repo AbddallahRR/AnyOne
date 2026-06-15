@@ -8,6 +8,7 @@ from core.database import (
     get_watched_chapters,
     save_content_to_db,
 )
+from core.db.downloads import queue_find_active, queue_get_status, queue_insert
 from core.download_worker import download_queue
 from core.models import (
     DownloadChapterRequest,
@@ -19,18 +20,13 @@ from core.sources import get_source
 from core.utils import normalize_title
 
 from . import api_router
-from .common import (
-    _queue_find_active,
-    _queue_get_status,
-    _queue_insert,
-)
 
 logger = logging.getLogger(__name__)
 
 
 @api_router.get('/queue/status')
 def api_queue_status():
-    active, pending = _queue_get_status()
+    active, pending = queue_get_status()
     return {'active': active, 'queue': pending}
 
 
@@ -55,11 +51,11 @@ def api_download(data: DownloadRequest):
         if excluded_chapters:
             logger.debug(f"Excluyendo {len(excluded_chapters)} capítulos vistos para '{data.title}'")
 
-    existing = _queue_find_active(ref)
+    existing = queue_find_active(ref)
     if existing:
         raise HTTPException(status_code=409, detail=f"Ya está en cola (estado: {existing['status']})")
 
-    job_id = _queue_insert(ref, data.type, data.title)
+    job_id = queue_insert(ref, data.type, data.title)
     try:
         download_queue.put(DownloadJob(
             id=job_id,
@@ -86,11 +82,11 @@ def api_download_chapter(data: DownloadChapterRequest):
 
     ref = get_content_ref(data.source, data.content_id)
 
-    existing = _queue_find_active(ref, data.chapter_id)
+    existing = queue_find_active(ref, data.chapter_id)
     if existing:
         raise HTTPException(status_code=409, detail=f"Ya está en cola (estado: {existing['status']})")
 
-    job_id = _queue_insert(ref, data.type, data.title, data.chapter_id)
+    job_id = queue_insert(ref, data.type, data.title, data.chapter_id)
     try:
         download_queue.put(DownloadJob(
             id=job_id,
@@ -119,10 +115,10 @@ def api_download_chapters(data: DownloadChaptersRequest):
 
     job_ids = []
     for ch_id in data.chapter_ids:
-        existing = _queue_find_active(ref, ch_id)
+        existing = queue_find_active(ref, ch_id)
         if existing:
             continue
-        job_id = _queue_insert(ref, data.type, data.title, ch_id)
+        job_id = queue_insert(ref, data.type, data.title, ch_id)
         try:
             download_queue.put(DownloadJob(
                 id=job_id,

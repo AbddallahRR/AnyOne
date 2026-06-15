@@ -214,19 +214,6 @@ select.input-field {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ── Skeleton ── */
-.skeleton {
-  background: linear-gradient(90deg, var(--raised) 25%, rgba(255,255,255,0.04) 50%, var(--raised) 75%);
-  background-size: 400px 100%;
-  animation: shimmer 1.4s ease infinite;
-  border-radius: var(--card-r);
-}
-.skeleton-card { aspect-ratio: 2/3; border-radius: 14px; }
-@keyframes shimmer {
-  0%   { background-position: -400px 0; }
-  100% { background-position:  400px 0; }
-}
-
 /* ── Progress bar ── */
 .progress-bar { height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
 .progress-bar-fill {
@@ -490,8 +477,6 @@ select.input-field {
   .modal-header h3 { font-size: 15px; }
 }
 
-.queue-progress-bar { transition: width 0.4s cubic-bezier(0.4,0,0.2,1); }
-
 /* ── Confirm Dialog ── */
 .confirm-overlay {
   position: fixed;
@@ -620,12 +605,6 @@ select.input-field {
   transform: scale(0.92);
 }
 
-/* ── Card chips nowrap ── */
-.card-chips-nowrap {
-  flex-wrap: nowrap;
-  overflow: hidden;
-}
-
 /* ── Small chip ── */
 .chip-sm {
   font-size: 10px;
@@ -648,16 +627,3 @@ select.input-field {
 }
 .nav-enter          { animation: slideDown 0.32s cubic-bezier(0.4,0,0.2,1) both; }
 .page-enter         { animation: fadeUp   0.4s  cubic-bezier(0.4,0,0.2,1) both; }
-.hero-enter         { animation: fadeUp   0.45s cubic-bezier(0.4,0,0.2,1) both; }
-.hero-enter-delay   { animation: fadeUp   0.45s 0.08s cubic-bezier(0.4,0,0.2,1) both; }
-
-/* ── Glow pulse (downloads activos) ── */
-@keyframes glowPulse {
-  0%,100% { box-shadow: 0 0 0 0 rgba(124,92,252,0); }
-  50%     { box-shadow: 0 0 0 6px rgba(124,92,252,0.12); }
-}
-.downloading-glow { animation: glowPulse 2s ease infinite; }
-
-/* ── Reader fade (usado por reader.js) ── */
-@keyframes readerFadeIn { from { opacity: 0; } to { opacity: 1; } }
-.manga-page-entering { animation: readerFadeIn 0.2s ease both; }

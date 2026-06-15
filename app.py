@@ -11,7 +11,6 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 from starlette.types import Receive, Scope, Send
 
-import config
 from core.database import cleanup_download_queue, init_db
 from core.download_worker import start_workers, stop_workers
 from core.settings import settings
@@ -153,9 +152,9 @@ def health():
 if __name__ == '__main__':
     import uvicorn
     print("🔧 Iniciando servidor...")
-    print(f"📁 Directorio de descargas: {config.BASE_DOWNLOAD_DIR}")
-    print(f"🗄️  Base de datos: {config.DB_PATH}")
+    print(f"📁 Directorio de descargas: {settings.base_download_dir}")
+    print(f"🗄️  Base de datos: {settings.db_path}")
     print("🌐 Fuentes cargadas:")
     for stype, sources in SOURCES.items():
         print(f"   {stype}: {', '.join(sources.keys())}")
-    uvicorn.run('app:app', host=config.HOST, port=config.PORT, reload=config.DEBUG)
+    uvicorn.run('app:app', host=settings.host, port=settings.port, reload=settings.debug)

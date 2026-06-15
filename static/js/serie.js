@@ -43,9 +43,7 @@
       const url = isLocal
         ? `/api/content/local/${type}/${id}`
         : `/api/content/${type}/${source}/${id}`;
-      const res  = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      const data = await api.get(url);
 
       titleEl.textContent    = data.title    || 'Sin título';
       synopsisEl.textContent = data.synopsis || 'Sin descripción disponible.';
@@ -85,23 +83,21 @@
       if (isLocal) {
         // [OPT-1] Capítulos + watched en paralelo
         const [chapRes, watchRes] = await Promise.all([
-          fetch(`/api/chapters/local/${type}/${id}`),
-          fetch(`/api/watched/local:${id}`),
+          api.get(`/api/chapters/local/${type}/${id}`),
+          api.get(`/api/watched/local:${id}`),
         ]);
-        remote = chapRes.ok ? await chapRes.json() : [];
-        remote = remote.map(ch => ({ ...ch, is_downloaded: true }));
-        if (watchRes.ok) {
-          const data = await watchRes.json();
-          watchedSet = new Set((data.watched || []).map(Number));
+        remote = (chapRes || []).map(ch => ({ ...ch, is_downloaded: true }));
+        if (watchRes) {
+          watchedSet = new Set((watchRes.watched || []).map(Number));
         }
       } else {
         // [OPT-1] Remote + local en paralelo
         const [remoteRes, localRes] = await Promise.all([
-          fetch(`/api/chapters/${type}/${source}/${id}`),
-          fetch(`/api/chapters/local/${type}/${id}`),
+          api.get(`/api/chapters/${type}/${source}/${id}`),
+          api.get(`/api/chapters/local/${type}/${id}`),
         ]);
-        remote = remoteRes.ok ? await remoteRes.json() : [];
-        const localChaps = localRes.ok ? await localRes.json() : [];
+        remote = remoteRes || [];
+        const localChaps = localRes || [];
         localSet = new Set(localChaps.map(ch => String(ch.number)));
         remote = remote.map(ch => ({ ...ch, is_downloaded: localSet.has(String(ch.number)) }));
       }
@@ -304,38 +300,17 @@
     }
   }
 
-  // ── Confirm dialog ─────────────────────────────────────────────────────
-  function showConfirm(message, onConfirm) {
-    window.showConfirm(
-      'Confirmar acción',
-      message,
-      'Eliminar', 'danger'
-    ).then(function (confirmed) {
-      if (confirmed) onConfirm();
-    });
-  }
-
   // ── Acciones sobre capítulos ───────────────────────────────────────────
 
   async function toggleWatched(chapterNum) {
     try {
-      const res  = await fetch('/api/watched/toggle', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ content_ref: `local:${id}`, chapter: chapterNum }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        const wasWatched = data.status === 'watched';
-        // [OPT-2] Actualizar estado local y parchar solo esa pill
-        const ch = chapters.find(c => String(c.number) === String(chapterNum));
-        if (ch) ch.is_watched = wasWatched;
-        patchPillInDOM(chapterNum);
-        updateProgress();
-        notify(`Cap. ${chapterNum} marcado como ${wasWatched ? 'visto' : 'no visto'}`, 'success');
-      } else {
-        notify(`Error: ${data.error}`, 'error');
-      }
+      const data = await api.post('/api/watched/toggle', { content_ref: `local:${id}`, chapter: chapterNum });
+      const wasWatched = data.status === 'watched';
+      const ch = chapters.find(c => String(c.number) === String(chapterNum));
+      if (ch) ch.is_watched = wasWatched;
+      patchPillInDOM(chapterNum);
+      updateProgress();
+      notify(`Cap. ${chapterNum} marcado como ${wasWatched ? 'visto' : 'no visto'}`, 'success');
     } catch (err) {
       notify(`Error: ${err.message}`, 'error');
     }
@@ -343,22 +318,12 @@
 
   async function deleteChapter(chapterNum) {
     try {
-      const res  = await fetch('/api/delete-chapter', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ content_ref: `local:${id}`, type, chapter: chapterNum }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        notify(`Capítulo ${chapterNum} eliminado`, 'success');
-        // [OPT-2] Eliminar del array local y del DOM sin re-fetch
-        chapters = chapters.filter(c => String(c.number) !== String(chapterNum));
-        chaptersContainer.querySelector(`.chapter-pill[data-chapter="${chapterNum}"]`)?.remove();
-        if (chaptersCount) chaptersCount.textContent = `${chapters.length} capítulos`;
-        await loadProgress();
-      } else {
-        notify(`Error: ${data.error}`, 'error');
-      }
+      await api.post('/api/delete-chapter', { content_ref: `local:${id}`, type, chapter: chapterNum });
+      notify(`Capítulo ${chapterNum} eliminado`, 'success');
+      chapters = chapters.filter(c => String(c.number) !== String(chapterNum));
+      chaptersContainer.querySelector(`.chapter-pill[data-chapter="${chapterNum}"]`)?.remove();
+      if (chaptersCount) chaptersCount.textContent = `${chapters.length} capítulos`;
+      await loadProgress();
     } catch (err) {
       notify(`Error: ${err.message}`, 'error');
     }
@@ -367,22 +332,13 @@
   async function downloadSingleChapter(chapterNum, chapterId) {
     if (isLocal) { notify('Este contenido ya está descargado localmente.', 'info'); return; }
     try {
-      const res  = await fetch('/api/download/chapter', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({
-          type, source, content_id: id,
-          chapter_id: chapterId,
-          title: titleEl.textContent,
-        }),
+      await api.post('/api/download/chapter', {
+        type, source, content_id: id,
+        chapter_id: chapterId,
+        title: titleEl.textContent,
       });
-      const data = await res.json();
-      if (res.ok) {
-        notify(`Cap. ${chapterNum} encolado para descarga`, 'success');
-        if (window.showDownloadIndicator) window.showDownloadIndicator();
-      } else {
-        notify(`Error: ${data.error}`, 'error');
-      }
+      notify(`Cap. ${chapterNum} encolado para descarga`, 'success');
+      if (window.showDownloadIndicator) window.showDownloadIndicator();
     } catch (err) {
       notify(`Error: ${err.message}`, 'error');
     }
@@ -391,18 +347,9 @@
   async function downloadFullSeries() {
     if (isLocal) { notify('Esta serie ya está descargada localmente.', 'info'); return; }
     try {
-      const res  = await fetch('/api/download', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ type, source, content_id: id, title: titleEl.textContent }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        notify(`Descarga de serie completa encolada (ID: ${data.job_id})`, 'success');
-        if (window.showDownloadIndicator) window.showDownloadIndicator();
-      } else {
-        notify(`Error: ${data.error}`, 'error');
-      }
+      const data = await api.post('/api/download', { type, source, content_id: id, title: titleEl.textContent });
+      notify(`Descarga de serie completa encolada (ID: ${data.job_id})`, 'success');
+      if (window.showDownloadIndicator) window.showDownloadIndicator();
     } catch (err) {
       notify(`Error: ${err.message}`, 'error');
     }
@@ -422,13 +369,10 @@
       const refSource = originalSource || source;
       const refId     = originalId     || id;
       const contentRef = `${refSource}:${refId}`;
-      const res  = await fetch(`/api/library/check-updates/${contentRef}`, {
-        method: 'POST',
-      });
-      const data = await res.json();
-  
-      if (!res.ok || data.error) {
-        notify(`Error al buscar actualizaciones: ${data.error || res.status}`, 'error');
+      const data = await api.post(`/api/library/check-updates/${contentRef}`);
+
+      if (data.error) {
+        notify(`Error al buscar actualizaciones: ${data.error}`, 'error');
         return;
       }
   
@@ -466,26 +410,16 @@
     checkUpdatesBtn.querySelector('.btn-label').textContent = 'Descargando…';
 
     try {
-      const res  = await fetch('/api/download/chapters', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type:        type,
-          source:      refSource,
-          content_id:  refId,
-          title:       titleEl.textContent,
-          chapter_ids: chapterIds,
-        }),
+      const data = await api.post('/api/download/chapters', {
+        type:        type,
+        source:      refSource,
+        content_id:  refId,
+        title:       titleEl.textContent,
+        chapter_ids: chapterIds,
       });
-      const data = await res.json();
-      if (res.ok) {
-        notify(`${data.message}`, 'success');
-        if (window.showDownloadIndicator) window.showDownloadIndicator();
-        // Quitar badge de novedades
-        _showUpdateBadge(0);
-      } else {
-        notify(`Error al descargar: ${data.error}`, 'error');
-      }
+      notify(`${data.message}`, 'success');
+      if (window.showDownloadIndicator) window.showDownloadIndicator();
+      _showUpdateBadge(0);
     } catch (err) {
       notify(`Error al descargar: ${err.message}`, 'error');
     }
@@ -531,8 +465,7 @@
       const url = isLocal
         ? `/api/progress/local/${type}/${id}`
         : `/api/progress/${type}/${source}/${id}`;
-      const res  = await fetch(url);
-      const prog = await res.json();
+      const prog = await api.get(url);
 
       if (currentChapterSpan) currentChapterSpan.textContent = prog.chapter;
       _progressData = prog; // cachear para updateProgress()
@@ -559,9 +492,9 @@
       const savedTime = parseInt(prog.progress) || 0;
       if (isLocal) {
         try {
-          const durRes = await fetch(`/api/video-duration/anime/${id}/${prog.chapter}`);
-          if (durRes.ok) {
-            const { duration } = await durRes.json();
+          const durData = await api.get(`/api/video-duration/anime/${id}/${prog.chapter}`).catch(() => null);
+          if (durData) {
+            const { duration } = durData;
             if (duration > 0) {
               const pct = Math.round((savedTime / duration) * 100);
               if (progressPercentSpan) progressPercentSpan.textContent = `${pct}%`;
@@ -599,9 +532,8 @@
 
   async function getTotalImagesInChapter(chapterNum) {
     try {
-      const res = await fetch(`/api/play/local/manga/${id}/${chapterNum}`);
-      if (!res.ok) return 0;
-      const paths = await res.json();
+      const paths = await api.get(`/api/play/local/manga/${id}/${chapterNum}`).catch(() => null);
+      if (!paths) return 0;
       return paths.length;
     } catch { return 0; }
   }
@@ -621,11 +553,7 @@
     // novedades para que el badge global se actualice.
     if (isLocal && originalSource) {
       const contentRef = `${originalSource}:${originalId}`;
-      fetch('/api/library/acknowledge-updates', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content_ref: contentRef }),
-      }).catch(() => {});
+      api.post('/api/library/acknowledge-updates', { content_ref: contentRef }).catch(() => {});
     }
 
     // Botones según contexto
@@ -655,37 +583,28 @@
 
     downloadAllBtn?.addEventListener('click', downloadFullSeries);
 
-    deleteWatchedBtn?.addEventListener('click', () => {
-      showConfirm(
+    deleteWatchedBtn?.addEventListener('click', async () => {
+      const confirmed = await window.showConfirm(
+        'Confirmar acción',
         '¿Eliminar todos los capítulos vistos (excepto el último)? Esta acción no se puede deshacer.',
-        async () => {
+        'Eliminar', 'danger'
+      );
+      if (!confirmed) return;
           try {
             const ref = isLocal ? `local:${id}` : `${source}:${id}`;
-            const res  = await fetch('/api/delete-watched', {
-              method:  'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body:    JSON.stringify({ content_ref: ref, type }),
+            const data = await api.post('/api/delete-watched', { content_ref: ref, type });
+            const n = data.deleted?.length ?? 0;
+            notify(`Se eliminaron ${n} capítulo${n !== 1 ? 's' : ''}`, 'success');
+            const deletedNums = new Set((data.deleted || []).map(String));
+            chapters = chapters.filter(c => !deletedNums.has(String(c.number)));
+            deletedNums.forEach(num => {
+              chaptersContainer.querySelector(`.chapter-pill[data-chapter="${num}"]`)?.remove();
             });
-            const data = await res.json();
-            if (res.ok) {
-              const n = data.deleted?.length ?? 0;
-              notify(`Se eliminaron ${n} capítulo${n !== 1 ? 's' : ''}`, 'success');
-              // [OPT-2] Eliminar del array + DOM sin re-fetch
-              const deletedNums = new Set((data.deleted || []).map(String));
-              chapters = chapters.filter(c => !deletedNums.has(String(c.number)));
-              deletedNums.forEach(num => {
-                chaptersContainer.querySelector(`.chapter-pill[data-chapter="${num}"]`)?.remove();
-              });
-              if (chaptersCount) chaptersCount.textContent = `${chapters.length} capítulos`;
-              await loadProgress();
-            } else {
-              notify(`Error: ${data.error || 'Error desconocido'}`, 'error');
-            }
+            if (chaptersCount) chaptersCount.textContent = `${chapters.length} capítulos`;
+            await loadProgress();
           } catch (err) {
             notify(`Error: ${err.message}`, 'error');
           }
-        }
-      );
     });
 
     sortBtn?.addEventListener('click', () => {
@@ -704,8 +623,7 @@
 
     async function pollSerieDownloadProgress() {
       try {
-        const res  = await fetch('/api/queue/status');
-        const data = await res.json();
+        const data = await api.get('/api/queue/status');
         const all   = [...(data.active || []), ...(data.queue || [])];
         const match = all.filter(j => j.content_ref === contentRef && (j.status === 'downloading' || j.status === 'pending'));
 

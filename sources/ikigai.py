@@ -12,11 +12,12 @@ from bs4 import BeautifulSoup
 from core.chapter_utils import chapter_float_key
 from core.disk_cache import search_cache
 from core.html_utils import normalize_image_url, url_ext
-from core.http_pool import HTTP_TIMEOUT, HttpPool
-from core.models import Chapter, SearchResult, SeriesDetails, chapter_to_filename
-from core.throttle import rate_limiter
+from core.http_pool import HttpPool
+from core.models import Chapter, SearchResult, SeriesDetails
+from core.utils import count_images_in_dir
 
 from . import BaseSource
+from .common import HttpClientMixin, MangaDownloadHelper
 
 logger = logging.getLogger(__name__)
 
@@ -26,37 +27,16 @@ _PAGE_TTL     = 60 * 60 * 24 * 7   # 7 días  — páginas individuales, más es
 _PAGE_WORKERS = 4                   # hilos paralelos para descargar páginas del catálogo
 
 
-class IkigaiSource(BaseSource):
+class IkigaiSource(HttpClientMixin, BaseSource):
     type = 'manga'
     label = 'Ikigai'
     BASE_URL      = "https://visorikigai.yomod.xyz"
     CATALOGO_BASE = "https://visorikigai.yomod.xyz/series/"
-    UA            = "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0"
 
     # Lock y timestamp a nivel de clase: compartidos entre todas las instancias/workers
     _refresh_lock     = threading.Lock()
     _last_refresh_ts  = 0.0
     _REFRESH_COOLDOWN = 60 * 60 * 24   # 24 horas entre refrescos en background
-
-    def __init__(self):
-        self.scraper = HttpPool.get_scraper()
-
-    # -----------------------------------------------------------------------
-    # HTTP helpers
-    # -----------------------------------------------------------------------
-
-    @property
-    def _headers(self) -> dict:
-        return {'User-Agent': self.UA}
-
-    def _get(self, url: str, **kwargs):
-        rate_limiter.wait(url)
-        kwargs.setdefault('timeout', HTTP_TIMEOUT)
-        extra_headers = kwargs.pop('headers', {})
-        headers = {**self._headers, **extra_headers}
-        resp = self.scraper.get(url, headers=headers, **kwargs)
-        resp.raise_for_status()
-        return resp
 
     def _fetch_url(self, url: str, **kwargs) -> str:
         return self._get(url, **kwargs).text
@@ -459,32 +439,17 @@ class IkigaiSource(BaseSource):
             raise Exception(f"Ikigai: no se encontraron imágenes en capítulo {chapter_id}")
 
         cap_num = chapter_number or chapter_id
-        dir_name = (f"cap_{chapter_to_filename(cap_num)}"
-                    if cap_num.replace('.', '', 1).isdigit()
-                    else f"cap_{cap_num}")
-        cap_dir  = os.path.join(dest_folder, dir_name)
-        os.makedirs(cap_dir, exist_ok=True)
+        cap_dir = MangaDownloadHelper.make_chapter_dir(dest_folder, cap_num)
 
         cap_url = f"{self.BASE_URL}/capitulo/{chapter_id}/"
-        dl_headers       = {**self._headers, 'Referer': cap_url}
-        downloaded_count = 0
-        for i, img_url in enumerate(img_urls, start=1):
-            ext      = url_ext(img_url)
-            filepath = os.path.join(cap_dir, f"{i:04d}.{ext}")
-            if os.path.exists(filepath):
-                downloaded_count += 1
-                continue
-            try:
-                with self._get_with_retry(img_url, headers=dl_headers, stream=True) as resp:
-                    with open(filepath, 'wb') as f:
-                        for chunk in resp.iter_content(8192):
-                            f.write(chunk)
-                downloaded_count += 1
-            except Exception as exc:
-                logger.warning(f"Ikigai: error descargando imagen {i} "
-                               f"del capítulo {chapter_id} (ignorada): {exc}")
+        dl_headers = {**self._headers, 'Referer': cap_url}
+        failures = MangaDownloadHelper.download_images(
+            img_urls, cap_dir, dl_headers, self._get_with_retry,
+        )
 
-        if downloaded_count == 0:
+        total = len(img_urls)
+        downloaded = total - failures
+        if downloaded == 0:
             raise Exception(f"Ikigai: no se pudo descargar ninguna imagen del capítulo {chapter_id}")
 
         return cap_dir

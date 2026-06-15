@@ -27,6 +27,7 @@ from core.models import Chapter, SearchResult, SeriesDetails, chapter_to_filenam
 from core.throttle import rate_limiter
 
 from . import BaseSource
+from .common import HttpClientMixin
 
 logger = logging.getLogger(__name__)
 
@@ -42,11 +43,11 @@ def get_last_error(name: str) -> str:
 
 # --- IGNORE --- (base class for generated scrapers, not standalone)
 
-class DynamicSource(BaseSource):
+class DynamicSource(HttpClientMixin, BaseSource):
     CONFIG_NAME = ''
 
     def __init__(self):
-        self.scraper = HttpPool.get_scraper()
+        super().__init__()
         self._cfg = None
 
     def _load_config(self) -> dict:
@@ -113,20 +114,6 @@ class DynamicSource(BaseSource):
             extra = self._cfg.get('config', {}).get('extra_headers', {})
             headers.update(extra)
         return headers
-
-    def _get(self, url: str, **kwargs):
-        rate_limiter.wait(url)
-        kwargs.setdefault('timeout', HTTP_TIMEOUT)
-        headers = self._headers.copy()
-        if 'headers' in kwargs:
-            headers.update(kwargs.pop('headers'))
-        scraper = HttpPool.get_scraper()
-        resp = scraper.get(url, headers=headers, **kwargs)
-        resp.raise_for_status()
-        return resp
-
-    def _get_json(self, url: str, **kwargs) -> dict:
-        return self._get(url, **kwargs).json()
 
     def _extract_attr(self, soup, selector: str, attr: str = 'text') -> str:
         if not selector:

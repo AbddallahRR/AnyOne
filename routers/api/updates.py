@@ -4,8 +4,8 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
-from config import ANIME_DOWNLOAD_DIR, MANGA_DOWNLOAD_DIR
 from core.chapter_utils import chapter_float_key
+from core.settings import settings
 from core.database import (
     get_series_to_check,
     mark_series_checked,
@@ -31,7 +31,7 @@ def _check_series_for_new_chapters(content_ref: str) -> dict:
         source_name, content_id = content_ref.split(':', 1)
 
         content_type = None
-        for ct, base in [('anime', ANIME_DOWNLOAD_DIR), ('manga', MANGA_DOWNLOAD_DIR)]:
+        for ct, base in [('anime', settings.anime_download_dir), ('manga', settings.manga_download_dir)]:
             base_path = Path(base)
             serie_dir = _find_local_serie_dir(base_path, content_id)
             if serie_dir:

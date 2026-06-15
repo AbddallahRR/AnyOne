@@ -324,8 +324,7 @@
   // ── Fetch y render del estado de la cola ──────────────────────────────
   async function fetchQueueStatus() {
     try {
-      const res  = await fetch('/api/queue/status');
-      const data = await res.json();
+      const data = await api.get('/api/queue/status');
       const active  = data.active  || [];
       const pending = (data.queue  || []).filter(j => j.status === 'pending');
       const failed  = (data.queue  || []).filter(j => j.status === 'failed');

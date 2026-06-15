@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import HTTPException, Request
+from fastapi import Body, HTTPException
 
 from core.database import get_source_settings, update_source_settings
 from core.sources import get_all_sources_meta
@@ -26,11 +26,7 @@ async def api_get_source_settings():
 
 
 @api_router.put('/settings/sources')
-async def api_update_source_settings(request: Request):
-    body = await request.json()
-    if not isinstance(body, dict):
-        raise HTTPException(status_code=400, detail='Se espera un objeto {name: bool, ...}')
-
+async def api_update_source_settings(body: dict[str, bool] = Body(...)):
     meta = get_all_sources_meta()
     valid_names = {s['name'] for s in meta}
     unknown = set(body.keys()) - valid_names

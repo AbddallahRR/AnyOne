@@ -175,9 +175,8 @@
       let url = `/api/search?type=${type}&source=${source}&q=${encodeURIComponent(query)}`;
       if (refresh) url += '&refresh=1';
 
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      renderSearchResults(await res.json(), type, source);
+      const data = await api.get(url);
+      renderSearchResults(data, type, source);
     } catch (err) {
       container.innerHTML = `
         <div class="empty-state">
@@ -354,18 +353,9 @@
   // ── Descarga de serie completa ─────────────────────────────────────────
   async function downloadSeries(type, source, contentId, title) {
     try {
-      const res  = await fetch('/api/download', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ type, source, content_id: contentId, title, exclude_watched: true }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        showNotification(`Error: ${data.error}`, 'error');
-      } else {
-        showNotification('Descarga encolada', 'success');
-        if (window.showDownloadIndicator) window.showDownloadIndicator();
-      }
+      const data = await api.post('/api/download', { type, source, content_id: contentId, title, exclude_watched: true });
+      showNotification('Descarga encolada', 'success');
+      if (window.showDownloadIndicator) window.showDownloadIndicator();
     } catch (err) {
       showNotification(`Error al encolar: ${err.message}`, 'error');
     }
@@ -391,13 +381,12 @@
         <p>Cargando biblioteca…</p>
       </div>`;
     try {
-      const [itemsRes, statusRes] = await Promise.all([
-        fetch('/api/library'),
-        fetch('/api/library/status'),
+      const [items, statusData] = await Promise.all([
+        api.get('/api/library'),
+        api.get('/api/library/status').catch(() => ({})),
       ]);
-      if (!itemsRes.ok) throw new Error(`HTTP ${itemsRes.status}`);
-      _libraryItems    = await itemsRes.json();
-      _libraryStatuses = statusRes.ok ? await statusRes.json() : {};
+      _libraryItems    = items;
+      _libraryStatuses = statusData;
       _initLibraryControls();
       applyLibraryView();
       fetchUpdatesBadge();
@@ -413,8 +402,7 @@
   // ── Badge global de novedades ─────────────────────────────────────────
   async function fetchUpdatesBadge() {
     try {
-      const res  = await fetch('/api/library/updates');
-      const data = await res.json();
+      const data = await api.get('/api/library/updates');
       const total = data.total || 0;
 
       // Quitar badge anterior si existe
@@ -714,26 +702,17 @@
         closeStatusPopup();
         if (opt.value === current) return;
         try {
-          const res = await fetch('/api/library/status', {
-            method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({ content_ref: ref, status: opt.value }),
-          });
-          if (res.ok) {
-            _libraryStatuses[ref] = opt.value;
-            showNotification(
-              opt.value === 'none' ? 'Etiqueta eliminada' : `Marcado como ${opt.label}`,
-              'success', 2000
-            );
-            // Actualizar solo la card afectada (sin re-render completo)
-            const id = ref.replace('local:', '');
-            const oldNode = _renderedCards.get(id);
-            if (oldNode) oldNode.remove(); // quitar del DOM primero
-            _renderedCards.delete(id);     // luego del mapa
-            applyLibraryView();
-          } else {
-            showNotification('Error al guardar etiqueta', 'error');
-          }
+          await api.post('/api/library/status', { content_ref: ref, status: opt.value });
+          _libraryStatuses[ref] = opt.value;
+          showNotification(
+            opt.value === 'none' ? 'Etiqueta eliminada' : `Marcado como ${opt.label}`,
+            'success', 2000
+          );
+          const id = ref.replace('local:', '');
+          const oldNode = _renderedCards.get(id);
+          if (oldNode) oldNode.remove();
+          _renderedCards.delete(id);
+          applyLibraryView();
         } catch (err) {
           showNotification(`Error: ${err.message}`, 'error');
         }
@@ -789,9 +768,7 @@
   // ── Poblar selectores de fuentes dinámicamente ─────────────────────────
   async function populateSourceDropdowns() {
     try {
-      const res = await fetch('/api/settings/sources');
-      if (!res.ok) return;
-      const sources = await res.json();
+      const sources = await api.get('/api/settings/sources');
       const animeSelect = document.getElementById('anime-source');
       const mangaSelect = document.getElementById('manga-source');
 

@@ -4,7 +4,6 @@
 import logging
 import os
 import re
-import time
 from pathlib import Path
 from urllib.parse import quote as _url_quote
 from urllib.parse import urljoin, urlparse
@@ -12,64 +11,22 @@ from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 
 from core.disk_cache import search_cache
-from core.http_pool import HTTPHTTP_TIMEOUT, HttpPool
+from core.html_utils import url_ext
 from core.models import Chapter, SearchResult, SeriesDetails, chapter_to_filename
-from core.throttle import rate_limiter
+from core.utils import count_images_in_dir
 
 from . import BaseSource
+from .common import HttpClientMixin, MangaDownloadHelper
 
 logger = logging.getLogger(__name__)
 
-HTTP_TIMEOUT   = 30
 
 
-class ManhwawebSource(BaseSource):
+class ManhwawebSource(HttpClientMixin, BaseSource):
     type = 'manga'
     label = 'ManhwaWeb'
     BASE_URL = "https://www.manhwaweb.com"
     API_BASE = "https://manhwawebbackend-production.up.railway.app"
-    UA       = "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0"
-
-    def __init__(self):
-        self.scraper = HttpPool.get_scraper()
-
-    # -----------------------------------------------------------------------
-    # HTTP helpers
-    # -----------------------------------------------------------------------
-
-    @property
-    def _headers(self) -> dict:
-        return {'User-Agent': self.UA}
-
-    def _get(self, url: str, **kwargs):
-        rate_limiter.wait(url)
-        kwargs.setdefault('timeout', HTTP_TIMEOUT)
-        headers = self._headers.copy()
-        if 'headers' in kwargs:
-            headers.update(kwargs.pop('headers'))
-        resp = self.scraper.get(url, headers=headers, **kwargs)
-        resp.raise_for_status()
-        return resp
-
-    def _get_json(self, url: str, **kwargs) -> dict:
-        kwargs.setdefault('headers', {})
-        kwargs['headers']['Accept'] = 'application/json'
-        return self._get(url, **kwargs).json()
-
-    def _get_with_retry(self, url: str, retries: int = 3,
-                        backoff: float = 1.0, **kwargs):
-        last_exc = None
-        for attempt in range(retries):
-            try:
-                return self._get(url, **kwargs)
-            except Exception as exc:
-                last_exc = exc
-                if attempt < retries - 1:
-                    wait = backoff * (2 ** attempt)
-                    logger.warning(f"ManhwaWeb: reintento {attempt + 1}/{retries - 1} "
-                                   f"para {url[:80]}… (espera {wait:.1f}s): {exc}")
-                    time.sleep(wait)
-        raise last_exc
 
     # -----------------------------------------------------------------------
     # URL helpers
@@ -83,22 +40,10 @@ class ManhwawebSource(BaseSource):
             src = 'https:' + src
         elif src.startswith('/'):
             src = urljoin(base_url, src)
-        # Filtrar solo placeholders obvios, no por extensión
-        # (muchos CDNs sirven imágenes sin extensión o con params)
         lower = src.lower()
         if any(x in lower for x in ('loading', 'placeholder', 'blank.', 'spinner')):
             return None
         return src
-
-    @staticmethod
-    def _url_ext(url: str) -> str:
-        path = urlparse(url).path
-        ext  = os.path.splitext(path)[1].lstrip('.')
-        # También detectar extensión en query params (ej. ?format=webp)
-        if ext not in {'jpg', 'jpeg', 'png', 'webp'}:
-            m = re.search(r'[?&]format=(jpg|jpeg|png|webp)', url, re.I)
-            ext = m.group(1) if m else 'jpg'
-        return ext
 
     @staticmethod
     def _chapter_num_from_id(chapter_id: str) -> str:
@@ -131,48 +76,6 @@ class ManhwawebSource(BaseSource):
                 return 0
         result.sort(key=_sort_key)
         return result
-
-    # -----------------------------------------------------------------------
-    # Descarga de imágenes helper
-    # -----------------------------------------------------------------------
-
-    def _download_images(self, img_urls: list[str], cap_dir: str,
-                         referer: str) -> int:
-        """
-        Descarga la lista de imágenes en `cap_dir`.
-        Devuelve el número de fallos. El llamador decide si lanzar excepción.
-        Omite imágenes que ya existen en disco.
-        """
-        dl_headers  = {'User-Agent': self.UA, 'Referer': referer}
-        failures = 0
-
-        for i, img_url in enumerate(img_urls, start=1):
-            norm = self._normalize_url(img_url, self.BASE_URL)
-            if not norm:
-                continue
-            ext      = self._url_ext(norm)
-            filepath = os.path.join(cap_dir, f"{i:04d}.{ext}")
-            if os.path.exists(filepath):
-                continue
-            try:
-                with self._get_with_retry(img_url, headers=dl_headers, stream=True) as resp:
-                    with open(filepath, 'wb') as f:
-                        for chunk in resp.iter_content(8192):
-                            f.write(chunk)
-            except Exception as exc:
-                logger.exception(f"ManhwaWeb: error descargando imagen {i} ({norm}): {exc}")
-                failures += 1
-
-        return failures
-
-    @staticmethod
-    def _count_images(cap_dir: str) -> int:
-        """Cuenta imágenes ya descargadas en un directorio de capítulo."""
-        exts = {'.jpg', '.jpeg', '.png', '.webp'}
-        return sum(
-            1 for f in Path(cap_dir).iterdir()
-            if f.is_file() and f.suffix.lower() in exts
-        )
 
     # -----------------------------------------------------------------------
     # Búsqueda
@@ -412,29 +315,24 @@ class ManhwawebSource(BaseSource):
     def download_chapter_sync(self, content_id: str, chapter_id: str,
                          dest_folder: str, chapter_number: str | None = None) -> str:
         num = chapter_number or self._chapter_num_from_id(chapter_id)
-        if '_' in num:
-            dir_name = f"cap_{num}"
-        elif num.replace('.', '', 1).isdigit():
-            dir_name = f"cap_{chapter_to_filename(num)}"
-        else:
-            dir_name = f"cap_{num}"
-        cap_dir     = os.path.join(dest_folder, dir_name)
-        os.makedirs(cap_dir, exist_ok=True)
+        cap_dir = MangaDownloadHelper.make_chapter_dir(dest_folder, num)
 
         img_urls = self.get_chapter_images_sync(content_id, chapter_id)
 
-        # Si get_chapter_images_sync falló, intentar con el scraping+descarga original
         if not img_urls:
             logger.warning(f"ManhwaWeb: get_chapter_images_sync devolvió vacío para "
                            f"'{chapter_id}', usando fallback scrape+descarga")
             return self._download_chapter_scrape(content_id, chapter_id, cap_dir)
 
-        existing = self._count_images(cap_dir)
+        existing = count_images_in_dir(cap_dir)
         if existing >= len(img_urls):
             logger.debug(f"ManhwaWeb: capítulo ya completo ({existing} imágenes): {cap_dir}")
             return cap_dir
 
-        failures = self._download_images(img_urls, cap_dir, referer=self.BASE_URL)
+        dl_headers = {'User-Agent': self.UA, 'Referer': self.BASE_URL}
+        failures = MangaDownloadHelper.download_images(
+            img_urls, cap_dir, dl_headers, self._get_with_retry,
+        )
         if failures:
             raise Exception(
                 f"ManhwaWeb: {failures}/{len(img_urls)} imágenes fallaron "
@@ -456,20 +354,15 @@ class ManhwawebSource(BaseSource):
         container = (soup.select_one('#chapter-content, .chapter-content, .reading-content')
                      or soup)
 
-        # Deduplicar respetando orden del DOM
         seen: set[str]      = set()
         img_urls: list[str] = []
 
-        # Recopilar todos los <img>, incluyendo los dentro de <noscript>
-        # (técnica común de lazy loading donde la img real va en noscript)
         all_imgs = list(container.find_all('img'))
         for noscript in container.find_all('noscript'):
             inner = BeautifulSoup(noscript.decode_contents(), 'html.parser')
             all_imgs.extend(inner.find_all('img'))
 
         for img in all_imgs:
-            # Priorizar data-src y variantes de lazy loading sobre src,
-            # ya que src puede contener un placeholder (loading.gif, etc.)
             src = (img.get('data-src') or img.get('data-lazy') or
                    img.get('data-original') or img.get('data-url') or
                    img.get('src'))
@@ -481,7 +374,10 @@ class ManhwawebSource(BaseSource):
         if not img_urls:
             raise Exception(f"ManhwaWeb: no se encontraron imágenes en '{chapter_id}'")
 
-        failures = self._download_images(img_urls, cap_dir, referer=self.BASE_URL)
+        dl_headers = {'User-Agent': self.UA, 'Referer': self.BASE_URL}
+        failures = MangaDownloadHelper.download_images(
+            img_urls, cap_dir, dl_headers, self._get_with_retry,
+        )
         if failures:
             raise Exception(
                 f"ManhwaWeb: {failures}/{len(img_urls)} imágenes fallaron "
