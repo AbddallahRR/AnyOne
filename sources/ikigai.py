@@ -2,19 +2,19 @@
 # -*- coding: utf-8 -*-
 
 import logging
-import os
 import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from bs4 import BeautifulSoup
 
 from core.chapter_utils import chapter_float_key
 from core.disk_cache import search_cache
-from core.html_utils import normalize_image_url, url_ext
-from core.http_pool import HttpPool
+from core.html_utils import normalize_image_url
+from core.http_pool import HTTP_TIMEOUT, HttpPool
 from core.models import Chapter, SearchResult, SeriesDetails
-from core.utils import count_images_in_dir
+from core.throttle import rate_limiter
 
 from . import BaseSource
 from .common import HttpClientMixin, MangaDownloadHelper

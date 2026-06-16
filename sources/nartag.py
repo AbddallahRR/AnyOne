@@ -9,7 +9,9 @@ from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 
 from core.disk_cache import search_cache
+from core.http_pool import HTTP_TIMEOUT
 from core.models import Chapter, SearchResult, SeriesDetails
+from core.throttle import rate_limiter
 from core.utils import count_images_in_dir
 
 from . import BaseSource
@@ -299,8 +301,6 @@ class NartagSource(HttpClientMixin, BaseSource):
 
     def download_chapter_sync(self, content_id: str, chapter_id: str,
                          dest_folder: str, chapter_number: str | None = None) -> str:
-        from core.html_utils import url_ext
-        from core.models import chapter_to_filename
         m       = re.search(r'capitulo-(\d+(?:\.\d+)?)', chapter_id)
         cap_num = m.group(1) if m else (chapter_number or chapter_id)
         cap_dir = MangaDownloadHelper.make_chapter_dir(dest_folder, cap_num)

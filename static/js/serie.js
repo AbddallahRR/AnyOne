@@ -31,6 +31,7 @@
   const chaptersCount       = document.getElementById('chapters-count');
   const badgeEl             = document.getElementById('serie-type-badge');
   const checkUpdatesBtn = document.getElementById('check-updates-btn');
+  const resetCacheBtn = document.getElementById('reset-cache-btn');
 
   function notify(msg, t = 'info') {
     if (window.showNotification) window.showNotification(msg, t);
@@ -355,6 +356,29 @@
     }
   }
 
+  async function resetCache() {
+    resetCacheBtn.disabled = true;
+    const icon = resetCacheBtn.querySelector('i');
+    if (icon) icon.className = 'fas fa-spinner fa-spin';
+    resetCacheBtn.querySelector('.btn-label').textContent = 'Recargando…';
+
+    try {
+      const refSource = originalSource || source;
+      const refId = originalId || id;
+      await api.post(`/api/cache/clear/${type}/${refSource}/${refId}`);
+      notify('Caché limpiado, recargando datos…', 'info');
+      await Promise.all([loadSerieDetails(), loadChapters()]);
+      await loadProgress();
+      notify('✓ Datos actualizados', 'success');
+    } catch (err) {
+      notify(`Error: ${err.message}`, 'error');
+    } finally {
+      resetCacheBtn.disabled = false;
+      if (icon) icon.className = 'fas fa-rotate-right';
+      resetCacheBtn.querySelector('.btn-label').textContent = 'Recargar';
+    }
+  }
+
   async function checkForUpdates() {
     if (!isLocal) return;
   
@@ -572,6 +596,10 @@
     } else {
       if (downloadAllBtn)   downloadAllBtn.classList.remove('hidden');
       if (continueBtn)      continueBtn.classList.remove('hidden');
+      if (resetCacheBtn) {
+        resetCacheBtn.classList.remove('hidden');
+        resetCacheBtn.addEventListener('click', resetCache);
+      }
     }
 
     continueBtn?.addEventListener('click', () => {

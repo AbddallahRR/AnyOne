@@ -145,3 +145,11 @@ async def api_chapters(content_type: str, source: str, content_id: str, refresh:
     except Exception:
         logger.exception("Error en api_chapters:")
         raise HTTPException(status_code=500, detail='Error al obtener capitulos')
+
+
+@api_router.post('/cache/clear/{content_type}/{source}/{content_id}')
+def api_clear_content_cache(content_type: str, source: str, content_id: str):
+    cache_key = f'{content_type}:{source}:{content_id}'
+    details_cache.delete(cache_key)
+    chapters_cache.delete(cache_key)
+    return {'cleared': True}

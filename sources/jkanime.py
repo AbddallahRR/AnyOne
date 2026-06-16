@@ -12,8 +12,9 @@ from urllib.parse import quote as _url_quote
 from bs4 import BeautifulSoup
 
 from core.disk_cache import search_cache
-from core.http_pool import HTTP_TIMEOUT
+from core.http_pool import HTTP_TIMEOUT, HttpPool
 from core.models import Chapter, EpisodeLink, EpisodeLinks, SearchResult, SeriesDetails, chapter_to_filename
+from core.throttle import rate_limiter
 
 from . import BaseSource
 from .common import HttpClientMixin
