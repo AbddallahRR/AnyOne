@@ -5,12 +5,13 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from core.chapter_utils import chapter_float_key
-from core.settings import settings
 from core.database import (
     get_series_to_check,
     mark_series_checked,
     set_series_updates,
 )
+from core.disk_cache import chapters_cache
+from core.settings import settings
 from core.sources import get_source
 
 from . import api_router
@@ -46,6 +47,7 @@ def _check_series_for_new_chapters(content_ref: str) -> dict:
         if not src:
             return {'content_ref': content_ref, 'new_chapters': [], 'error': f"Fuente '{source_name}' no disponible"}
 
+        chapters_cache.delete(f'{content_type}:{source_name}:{content_id}')
         remote_chapters = src.get_chapters_sync(content_id)
 
         if content_type == 'anime':

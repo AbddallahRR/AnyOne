@@ -3,6 +3,7 @@
   'use strict';
 
   const headers = { 'Content-Type': 'application/json' };
+  const inflight = new Map();
 
   async function handleError(res) {
     if (!res.ok) {
@@ -13,10 +14,18 @@
     return res.text().then(t => t ? JSON.parse(t) : null);
   }
 
+  async function dedupedGet(path) {
+    const pending = inflight.get(path);
+    if (pending) return pending;
+    const promise = fetch(path, { headers }).then(handleError);
+    inflight.set(path, promise);
+    promise.finally(() => { if (inflight.get(path) === promise) inflight.delete(path); });
+    return promise;
+  }
+
   window.api = {
     async get(path) {
-      const res = await fetch(path, { headers });
-      return handleError(res);
+      return dedupedGet(path);
     },
     async post(path, body) {
       const res = await fetch(path, { method: 'POST', headers, body: JSON.stringify(body) });

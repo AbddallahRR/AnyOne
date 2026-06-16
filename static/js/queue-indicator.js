@@ -251,6 +251,19 @@
     document.body.appendChild(popup);
   }
 
+  // ── BroadcastChannel (compartir polling entre pestañas) ────────────────
+  let _bc = null;
+  try {
+    _bc = new BroadcastChannel('anyone:queue');
+    _bc.onmessage = (ev) => {
+      if (ev.data?.type === 'queue') {
+        _applyQueueData(ev.data.data);
+        forceUntil = Date.now() + 5000;
+        scheduleNext(3000);
+      }
+    };
+  } catch (_) { /* BroadcastChannel no soportado */ }
+
   // ── Estado ─────────────────────────────────────────────────────────────
   let pollingTimer     = null;
   let forceUntil       = 0;
@@ -321,63 +334,67 @@
       </div>`;
   }
 
+  // ── Renderizar datos de cola (desde fetch o broadcast) ────────────────
+  function _applyQueueData(data) {
+    const active  = data.active  || [];
+    const pending = (data.queue  || []).filter(j => j.status === 'pending');
+    const failed  = (data.queue  || []).filter(j => j.status === 'failed');
+
+    const hasActivity = active.length > 0 || pending.length > 0;
+    const label       = document.getElementById('qi-label');
+    const countBadge  = document.getElementById('qi-count');
+
+    if (active.length > 0) {
+      const best = active.reduce((a, b) => (a.progress > b.progress ? a : b), active[0]);
+      if (label) label.textContent = truncate(best.title);
+      if (countBadge) {
+        countBadge.style.display = active.length > 1 ? 'inline' : 'none';
+        countBadge.textContent   = `+${active.length - 1}`;
+      }
+      showIndicator();
+    } else if (pending.length > 0) {
+      if (label) label.textContent = `En cola: ${pending.length}`;
+      if (countBadge) countBadge.style.display = 'none';
+      showIndicator();
+    } else if (failed.length > 0 && Date.now() < forceUntil) {
+      if (label) label.textContent = `${failed.length} error${failed.length > 1 ? 'es' : ''}`;
+      if (countBadge) countBadge.style.display = 'none';
+      showIndicator();
+    } else if (!hasActivity && Date.now() >= forceUntil) {
+      hideIndicator();
+    }
+
+    const listDiv = document.getElementById('qi-list');
+    if (listDiv) {
+      let html = '';
+      if (active.length) {
+        html += `<div class="qi-section-title">Descargando ahora</div>`;
+        html += active.map(buildJobHtml).join('');
+      }
+      if (pending.length) {
+        html += `<div class="qi-section-title" style="margin-top:${active.length ? 10 : 0}px;">En cola</div>`;
+        html += pending.map(buildJobHtml).join('');
+      }
+      if (failed.length) {
+        html += `<div class="qi-section-title" style="margin-top:${active.length || pending.length ? 10 : 0}px; color:#f87171;">Errores recientes</div>`;
+        html += failed.map(buildJobHtml).join('');
+      }
+      if (!active.length && !pending.length && !failed.length) {
+        html = `<div class="qi-empty"><i class="fas fa-check-circle" style="margin-right:6px; color:#4ade80;"></i>Sin actividad</div>`;
+      }
+      listDiv.innerHTML = html;
+    }
+
+    return hasActivity;
+  }
+
   // ── Fetch y render del estado de la cola ──────────────────────────────
   async function fetchQueueStatus() {
     try {
       const data = await api.get('/api/queue/status');
-      const active  = data.active  || [];
-      const pending = (data.queue  || []).filter(j => j.status === 'pending');
-      const failed  = (data.queue  || []).filter(j => j.status === 'failed');
+      const hasActivity = _applyQueueData(data);
+      if (_bc) _bc.postMessage({ type: 'queue', data });
 
-      const hasActivity = active.length > 0 || pending.length > 0;
-      const label       = document.getElementById('qi-label');
-      const countBadge  = document.getElementById('qi-count');
-
-      // ── Texto del indicador (truncado) ──
-      if (active.length > 0) {
-        const best = active.reduce((a, b) => (a.progress > b.progress ? a : b), active[0]);
-        if (label) label.textContent = truncate(best.title);
-        if (countBadge) {
-          countBadge.style.display = active.length > 1 ? 'inline' : 'none';
-          countBadge.textContent   = `+${active.length - 1}`;
-        }
-        showIndicator();
-      } else if (pending.length > 0) {
-        if (label) label.textContent = `En cola: ${pending.length}`;
-        if (countBadge) countBadge.style.display = 'none';
-        showIndicator();
-      } else if (failed.length > 0 && Date.now() < forceUntil) {
-        if (label) label.textContent = `${failed.length} error${failed.length > 1 ? 'es' : ''}`;
-        if (countBadge) countBadge.style.display = 'none';
-        showIndicator();
-      } else if (!hasActivity && Date.now() >= forceUntil) {
-        hideIndicator();
-      }
-
-      // ── Contenido del popup ──
-      const listDiv = document.getElementById('qi-list');
-      if (listDiv) {
-        let html = '';
-
-        if (active.length) {
-          html += `<div class="qi-section-title">Descargando ahora</div>`;
-          html += active.map(buildJobHtml).join('');
-        }
-        if (pending.length) {
-          html += `<div class="qi-section-title" style="margin-top:${active.length ? 10 : 0}px;">En cola</div>`;
-          html += pending.map(buildJobHtml).join('');
-        }
-        if (failed.length) {
-          html += `<div class="qi-section-title" style="margin-top:${active.length || pending.length ? 10 : 0}px; color:#f87171;">Errores recientes</div>`;
-          html += failed.map(buildJobHtml).join('');
-        }
-        if (!active.length && !pending.length && !failed.length) {
-          html = `<div class="qi-empty"><i class="fas fa-check-circle" style="margin-right:6px; color:#4ade80;"></i>Sin actividad</div>`;
-        }
-        listDiv.innerHTML = html;
-      }
-
-      // ── Polling ──
       if (hasActivity) {
         forceUntil = Date.now() + 5000;
         scheduleNext(2000);
@@ -386,7 +403,6 @@
       } else {
         clearPolling();
       }
-
     } catch (err) {
       console.error('queue-indicator:', err);
       showNotification('Error al consultar cola de descarga', 'error');

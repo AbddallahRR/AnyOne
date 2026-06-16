@@ -236,6 +236,19 @@
     document.body.appendChild(popup);
   }
 
+  // ── BroadcastChannel (compartir polling entre pestañas) ────────────────
+  let _bc = null;
+  try {
+    _bc = new BroadcastChannel('anyone:health');
+    _bc.onmessage = (ev) => {
+      if (ev.data?.type === 'health') {
+        _applyHealthData(ev.data.data);
+        forceUntil = Date.now() + 10000;
+        scheduleNext(8000);
+      }
+    };
+  } catch (_) { /* BroadcastChannel no soportado */ }
+
   // ── Estado ─────────────────────────────────────────────────────────────
   let pollingTimer = null;
   let forceUntil = 0;
@@ -304,69 +317,71 @@
       </div>`;
   }
 
+  function _applyHealthData(data) {
+    _lastStatus = data;
+    const entries = Object.entries(data);
+    const withErrors = entries.filter(([_, s]) => s.last_error || s.temporarily_disabled);
+    const hasIssues = withErrors.length > 0;
+
+    const label = document.getElementById('sh-label');
+    const countBadge = document.getElementById('sh-count');
+    const listDiv = document.getElementById('sh-list');
+
+    if (hasIssues && !isHidden()) {
+      const disabledCount = withErrors.filter(([_, s]) => s.temporarily_disabled).length;
+      const errorCount = withErrors.length - disabledCount;
+      let text = '';
+      if (disabledCount > 0 && errorCount > 0) {
+        text = `${disabledCount} desactivada(s), ${errorCount} error(es)`;
+      } else if (disabledCount > 0) {
+        text = `${disabledCount} fuente(s) desactivada(s)`;
+      } else {
+        text = `${errorCount} fuente(s) con error(es)`;
+      }
+      if (label) label.textContent = text;
+      if (countBadge) {
+        const total = withErrors.length;
+        countBadge.style.display = total > 1 ? 'inline' : 'none';
+        countBadge.textContent = `${total}`;
+      }
+      showIndicator();
+    } else {
+      if (label) label.textContent = '';
+      if (countBadge) countBadge.style.display = 'none';
+      if (Date.now() >= forceUntil) {
+        hideIndicator();
+      }
+    }
+
+    if (listDiv) {
+      if (withErrors.length) {
+        listDiv.innerHTML = withErrors.map(([name, state]) => buildEntryHtml(name, state)).join('');
+        listDiv.querySelectorAll('.sh-re-enable-btn').forEach(btn => {
+          btn.addEventListener('click', async function () {
+            const sourceName = this.dataset.source;
+            try {
+              await api.post('/api/scraper-health/re-enable', { name: sourceName });
+              fetchHealth();
+            } catch (err) {
+              console.error('scraper-health: error re-enabling', err);
+              if (!isHidden()) showNotification('Error al reactivar fuente', 'error');
+            }
+          });
+        });
+      } else {
+        listDiv.innerHTML = '<div class="sh-empty"><i class="fas fa-check-circle" style="margin-right:6px; color:#4ade80;"></i>Todas las fuentes funcionando</div>';
+      }
+    }
+
+    return hasIssues;
+  }
+
   async function fetchHealth() {
     try {
       const data = await api.get('/api/scraper-health');
-      _lastStatus = data;
+      const hasIssues = _applyHealthData(data);
+      if (_bc) _bc.postMessage({ type: 'health', data });
 
-      const entries = Object.entries(data);
-      const withErrors = entries.filter(([_, s]) => s.last_error || s.temporarily_disabled);
-      const hasIssues = withErrors.length > 0;
-
-      const label = document.getElementById('sh-label');
-      const countBadge = document.getElementById('sh-count');
-      const listDiv = document.getElementById('sh-list');
-
-      // ── Indicador ──
-      if (hasIssues && !isHidden()) {
-        const disabledCount = withErrors.filter(([_, s]) => s.temporarily_disabled).length;
-        const errorCount = withErrors.length - disabledCount;
-        let text = '';
-        if (disabledCount > 0 && errorCount > 0) {
-          text = `${disabledCount} desactivada(s), ${errorCount} error(es)`;
-        } else if (disabledCount > 0) {
-          text = `${disabledCount} fuente(s) desactivada(s)`;
-        } else {
-          text = `${errorCount} fuente(s) con error(es)`;
-        }
-        if (label) label.textContent = text;
-        if (countBadge) {
-          const total = withErrors.length;
-          countBadge.style.display = total > 1 ? 'inline' : 'none';
-          countBadge.textContent = `${total}`;
-        }
-        showIndicator();
-      } else {
-        if (label) label.textContent = '';
-        if (countBadge) countBadge.style.display = 'none';
-        if (Date.now() >= forceUntil) {
-          hideIndicator();
-        }
-      }
-
-      // ── Popup ──
-      if (listDiv) {
-        if (withErrors.length) {
-          listDiv.innerHTML = withErrors.map(([name, state]) => buildEntryHtml(name, state)).join('');
-          // Bind re-enable buttons
-          listDiv.querySelectorAll('.sh-re-enable-btn').forEach(btn => {
-            btn.addEventListener('click', async function () {
-              const sourceName = this.dataset.source;
-              try {
-                await api.post('/api/scraper-health/re-enable', { name: sourceName });
-                fetchHealth();
-              } catch (err) {
-                console.error('scraper-health: error re-enabling', err);
-                if (!isHidden()) showNotification('Error al reactivar fuente', 'error');
-              }
-            });
-          });
-        } else {
-          listDiv.innerHTML = '<div class="sh-empty"><i class="fas fa-check-circle" style="margin-right:6px; color:#4ade80;"></i>Todas las fuentes funcionando</div>';
-        }
-      }
-
-      // ── Polling ──
       if (hasIssues && !isHidden()) {
         forceUntil = Date.now() + 30000;
         scheduleNext(5000);
@@ -375,7 +390,6 @@
       } else {
         clearPolling();
       }
-
     } catch (err) {
       console.error('scraper-health:', err);
       if (!isHidden()) showNotification('Error al consultar estado de fuentes', 'error');

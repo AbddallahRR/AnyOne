@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from core.database import save_content_to_db
+from core.disk_cache import chapters_cache, details_cache
 from core.sources import get_source
 from core.utils import normalize_title
 
@@ -101,28 +102,46 @@ async def api_chapters_with_local(type: str, source: str, id: str):
 
 
 @api_router.get('/content/{content_type}/{source}/{content_id}')
-async def api_content_details(content_type: str, source: str, content_id: str):
+async def api_content_details(content_type: str, source: str, content_id: str, refresh: bool = False):
     src = get_source(content_type, source)
     if not src:
         raise HTTPException(status_code=404, detail='Fuente no encontrada')
+
+    cache_key = f'{content_type}:{source}:{content_id}'
+    if not refresh:
+        cached = await details_cache.aget(cache_key)
+        if cached is not None:
+            return cached
+
     try:
         details = await src.get_details(content_id)
         save_content_to_db(content_type, source, content_id,
                            details.title, details.cover or '')
-        return details.model_dump()
+        result = details.model_dump()
+        await details_cache.aset(cache_key, result)
+        return result
     except Exception:
         logger.exception("Error en api_content_details:")
         raise HTTPException(status_code=500, detail='Error al obtener detalles')
 
 
 @api_router.get('/chapters/{content_type}/{source}/{content_id}')
-async def api_chapters(content_type: str, source: str, content_id: str):
+async def api_chapters(content_type: str, source: str, content_id: str, refresh: bool = False):
     src = get_source(content_type, source)
     if not src:
         raise HTTPException(status_code=404, detail='Fuente no encontrada')
+
+    cache_key = f'{content_type}:{source}:{content_id}'
+    if not refresh:
+        cached = await chapters_cache.aget(cache_key)
+        if cached is not None:
+            return cached
+
     try:
         chapters = await src.get_chapters(content_id)
-        return [c.model_dump() for c in chapters]
+        result = [c.model_dump() for c in chapters]
+        await chapters_cache.aset(cache_key, result)
+        return result
     except Exception:
         logger.exception("Error en api_chapters:")
         raise HTTPException(status_code=500, detail='Error al obtener capitulos')
