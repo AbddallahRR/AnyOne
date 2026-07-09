@@ -243,12 +243,14 @@
 }
 .recent-grid {
   display: flex;
+  flex-wrap: nowrap;
   gap: 12px;
   overflow-x: auto;
   padding-bottom: 8px;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
   -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x mandatory;
 }
 .recent-grid::-webkit-scrollbar {
   height: 4px;
@@ -266,6 +268,7 @@
   width: 120px;
   cursor: pointer;
   transition: transform 0.15s ease;
+  scroll-snap-align: start;
 }
 .recent-card:hover {
   transform: translateY(-2px);
@@ -284,6 +287,29 @@
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+.recent-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.recent-badge::after {
+  content: '';
+  display: block;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 5px 0 5px 8px;
+  border-color: transparent transparent transparent var(--surface);
+  margin-left: 2px;
 }
 
 .recent-info {

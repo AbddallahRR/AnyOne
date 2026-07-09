@@ -465,6 +465,7 @@
               alt="${item.title}" loading="lazy"
               onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22120%22 height=%22180%22%3E%3Crect fill=%22%2313131e%22 width=%22120%22 height=%22180%22/%3E%3Ctext x=%2260%22 y=%2290%22 text-anchor=%22middle%22 fill=%22%236e6e88%22 font-size=%2210%22%3ESin portada%3C/text%3E%3C/svg%3E'">
             <span class="chip chip-sm chip-${item.type} type-chip">${typeLabel}</span>
+            <span class="recent-badge"></span>
           </div>
           <div class="recent-info">
             <div class="recent-card-title" title="${item.title}">${item.title}</div>
