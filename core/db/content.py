@@ -15,3 +15,9 @@ def save_content_to_db(content_type: str, source: str, content_id: str,
 
 def get_content_ref(source: str, content_id: str) -> str:
     return f"{source}:{content_id}"
+
+
+def delete_content_from_db(content_id: str) -> None:
+    conn = get_conn()
+    with conn:
+        conn.execute('DELETE FROM content WHERE id = ?', (content_id,))

@@ -115,6 +115,11 @@ class DeleteChapterRequest(BaseModel):
     chapter: str
 
 
+class DeleteSeriesRequest(BaseModel):
+    content_ref: str
+    type: str
+
+
 class AcknowledgeUpdatesRequest(BaseModel):
     content_ref: Optional[str] = None
     content_refs: Optional[list[str]] = None

@@ -1,5 +1,5 @@
 from core.db.connection import cleanup_download_queue, get_conn, init_db
-from core.db.content import get_content_ref, save_content_to_db
+from core.db.content import delete_content_from_db, get_content_ref, save_content_to_db
 from core.db.downloads import update_queue_status
 from core.db.library import (
     clear_series_updates,

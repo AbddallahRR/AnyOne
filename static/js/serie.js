@@ -32,6 +32,7 @@
   const badgeEl             = document.getElementById('serie-type-badge');
   const checkUpdatesBtn = document.getElementById('check-updates-btn');
   const resetCacheBtn = document.getElementById('reset-cache-btn');
+  const deleteSeriesBtn = document.getElementById('delete-series-btn');
 
   function notify(msg, t = 'info') {
     if (window.showNotification) window.showNotification(msg, t);
@@ -585,6 +586,7 @@
       if (downloadAllBtn)   downloadAllBtn.classList.add('hidden');
       if (continueBtn)      continueBtn.classList.remove('hidden');
       if (deleteWatchedBtn) deleteWatchedBtn.classList.remove('hidden');
+      if (deleteSeriesBtn)  deleteSeriesBtn.classList.remove('hidden');
       if (checkUpdatesBtn) {
         if (originalSource) {
           checkUpdatesBtn.classList.remove('hidden');
@@ -633,6 +635,22 @@
           } catch (err) {
             notify(`Error: ${err.message}`, 'error');
           }
+    });
+
+    deleteSeriesBtn?.addEventListener('click', async () => {
+      const confirmed = await window.showConfirm(
+        'Eliminar serie',
+        '¿Eliminar toda la serie del disco? Esta acción no se puede deshacer.',
+        'Eliminar', 'danger'
+      );
+      if (!confirmed) return;
+      try {
+        await api.post('/api/delete-series', { content_ref: `local:${id}`, type });
+        notify('Serie eliminada correctamente', 'success');
+        setTimeout(() => { window.location.href = '/'; }, 800);
+      } catch (err) {
+        notify(`Error: ${err.message}`, 'error');
+      }
     });
 
     sortBtn?.addEventListener('click', () => {

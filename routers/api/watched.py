@@ -1,11 +1,14 @@
+import json
 import logging
 import re
+import shutil
 from pathlib import Path
 
 from fastapi import HTTPException
 
 from core.chapter_utils import chapter_float_key, normalize_chapter_number
 from core.database import (
+    delete_content_from_db,
     delete_watched_chapter,
     delete_watched_chapters_batch,
     get_conn,
@@ -17,16 +20,20 @@ from core.database import (
 )
 from core.models import (
     DeleteChapterRequest,
+    DeleteSeriesRequest,
     DeleteWatchedRequest,
     WatchedToggleRequest,
     parse_chapter_from_filename,
 )
 from core.download_worker import is_downloading
+from core.settings import settings
+from core.utils import _invalidate_scan_cache
 
 from . import api_router
 from .common import (
     _base_folder,
     _delete_chapter_files,
+    _invalidate_series_index,
     _require_local,
 )
 
@@ -128,3 +135,54 @@ def api_delete_chapter(data: DeleteChapterRequest):
         logger.warning(f"No se pudo actualizar progreso tras eliminar capítulo {data.chapter}: {exc}")
 
     return {'status': 'deleted', 'chapter': data.chapter}
+
+
+@api_router.post('/delete-series')
+def api_delete_series(data: DeleteSeriesRequest):
+    _require_local(data.content_ref)
+
+    folder_name = data.content_ref[6:]
+    base = Path(_base_folder(data.type))
+    serie_path = base / folder_name
+    if not serie_path.exists():
+        raise HTTPException(status_code=404, detail='Carpeta de serie no encontrada')
+
+    # Leer series_info.json para obtener source + content_id original
+    source_name = None
+    orig_content_id = None
+    info_path = serie_path / 'series_info.json'
+    if info_path.exists():
+        try:
+            info = json.loads(info_path.read_text(encoding='utf-8'))
+            source_name = info.get('source')
+            orig_content_id = info.get('content_id')
+        except Exception:
+            pass
+
+    # Eliminar directorio completo del disco
+    try:
+        shutil.rmtree(serie_path)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f'Error al eliminar carpeta: {exc}')
+
+    conn = get_conn()
+    with conn:
+        # user_progress
+        conn.execute('DELETE FROM user_progress WHERE content_id = ?', (data.content_ref,))
+        # watched_chapters
+        conn.execute('DELETE FROM watched_chapters WHERE content_id = ?', (data.content_ref,))
+        # series_status
+        conn.execute('DELETE FROM series_status WHERE content_ref = ?', (data.content_ref,))
+
+    # Limpiar entrada en tabla content si existe
+    if source_name and orig_content_id:
+        orig_ref = f"{source_name}:{orig_content_id}"
+        delete_content_from_db(orig_ref)
+        # También limpiar cola de descarga asociada
+        conn.execute('DELETE FROM download_queue WHERE content_ref = ?', (orig_ref,))
+
+    # Invalidar caches
+    _invalidate_series_index(base)
+    _invalidate_scan_cache()
+
+    return {'status': 'deleted', 'content_ref': data.content_ref}
