@@ -24,9 +24,27 @@
   const UI_ELS = [controlsDiv, fullscreenBtn, backBtn].filter(Boolean);
   function showUI() { UI_ELS.forEach(el => el.classList.add('show')); }
 
+  // ── Player overlay helpers (anime) ─────────────────────────────────────
+  const poPlayBtn    = document.getElementById('po-play');
+  const poPlaySvg    = document.getElementById('po-play-svg');
+  const poCenterBtn  = document.getElementById('po-center-play');
+  const poCenterSvg  = document.getElementById('po-center-svg');
+  const poProgress   = document.getElementById('po-progress');
+  const poProgressPlayed = document.getElementById('po-progress-played');
+  const poTime       = document.getElementById('po-time');
+  const poSubs       = document.getElementById('po-subs');
+  const poSpeed      = document.getElementById('po-speed');
+  const poVolBtn     = document.getElementById('po-vol');
+  const poVolSvg     = document.getElementById('po-vol-svg');
+  const poVolSlider  = document.getElementById('po-vol-slider');
+  const poChapterNum = document.getElementById('po-chapter-num');
+  const poOverlay    = document.getElementById('player-overlay');
+
   // ── Label del capítulo ─────────────────────────────────────────────────
   function updateChapterLabel() {
-    if (chapterLabelNum) chapterLabelNum.textContent = currentChapterNum;
+    const text = String(currentChapterNum);
+    if (chapterLabelNum) chapterLabelNum.textContent = text;
+    if (poChapterNum)    poChapterNum.textContent    = text;
     if (prevBtn) prevBtn.disabled = currentChapterIndex <= 0;
     if (nextBtn) nextBtn.disabled = currentChapterIndex >= chaptersList.length - 1;
     if (window.animateChapterLabel) window.animateChapterLabel();
@@ -137,13 +155,16 @@
     if (durData?.duration > 0) duration = durData.duration;
 
     if (chapterWrapper) chapterWrapper.innerHTML = `
-      <video id="anime-video" controls autoplay
+      <video id="anime-video" autoplay playsinline
              style="width:100%; height:100%; object-fit:contain;">
         <source src="${videoUrl}" type="video/mp4">
       </video>`;
 
     const video = document.getElementById('anime-video');
     if (!video) return;
+
+    // ── Wire custom controls ──
+    wirePlayerControls(video, duration);
 
     if (savedTime > 0)
       video.addEventListener('loadedmetadata', () => {
@@ -191,6 +212,218 @@
         `<div style="color:var(--accent2); text-align:center; padding:20px;">
            Error al cargar capítulo: ${err.message}
          </div>`;
+    }
+  }
+
+  // ── Player controls wiring (anime) ─────────────────────────────────────
+  function wirePlayerControls(video, duration) {
+    if (!poPlayBtn || !poProgress) return;
+
+    // Format time helper
+    function fmt(sec) {
+      if (!isFinite(sec) || sec < 0) return '0:00';
+      const m = Math.floor(sec / 60);
+      const s = Math.floor(sec % 60);
+      return `${m}:${String(s).padStart(2, '0')}`;
+    }
+
+    function updateUI() {
+      const t = video.currentTime;
+      const d = duration > 0 ? duration : (video.duration || 0);
+      const pct = d > 0 ? (t / d) * 100 : 0;
+      poProgress.value = d > 0 ? (t / d) * 1000 : 0;
+      if (poProgressPlayed) poProgressPlayed.style.width = pct + '%';
+      if (poTime) poTime.textContent = `${fmt(t)} / ${fmt(d)}`;
+
+      // Play/pause icons
+      const playing = !video.paused;
+      const pauseSvg = '<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>';
+      const playSvg  = '<polygon points="6 3 20 12 6 21 6 3"/>';
+      if (poPlaySvg) poPlaySvg.innerHTML = playing ? pauseSvg : playSvg;
+      if (poCenterSvg) {
+        poCenterSvg.innerHTML = playing ? pauseSvg : playSvg;
+        poCenterBtn?.classList.toggle('hidden', playing);
+      }
+    }
+
+    // ── Play / Pause ──
+    const togglePlay = () => {
+      if (video.paused) video.play(); else video.pause();
+    };
+    poPlayBtn?.addEventListener('click', togglePlay);
+    poCenterBtn?.addEventListener('click', togglePlay);
+    video.addEventListener('play', updateUI);
+    video.addEventListener('pause', updateUI);
+
+    // ── Progress bar references ──
+    const progressWrap = document.querySelector('.po-progress-wrap');
+    const progressTooltip = document.getElementById('po-progress-tooltip');
+
+    // ── Progress bar (click / drag directo) ──
+    function getDurationSec() {
+      return (duration > 0 ? duration : (video.duration || 0));
+    }
+    function seekFromClientX(clientX) {
+      const d = getDurationSec();
+      if (d <= 0 || !isFinite(d)) return;
+      const rect = progressWrap.getBoundingClientRect();
+      const x    = Math.max(0, Math.min(clientX - rect.left, rect.width));
+      const pct  = x / rect.width;
+      const target = pct * d;
+      video.currentTime = target;
+      // Update visual directly (no dependemos de video.currentTime aún)
+      poProgress.value = Math.round(pct * 1000);
+      if (poProgressPlayed) poProgressPlayed.style.width = (pct * 100) + '%';
+      if (poTime) poTime.textContent = `${fmt(target)} / ${fmt(d)}`;
+    }
+
+    let _drag = false;
+
+    function onDown(clientX) { _drag = true; seekFromClientX(clientX); }
+    function onMove(clientX) { if (_drag) { seekFromClientX(clientX); } }
+    function onUp()          { _drag = false; updateUI(); }
+
+    progressWrap.addEventListener('mousedown',  e => onDown(e.clientX));
+    document.addEventListener('mousemove',      e => { if (_drag) e.preventDefault(); onMove(e.clientX); });
+    document.addEventListener('mouseup',        onUp);
+    progressWrap.addEventListener('touchstart', e => { e.preventDefault(); onDown(e.touches[0].clientX); }, { passive: false });
+    document.addEventListener('touchmove',      e => { if (_drag) e.preventDefault(); onMove(e.touches[0].clientX); }, { passive: false });
+    document.addEventListener('touchend',       onUp);
+
+    video.addEventListener('timeupdate', () => { if (!_drag) updateUI(); });
+    video.addEventListener('loadedmetadata', () => { updateUI(); });
+    video.addEventListener('seeked',      () => { updateUI(); });
+
+    // ── Volume ──
+    function updateVolUI() {
+      const v = video.muted ? 0 : video.volume;
+      if (poVolSlider) {
+        poVolSlider.value = v;
+        poVolSlider.style.setProperty('--vol-pct', (v * 100) + '%');
+      }
+      if (poVolSvg) {
+        const muted = video.muted || v === 0;
+        const half  = !muted && v < 0.5;
+        poVolSvg.innerHTML = muted
+          ? '<line x1="1" y1="1" x2="23" y2="23"/><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>'
+          : half
+            ? '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>'
+            : '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>';
+      }
+    }
+    poVolSlider?.addEventListener('input', () => {
+      video.volume = parseFloat(poVolSlider.value);
+      video.muted = false;
+      updateVolUI();
+    });
+    poVolBtn?.addEventListener('click', () => {
+      video.muted = !video.muted;
+      updateVolUI();
+    });
+    video.addEventListener('volumechange', updateVolUI);
+    updateVolUI();
+
+    // ── Speed ──
+    const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+    poSpeed?.addEventListener('click', () => {
+      const cur = video.playbackRate;
+      let idx = SPEEDS.indexOf(cur);
+      if (idx === -1 || idx >= SPEEDS.length - 1) idx = 0; else idx++;
+      video.playbackRate = SPEEDS[idx];
+      poSpeed.textContent = SPEEDS[idx] + '×';
+    });
+
+    // ── Subtitles ──
+    poSubs?.addEventListener('click', () => cycleSubtitles(video));
+
+    // ── Click on empty overlay area → toggle play ──
+    poOverlay?.addEventListener('click', e => {
+      if (e.target === poOverlay || e.target.classList.contains('po-top') || e.target.classList.contains('po-bottom')) {
+        if (video.paused) video.play(); else video.pause();
+      }
+    });
+
+    // ── Progress tooltip ──
+    if (progressWrap && progressTooltip) {
+      function fmtTooltip(sec) {
+        if (!isFinite(sec) || sec < 0) return '0:00';
+        const m = Math.floor(sec / 60);
+        const s = Math.floor(sec % 60);
+        return `${m}:${String(s).padStart(2, '0')}`;
+      }
+      function onProgressMove(clientX) {
+        const d = duration > 0 ? duration : (video.duration || 0);
+        if (d <= 0) return;
+        const rect = progressWrap.getBoundingClientRect();
+        const x    = Math.max(0, Math.min(clientX - rect.left, rect.width));
+        const pct  = x / rect.width;
+        const sec  = pct * d;
+        progressTooltip.textContent = fmtTooltip(sec);
+        progressTooltip.style.left  = (pct * 100) + '%';
+      }
+      progressWrap.addEventListener('mousemove', e => onProgressMove(e.clientX));
+      progressWrap.addEventListener('touchmove', e => {
+        const touch = e.touches[0];
+        if (touch) onProgressMove(touch.clientX);
+      });
+    }
+
+    // ── Keyboard ──
+    if (!window.__readerKeys) {
+      window.__readerKeys = true;
+      document.addEventListener('keydown', e => {
+        const v = document.getElementById('anime-video');
+        if (!v || type !== 'anime') return;
+
+        if (e.key === ' ' || e.key === 'Space') {
+          e.preventDefault();
+          if (v.paused) v.play(); else v.pause();
+        }
+        if (e.key === 'c' || e.key === 'C') {
+          e.preventDefault();
+          cycleSubtitles(v);
+        }
+        if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          v.currentTime = Math.max(0, v.currentTime - 5);
+        }
+        if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          v.currentTime = Math.min(v.duration || Infinity, v.currentTime + 5);
+        }
+      });
+    }
+
+    updateUI();
+  }
+
+  // ── Subtitle cycling ──────────────────────────────────────────────────
+  function cycleSubtitles(video) {
+    if (!video) return;
+    const tracks = video.textTracks;
+    if (!tracks || tracks.length === 0) {
+      showNotification('No hay subtítulos disponibles', 'info');
+      return;
+    }
+
+    // Find currently showing track
+    let showingIdx = -1;
+    for (let i = 0; i < tracks.length; i++) {
+      if (tracks[i].mode === 'showing') { showingIdx = i; break; }
+    }
+
+    // Hide all
+    for (let i = 0; i < tracks.length; i++) tracks[i].mode = 'hidden';
+
+    const nextIdx = showingIdx + 1;
+    if (nextIdx < tracks.length) {
+      tracks[nextIdx].mode = 'showing';
+      const label = tracks[nextIdx].label || `Track ${nextIdx + 1}`;
+      showNotification(`Subtítulos: ${label}`, 'info');
+      poSubs?.classList.add('active');
+    } else {
+      showNotification('Subtítulos: desactivados', 'info');
+      poSubs?.classList.remove('active');
     }
   }
 
@@ -481,9 +714,14 @@
     prevBtn?.addEventListener('click', prevChapter);
     nextBtn?.addEventListener('click', nextChapter);
 
-    backBtn?.addEventListener('click', () => {
+    const goBack = () => {
       window.location.href = `/serie/${type}/${source}/${content_id}`;
-    });
+    };
+    backBtn?.addEventListener('click', goBack);
+    document.getElementById('po-back')?.addEventListener('click', goBack);
+
+    document.getElementById('po-prev')?.addEventListener('click', prevChapter);
+    document.getElementById('po-next')?.addEventListener('click', nextChapter);
 
     if (_unloadClearHandler) window.removeEventListener('beforeunload', _unloadClearHandler);
     _unloadClearHandler = function() {

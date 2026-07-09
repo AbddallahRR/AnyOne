@@ -27,7 +27,7 @@
     <i class="fas fa-expand"></i>
   </button>
 
-  <!-- Nav controls -->
+  <!-- Nav controls (manga) -->
   <div class="controls-bar reader-ui" id="controls">
     <button class="nav-btn" id="prev-btn" title="Capítulo anterior">
       <i class="fas fa-chevron-left"></i>
@@ -36,6 +36,70 @@
     <button class="nav-btn" id="next-btn" title="Capítulo siguiente">
       <i class="fas fa-chevron-right"></i>
     </button>
+  </div>
+
+  <!-- ── Player overlay (anime) ── -->
+  <div id="player-overlay" class="player-overlay hidden">
+    <!-- Top bar -->
+    <div class="po-top">
+      <button id="po-back" class="po-btn" title="Volver">
+        <i class="fas fa-arrow-left"></i>
+      </button>
+      <div class="po-chapter-info">
+        <button id="po-prev" class="po-btn po-btn--sm" title="Capítulo anterior">
+          <i class="fas fa-chevron-left"></i>
+        </button>
+        <span class="po-chapter-label">Cap. <strong id="po-chapter-num">—</strong></span>
+        <button id="po-next" class="po-btn po-btn--sm" title="Capítulo siguiente">
+          <i class="fas fa-chevron-right"></i>
+        </button>
+      </div>
+      <button id="po-fs" class="po-btn" title="Pantalla completa (F)">
+        <i class="fas fa-expand"></i>
+      </button>
+    </div>
+
+    <!-- Center play button -->
+    <button id="po-center-play" class="po-center-play hidden">
+      <svg id="po-center-svg" width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
+        <polygon points="6 3 20 12 6 21 6 3"/>
+      </svg>
+    </button>
+
+    <!-- Bottom bar -->
+    <div class="po-bottom">
+      <div class="po-progress-wrap">
+        <div class="po-progress-track">
+          <div class="po-progress-played" id="po-progress-played"></div>
+        </div>
+        <div class="po-progress-tooltip" id="po-progress-tooltip">0:00</div>
+        <input type="range" id="po-progress" class="po-progress" value="0" min="0" max="1000" step="1">
+      </div>
+      <div class="po-bar">
+        <div class="po-bar-left">
+          <button id="po-play" class="po-btn po-btn--play" title="Reproducir/Pausar">
+            <svg id="po-play-svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="6 3 20 12 6 21 6 3"/>
+            </svg>
+          </button>
+          <span id="po-time" class="po-time">0:00 / 0:00</span>
+        </div>
+        <div class="po-bar-right">
+          <button id="po-subs" class="po-btn po-btn--subs" title="Subtítulos (C)">CC</button>
+          <button id="po-speed" class="po-btn po-btn--speed" title="Velocidad">1×</button>
+          <div class="po-vol-wrap">
+            <button id="po-vol" class="po-btn" title="Volumen">
+              <svg id="po-vol-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+              </svg>
+            </button>
+            <input type="range" id="po-vol-slider" class="po-vol-slider" value="1" min="0" max="1" step="0.01">
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
 </div>
@@ -84,6 +148,31 @@
     }, 200);
   };
 
+  // ── Fullscreen ────────────────────────────────────────────────────────
+  function getFullscreenTarget() {
+    // Anime → reader-root incluye el overlay de controles
+    if (!isManga) return document.getElementById('reader-root');
+    return document.getElementById('media-content')
+        || document.getElementById('reader-root');
+  }
+
+  function updateFullscreenIcon() {
+    const icons = document.querySelectorAll('#fullscreen-btn i, #po-fs i');
+    const cls = document.fullscreenElement ? 'fas fa-compress' : 'fas fa-expand';
+    icons.forEach(i => i.className = cls);
+  }
+
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      const target = getFullscreenTarget();
+      target.requestFullscreen().catch(err =>
+        console.warn(`Pantalla completa: ${err.message}`)
+      );
+    } else {
+      document.exitFullscreen();
+    }
+  }
+
   // ── UI visibility ─────────────────────────────────────────────────────
   if (isManga) {
     let uiVisible = false;
@@ -103,50 +192,44 @@
     });
 
   } else {
-    // Anime: auto-hide on mouse idle
+    // Anime: show player overlay, hide manga UI
+    document.getElementById('player-overlay')?.classList.remove('hidden');
+    uiEls.forEach(el => el.classList.add('hidden'));
+
+    // Auto-hide on mouse idle
     let hideTimer;
-    controls.classList.add('manga-top');
 
-    function showUI() {
-      uiEls.forEach(el => el.classList.add('show'));
+    const readerRoot = document.getElementById('reader-root');
+
+    function showPlayerUI() {
+      const po = document.getElementById('player-overlay');
+      if (!po) return;
+      po.classList.remove('po-hidden');
+      readerRoot?.classList.remove('cursor-hidden');
       clearTimeout(hideTimer);
+      const video = document.getElementById('anime-video');
       hideTimer = setTimeout(() => {
-        uiEls.forEach(el => el.classList.remove('show'));
-      }, 2500);
+        if (!video || !video.paused) {
+          po.classList.add('po-hidden');
+          readerRoot?.classList.add('cursor-hidden');
+        }
+      }, 3000);
     }
 
-    document.addEventListener('mousemove', showUI);
-    document.addEventListener('touchstart', showUI, { passive: true });
-    showUI();
+    document.addEventListener('mousemove', showPlayerUI);
+    document.addEventListener('touchstart', showPlayerUI, { passive: true });
+    showPlayerUI();
+
+    document.getElementById('media-content')?.addEventListener('click', () => {
+      const video = document.getElementById('anime-video');
+      if (!video) return;
+      if (video.paused) video.play(); else video.pause();
+    });
   }
 
-  // ── Fullscreen ────────────────────────────────────────────────────────
-  const fullscreenBtn = document.getElementById('fullscreen-btn');
-
-  function getFullscreenTarget() {
-    // Anime → solo el video; Manga/lector → toda la raíz
-    return document.getElementById('anime-video')
-        || document.getElementById('media-content')
-        || document.getElementById('reader-root');
-  }
-
-  function updateFullscreenIcon() {
-    const icon = fullscreenBtn.querySelector('i');
-    icon.className = document.fullscreenElement ? 'fas fa-compress' : 'fas fa-expand';
-  }
-
-  function toggleFullscreen() {
-    if (!document.fullscreenElement) {
-      const target = getFullscreenTarget();
-      target.requestFullscreen().catch(err =>
-        console.warn(`Pantalla completa: ${err.message}`)
-      );
-    } else {
-      document.exitFullscreen();
-    }
-  }
-
-  fullscreenBtn?.addEventListener('click', toggleFullscreen);
+  // ── Common handlers ───────────────────────────────────────────────────
+  document.getElementById('fullscreen-btn')?.addEventListener('click', toggleFullscreen);
+  document.getElementById('po-fs')?.addEventListener('click', toggleFullscreen);
   document.addEventListener('fullscreenchange', updateFullscreenIcon);
   document.addEventListener('keydown', e => {
     if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleFullscreen(); }
