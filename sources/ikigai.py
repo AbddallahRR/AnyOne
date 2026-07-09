@@ -30,8 +30,8 @@ _PAGE_WORKERS = 4                   # hilos paralelos para descargar páginas de
 class IkigaiSource(HttpClientMixin, BaseSource):
     type = 'manga'
     label = 'Ikigai'
-    BASE_URL      = "https://visorikigai.yomod.xyz"
-    CATALOGO_BASE = "https://visorikigai.yomod.xyz/series/"
+    BASE_URL      = "https://visualikigai.treefy.online/"
+    CATALOGO_BASE = "https://visualikigai.treefy.online/series/?tipos[]=comic"
 
     # Lock y timestamp a nivel de clase: compartidos entre todas las instancias/workers
     _refresh_lock     = threading.Lock()
