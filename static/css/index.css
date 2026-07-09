@@ -183,6 +183,36 @@
   box-shadow: 0 0 0 3px rgba(255,255,255,0.04);
 }
 
+/* ── Type filter icon ── */
+.type-filter-icon {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+/* ── Active: Todo ── */
+.lib-filter.active[data-type-filter="all"] {
+  background: rgba(124,92,252,0.14);
+  border-color: rgba(124,92,252,0.40);
+  color: #c4b5fd;
+  box-shadow: 0 0 0 3px rgba(124,92,252,0.08);
+}
+
+/* ── Active: Anime ── */
+.lib-filter.active[data-type-filter="anime"] {
+  background: rgba(124,92,252,0.12);
+  border-color: rgba(124,92,252,0.38);
+  color: #a98aff;
+  box-shadow: 0 0 0 3px rgba(124,92,252,0.07);
+}
+
+/* ── Active: Manga ── */
+.lib-filter.active[data-type-filter="manga"] {
+  background: rgba(252,92,138,0.12);
+  border-color: rgba(252,92,138,0.38);
+  color: #fda4af;
+  box-shadow: 0 0 0 3px rgba(252,92,138,0.07);
+}
+
 /* ── Library search focus ── */
 #library-search-input:focus {
   border-color: var(--accent);

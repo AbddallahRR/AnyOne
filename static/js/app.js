@@ -7,6 +7,7 @@
   let _libraryItems    = [];
   let _libraryStatuses = {};
   let _libraryFilter   = 'all';
+  let _libraryTypeFilter = 'all';
   let _libraryQuery    = '';
   let _libraryLoaded   = false;
 
@@ -453,7 +454,7 @@
       });
     }
 
-    // [OPT-4] Event delegation para filtros
+    // [OPT-4] Event delegation para filtros de etiqueta
     const filtersBar = document.getElementById('library-status-filters');
     if (filtersBar) {
       filtersBar.addEventListener('click', e => {
@@ -461,6 +462,19 @@
         if (!btn) return;
         _libraryFilter = btn.dataset.filter;
         filtersBar.querySelectorAll('.lib-filter').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        applyLibraryView();
+      });
+    }
+
+    // Event delegation para filtros de tipo
+    const typeFiltersBar = document.getElementById('library-type-filters');
+    if (typeFiltersBar) {
+      typeFiltersBar.addEventListener('click', e => {
+        const btn = e.target.closest('.type-filter');
+        if (!btn) return;
+        _libraryTypeFilter = btn.dataset.typeFilter;
+        typeFiltersBar.querySelectorAll('.type-filter').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         applyLibraryView();
       });
@@ -485,6 +499,11 @@
       const status = _libraryStatuses[`local:${item.id}`] || 'none';
       return _libraryFilter === 'all' || status === _libraryFilter;
     });
+
+    // 1b. Filtrar por tipo (anime / manga)
+    if (_libraryTypeFilter !== 'all') {
+      filtered = filtered.filter(item => item.type === _libraryTypeFilter);
+    }
 
     // 2. Filtrar por búsqueda
     if (_libraryQuery) {
