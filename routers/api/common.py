@@ -139,7 +139,7 @@ def _local_chapters_manga(serie_dir: Path) -> list[dict]:
 def _delete_chapter_files(serie_path: Path, content_type: str, chapter: str) -> None:
     chap_str = chapter_to_filename(chapter, padding=3 if content_type == 'anime' else 4)
     if content_type == 'anime':
-        for f in serie_path.glob(f"*_{chap_str}.mp4"):
+        for f in serie_path.glob(f"{chap_str}.mp4"):
             f.unlink()
     else:
         cap_dir = serie_path / f"cap_{chap_str}"

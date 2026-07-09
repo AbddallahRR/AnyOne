@@ -513,7 +513,7 @@ class AnimeflvSource(BaseSource):
             raise Exception("No se encontró URL de stream para el episodio")
 
         cap_num  = chapter_to_filename(chapter_id, padding=3) if str(chapter_id).replace('.', '', 1).isdigit() else chapter_id
-        filename = f"{content_id}_{cap_num}.mp4"
+        filename = f"{cap_num}.mp4"
         filepath = os.path.join(dest_folder, filename)
         os.makedirs(dest_folder, exist_ok=True)
 

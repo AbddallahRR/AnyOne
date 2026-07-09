@@ -57,7 +57,7 @@ def _scan_series_dir(serie_dir: Path, content_type: str) -> dict | None:
             return None
         chapters = []
         for f in mp4_files:
-            match = re.search(r'_(\d+)\.mp4$', f.name)
+            match = re.search(r'^(\d+)\.mp4$', f.name)
             if match:
                 chapters.append(int(match.group(1)))
         last_chapter = max(chapters) if chapters else 0
