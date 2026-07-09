@@ -1,13 +1,33 @@
 import logging
 import sqlite3
 import threading
+import time
 
 from core.settings import settings
 
 logger = logging.getLogger(__name__)
 
 _local = threading.local()
+_db_write_lock = threading.Lock()
 SCHEMA_VERSION = 9
+
+
+def execute_with_retry(sql: str, params: tuple = ()) -> sqlite3.Cursor:
+    for attempt in range(6):
+        try:
+            conn = get_conn()
+            with conn:
+                return conn.execute(sql, params)
+        except sqlite3.OperationalError as exc:
+            if 'locked' in str(exc):
+                if attempt < 5:
+                    logger.debug("DB bloqueada, reintento %d/5...", attempt + 1)
+                    time.sleep(2 ** attempt)
+                    _local.conn = None
+                    continue
+                logger.warning("DB persistentemente bloqueada tras 5 reintentos")
+                raise
+            raise
 
 
 def get_conn() -> sqlite3.Connection:

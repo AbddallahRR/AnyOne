@@ -1,7 +1,7 @@
 import json
 import logging
 
-from .connection import get_conn
+from .connection import execute_with_retry, get_conn
 
 logger = logging.getLogger(__name__)
 
@@ -103,9 +103,7 @@ def get_series_with_updates() -> list[dict]:
 
 
 def clear_series_updates(content_ref: str) -> None:
-    conn = get_conn()
-    with conn:
-        conn.execute(
-            "UPDATE series_status SET new_chapters_found = '' WHERE content_ref = ?",
-            (content_ref,)
-        )
+    execute_with_retry(
+        "UPDATE series_status SET new_chapters_found = '' WHERE content_ref = ?",
+        (content_ref,)
+    )
