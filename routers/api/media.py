@@ -68,11 +68,19 @@ def api_play_local(type: str, id: str, chapter: str):
     if not safe.exists():
         raise HTTPException(status_code=404)
     if type == 'anime':
-        files = list(safe.glob(f"*_{chapter}.mp4"))
+        files = list(safe.glob(f"[!.]*_{chapter}.mp4"))
         if not files:
             try:
                 chap_int = int(float(chapter))
-                files = list(safe.glob(f"*_{chap_int:03d}.mp4"))
+                files = list(safe.glob(f"[!.]*_{chap_int:03d}.mp4"))
+            except (ValueError, TypeError):
+                pass
+        if not files:
+            files = list(safe.glob(f"{chapter}.mp4"))
+        if not files:
+            try:
+                chap_int = int(float(chapter))
+                files = list(safe.glob(f"{chap_int:03d}.mp4"))
             except (ValueError, TypeError):
                 pass
         if not files:
@@ -195,11 +203,19 @@ def video_duration(content_id: str, chapter: str, request: Request):
     serie_dir = Path(str(settings.anime_download_dir)) / normalize_title(content_id)
     if not serie_dir.exists():
         raise HTTPException(status_code=404)
-    files = list(serie_dir.glob(f"*_{chapter}.mp4"))
+    files = list(serie_dir.glob(f"[!.]*_{chapter}.mp4"))
     if not files:
         try:
             chap_int = int(chapter)
-            files = list(serie_dir.glob(f"*_{chap_int:03d}.mp4"))
+            files = list(serie_dir.glob(f"[!.]*_{chap_int:03d}.mp4"))
+        except (ValueError, TypeError):
+            pass
+    if not files:
+        files = list(serie_dir.glob(f"{chapter}.mp4"))
+    if not files:
+        try:
+            chap_int = int(chapter)
+            files = list(serie_dir.glob(f"{chap_int:03d}.mp4"))
         except (ValueError, TypeError):
             pass
     if not files:

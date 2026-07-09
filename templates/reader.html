@@ -122,7 +122,13 @@
 
   // ── Fullscreen ────────────────────────────────────────────────────────
   const fullscreenBtn = document.getElementById('fullscreen-btn');
-  const rootElement   = document.getElementById('reader-root');
+
+  function getFullscreenTarget() {
+    // Anime → solo el video; Manga/lector → toda la raíz
+    return document.getElementById('anime-video')
+        || document.getElementById('media-content')
+        || document.getElementById('reader-root');
+  }
 
   function updateFullscreenIcon() {
     const icon = fullscreenBtn.querySelector('i');
@@ -131,7 +137,8 @@
 
   function toggleFullscreen() {
     if (!document.fullscreenElement) {
-      rootElement.requestFullscreen().catch(err =>
+      const target = getFullscreenTarget();
+      target.requestFullscreen().catch(err =>
         console.warn(`Pantalla completa: ${err.message}`)
       );
     } else {
