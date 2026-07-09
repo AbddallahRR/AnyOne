@@ -382,15 +382,17 @@
         <p>Cargando biblioteca…</p>
       </div>`;
     try {
-      const [items, statusData] = await Promise.all([
+      const [items, statusData, recentData] = await Promise.all([
         api.get('/api/library'),
         api.get('/api/library/status').catch(() => ({})),
+        api.get('/api/library/recent').catch(() => []),
       ]);
       _libraryItems    = items;
       _libraryStatuses = statusData;
       _initLibraryControls();
       applyLibraryView();
       fetchUpdatesBadge();
+      renderRecentSeries(recentData);
     } catch (err) {
       container.innerHTML = `
         <div class="empty-state">
@@ -436,6 +438,51 @@
       console.warn('fetchUpdatesBadge:', err);
       showNotification('Error al cargar actualizaciones', 'error');
     }
+  }
+
+  // ── Series recientes ──────────────────────────────────────────────────
+  function renderRecentSeries(recent) {
+    const section = document.getElementById('recent-section');
+    const list    = document.getElementById('recent-list');
+    if (!section || !list) return;
+
+    if (!recent || recent.length === 0) {
+      section.classList.add('hidden');
+      return;
+    }
+    section.classList.remove('hidden');
+
+    list.innerHTML = recent.map(item => {
+      const isAnime   = item.type === 'anime';
+      const typeLabel = isAnime ? 'Anime' : 'Manga';
+      const chapter   = item.chapter || '1';
+      const cover = item.cover || '';
+      return `
+        <div class="recent-card" data-id="${item.id}" data-type="${item.type}" data-chapter="${chapter}">
+          <div class="recent-cover-wrap">
+            <img class="recent-cover cover-lazy" data-src="${cover}"
+              src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='180'%3E%3Crect fill='%2313131e' width='120' height='180'/%3E%3C/svg%3E"
+              alt="${item.title}" loading="lazy"
+              onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22120%22 height=%22180%22%3E%3Crect fill=%22%2313131e%22 width=%22120%22 height=%22180%22/%3E%3Ctext x=%2260%22 y=%2290%22 text-anchor=%22middle%22 fill=%22%236e6e88%22 font-size=%2210%22%3ESin portada%3C/text%3E%3C/svg%3E'">
+            <span class="chip chip-sm chip-${item.type} type-chip">${typeLabel}</span>
+          </div>
+          <div class="recent-info">
+            <div class="recent-card-title" title="${item.title}">${item.title}</div>
+            <div class="recent-meta">Cap. ${chapter}</div>
+          </div>
+        </div>`;
+    }).join('');
+
+    // Click → navegar directo al episodio
+    list.addEventListener('click', e => {
+      const card = e.target.closest('.recent-card');
+      if (!card) return;
+      const { id, type, chapter } = card.dataset;
+      if (type && id) window.location.href = `/reader/${type}/local/${id}/${chapter || '1'}`;
+    });
+
+    // Lazy load covers
+    observeCovers(list);
   }
 
   // [OPT-5] _initLibraryControls se llama una sola vez (desde loadLibrary)

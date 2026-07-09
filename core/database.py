@@ -12,7 +12,7 @@ from core.db.library import (
     set_series_status,
     set_series_updates,
 )
-from core.db.progress import get_progress, save_progress
+from core.db.progress import get_progress, get_recent_progress, save_progress
 from core.db.settings import (
     ensure_source_in_db,
     get_enabled_source_names,

@@ -6,6 +6,7 @@ from core.database import (
     clear_series_updates,
     get_all_series_statuses,
     get_conn,
+    get_recent_progress,
     get_series_status,
     get_series_with_updates,
     set_series_status,
@@ -15,6 +16,7 @@ from core.models import (
     StatusUpdateRequest,
 )
 from core.utils import scan_downloaded_series
+from core.settings import settings
 
 from . import api_router
 from .common import _resolve_series_title
@@ -76,6 +78,29 @@ def api_library_updates():
         'total': len(results),
         'series': results,
     }
+
+
+@api_router.get('/library/recent')
+def api_library_recent():
+    recent = get_recent_progress(limit=10)
+    if not recent:
+        return []
+
+    library = {item['id']: item for item in scan_downloaded_series()}
+    result = []
+    for entry in recent:
+        folder = entry['content_ref'][6:]
+        item = library.get(folder)
+        if item:
+            result.append({
+                'id': folder,
+                'title': item['title'],
+                'cover': item['cover'],
+                'type': item['type'],
+                'chapter': entry['chapter'],
+                'progress': entry['progress'],
+            })
+    return result
 
 
 @api_router.post('/library/acknowledge-updates')

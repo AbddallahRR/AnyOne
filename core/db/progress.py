@@ -17,3 +17,15 @@ def save_progress(content_ref: str, chapter: str, progress: str) -> None:
             'INSERT OR REPLACE INTO user_progress (content_id, chapter, progress) VALUES (?, ?, ?)',
             (content_ref, chapter, progress)
         )
+
+
+def get_recent_progress(limit: int = 10) -> list[dict]:
+    conn = get_conn()
+    rows = conn.execute(
+        'SELECT content_id, chapter, progress '
+        'FROM user_progress '
+        'WHERE content_id LIKE ? '
+        'ORDER BY updated_at DESC LIMIT ?',
+        ('local:%', limit)
+    ).fetchall()
+    return [{'content_ref': r[0], 'chapter': r[1], 'progress': r[2]} for r in rows]

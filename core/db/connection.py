@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 _local = threading.local()
 _db_write_lock = threading.Lock()
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 
 def execute_with_retry(sql: str, params: tuple = ()) -> sqlite3.Cursor:
@@ -197,6 +197,14 @@ def _run_migrations(conn: sqlite3.Connection, current: int) -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_queue_status_created ON download_queue(status, created_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_series_status_check ON series_status(status, last_checked_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_series_status_updates ON series_status(new_chapters_found)")
+
+    if current < 10:
+        logger.info("Migracion 10: columna updated_at en user_progress")
+        existing = [r[1] for r in conn.execute("PRAGMA table_info(user_progress)")]
+        if 'updated_at' not in existing:
+            conn.execute(
+                "ALTER TABLE user_progress ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+            )
 
 
 def init_db() -> None:

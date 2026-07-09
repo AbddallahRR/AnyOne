@@ -313,7 +313,7 @@
             clearTimeout(decodeTimeout);
             if (slot.dataset.mounted !== '1') return;
 
-            const MIN_PX = 80;
+            const MIN_PX = 150;
             if (img.naturalWidth < MIN_PX || img.naturalHeight < MIN_PX) {
               slot.style.height    = '0';
               slot.style.overflow  = 'hidden';
@@ -356,6 +356,8 @@
             settled = true;
             clearTimeout(decodeTimeout);
             slot.dataset.mounted = '0';
+            slot.style.height    = '0';
+            slot.style.overflow  = 'hidden';
           });
       }
 

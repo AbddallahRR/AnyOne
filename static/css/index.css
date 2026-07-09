@@ -219,6 +219,96 @@
   box-shadow: 0 0 0 3px rgba(124,92,252,0.1);
 }
 
+/* ── Continue watching section ── */
+.recent-section {
+  margin-bottom: 24px;
+  animation: heroCardIn 0.45s ease both;
+}
+.recent-section.hidden {
+  display: none;
+}
+.recent-title {
+  font-family: var(--ff-head);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.recent-title i {
+  color: var(--accent);
+  font-size: 14px;
+}
+.recent-grid {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+  -webkit-overflow-scrolling: touch;
+}
+.recent-grid::-webkit-scrollbar {
+  height: 4px;
+}
+.recent-grid::-webkit-scrollbar-track {
+  background: transparent;
+}
+.recent-grid::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+.recent-card {
+  flex: 0 0 auto;
+  width: 120px;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+.recent-card:hover {
+  transform: translateY(-2px);
+}
+
+.recent-cover-wrap {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  aspect-ratio: 2/3;
+  background: var(--surface);
+}
+.recent-cover {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.recent-info {
+  padding: 6px 2px 0;
+}
+.recent-card-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recent-meta {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+@keyframes heroCardIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 /* ── Scroll horizontal en chips (móvil) ── */
 @media (max-width: 480px) {
   .lib-filter-group {
