@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 
 from fastapi import HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 
 from core.database import save_content_to_db
 from core.settings import settings
@@ -24,6 +24,79 @@ from .common import (
 )
 
 logger = logging.getLogger(__name__)
+
+_CHUNK_SIZE = 65536
+
+
+def _serve_video(filepath: str, request: Request) -> Response:
+    file_size = os.path.getsize(filepath)
+    stat = os.stat(filepath)
+    etag = f'"{stat.st_mtime:.0f}-{stat.st_size}"'
+
+    if request.headers.get('if-none-match') == etag:
+        return Response(status_code=304, headers={
+            'Cache-Control': 'public, max-age=86400',
+            'ETag': etag,
+        })
+
+    range_header = request.headers.get('range')
+    if range_header:
+        range_spec = range_header.strip().lower()
+        if range_spec.startswith('bytes='):
+            range_spec = range_spec[6:]
+        parts = range_spec.split('-', 1)
+        start = int(parts[0]) if parts[0] else 0
+        end = int(parts[1]) if parts[1] else file_size - 1
+        end = min(end, file_size - 1)
+        if start > end or start >= file_size:
+            return Response(status_code=416, headers={
+                'Content-Range': f'bytes */{file_size}',
+            })
+        content_length = end - start + 1
+
+        def range_gen():
+            with open(filepath, 'rb') as f:
+                f.seek(start)
+                remaining = content_length
+                while remaining > 0:
+                    chunk = f.read(min(_CHUNK_SIZE, remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                    yield chunk
+
+        return StreamingResponse(
+            range_gen(),
+            status_code=206,
+            media_type='video/mp4',
+            headers={
+                'Content-Range': f'bytes {start}-{end}/{file_size}',
+                'Accept-Ranges': 'bytes',
+                'Content-Length': str(content_length),
+                'Cache-Control': 'public, max-age=86400',
+                'ETag': etag,
+            },
+        )
+
+    def full_gen():
+        with open(filepath, 'rb') as f:
+            while True:
+                chunk = f.read(_CHUNK_SIZE)
+                if not chunk:
+                    break
+                yield chunk
+
+    return StreamingResponse(
+        full_gen(),
+        status_code=200,
+        media_type='video/mp4',
+        headers={
+            'Accept-Ranges': 'bytes',
+            'Content-Length': str(file_size),
+            'Cache-Control': 'public, max-age=86400',
+            'ETag': etag,
+        },
+    )
 
 
 @api_router.get('/local-cover/{type}/{filename:path}')
@@ -60,7 +133,7 @@ def local_cover(type: str, filename: str, request: Request, thumb: bool = False)
 
 
 @api_router.get('/play/local/{type}/{id}/{chapter}')
-def api_play_local(type: str, id: str, chapter: str):
+def api_play_local(type: str, id: str, chapter: str, request: Request):
     base = _base_folder(type)
     safe = _safe_path(base, id)
     if not safe:
@@ -85,7 +158,7 @@ def api_play_local(type: str, id: str, chapter: str):
                 pass
         if not files:
             raise HTTPException(status_code=404)
-        return FileResponse(files[0], headers={"Accept-Ranges": "bytes"})
+        return _serve_video(str(files[0]), request)
     else:
         cap_dir = safe / f"cap_{chapter}"
         if not cap_dir.exists():
@@ -107,7 +180,7 @@ def api_play_local(type: str, id: str, chapter: str):
 
 
 @api_router.get('/play/{content_type}/{source}/{content_id}/{chapter}')
-def api_play(content_type: str, source: str, content_id: str, chapter: str):
+def api_play(content_type: str, source: str, content_id: str, chapter: str, request: Request):
     if content_type != 'anime':
         return {'message': 'Usa el visor de manga en el frontend'}
 
@@ -124,7 +197,7 @@ def api_play(content_type: str, source: str, content_id: str, chapter: str):
             pass
     if not filepath or not filepath.exists():
         raise HTTPException(status_code=404, detail='Archivo no encontrado')
-    return FileResponse(filepath, headers={"Accept-Ranges": "bytes"})
+    return _serve_video(str(filepath), request)
 
 
 @api_router.get('/play/remote/{content_type}/{source}/{content_id}/{chapter}')

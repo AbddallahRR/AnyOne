@@ -76,10 +76,11 @@ class DiskCache:
             os.replace(tmp_path, path)
         except OSError:
             logger.warning("Error escribiendo caché a %s", path)
-            try:
-                os.unlink(tmp_path)
-            except Exception:
-                logger.warning('disk_cache: error limpiando archivo temporal %s', tmp_path)
+            if tmp_path is not None:
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    logger.warning('disk_cache: error limpiando archivo temporal %s', tmp_path)
 
     async def aset(self, key: str, value, ttl: int | None = None) -> None:
         return await asyncio.to_thread(self.set, key, value, ttl)

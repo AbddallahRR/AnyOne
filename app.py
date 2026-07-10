@@ -157,4 +157,5 @@ if __name__ == '__main__':
     print("🌐 Fuentes cargadas:")
     for stype, sources in SOURCES.items():
         print(f"   {stype}: {', '.join(sources.keys())}")
-    uvicorn.run('app:app', host=settings.host, port=settings.port, reload=settings.debug)
+    uvicorn.run('app:app', host=settings.host, port=settings.port, reload=settings.debug,
+                backlog=1024, timeout_keep_alive=30)

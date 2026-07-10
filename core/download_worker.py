@@ -4,6 +4,7 @@
 import json
 import logging
 import os
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -42,6 +43,27 @@ def unmark_downloading(folder: str, num: str) -> None:
 def is_downloading(folder: str, num: str) -> bool:
     with _dl_lock:
         return num in _downloading_chapters.get(folder, set())
+
+
+def _post_process_video(filepath: str) -> None:
+    tmp = filepath + '.faststart.mp4'
+    try:
+        subprocess.run(
+            ['ffmpeg', '-y', '-i', filepath, '-c', 'copy',
+             '-movflags', '+faststart', tmp],
+            capture_output=True, timeout=120,
+        )
+        if os.path.exists(tmp) and os.path.getsize(tmp) > 0:
+            os.replace(tmp, filepath)
+        else:
+            logger.warning(f"faststart falló para {filepath}, archivo original conservado")
+    except FileNotFoundError:
+        logger.warning("ffmpeg no encontrado, faststart omitido")
+    except Exception as exc:
+        logger.warning(f"faststart falló para {filepath}: {exc}")
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
 
 
 def _save_series_metadata(series_folder: str, title: str, source_name: str,
@@ -178,12 +200,13 @@ def _download_worker(worker_id: int) -> None:
                 chap_id  = chapter.id
 
                 mark_downloading(series_folder, chap_num)
+                result_path = None
                 try:
                     max_retries = 2
                     last_exc = None
                     for attempt in range(1 + max_retries):
                         try:
-                            source.download_chapter_sync(content_id, chap_id, series_folder, chap_num)
+                            result_path = source.download_chapter_sync(content_id, chap_id, series_folder, chap_num)
                             last_exc = None
                             break
                         except Exception as exc:
@@ -200,6 +223,9 @@ def _download_worker(worker_id: int) -> None:
                         raise Exception(f"Error en capítulo {chap_num} tras {max_retries + 1} intentos: {last_exc}") from last_exc
                 finally:
                     unmark_downloading(series_folder, chap_num)
+
+                if content_type == 'anime' and result_path:
+                    _post_process_video(result_path)
 
                 percent = int((idx / total) * 100)
                 if chapter_id:

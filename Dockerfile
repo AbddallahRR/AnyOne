@@ -37,4 +37,4 @@ COPY entrypoint.py /entrypoint.py
 
 EXPOSE 5000
 ENTRYPOINT ["python3", "/entrypoint.py"]
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000", "--backlog", "1024", "--timeout-keep-alive", "30"]
