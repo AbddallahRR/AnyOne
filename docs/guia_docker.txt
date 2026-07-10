@@ -1,5 +1,5 @@
 docker compose up -d --build
-docker save -o comic-web.tar anyone-comic-web
+docker save -o comic-web.tar anyone-anyone
 
 docker load -i /srv/nas/comic-web.tar
 cd /srv/comic-web/

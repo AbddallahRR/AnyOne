@@ -31,7 +31,7 @@ class IkigaiSource(HttpClientMixin, BaseSource):
     type = 'manga'
     label = 'Ikigai'
     BASE_URL      = "https://visualikigai.treefy.online/"
-    CATALOGO_BASE = "https://visualikigai.treefy.online/series/?tipos[]=comic"
+    CATALOGO_BASE = "https://visualikigai.treefy.online/series/"
 
     # Lock y timestamp a nivel de clase: compartidos entre todas las instancias/workers
     _refresh_lock     = threading.Lock()

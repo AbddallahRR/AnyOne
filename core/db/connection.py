@@ -203,8 +203,13 @@ def _run_migrations(conn: sqlite3.Connection, current: int) -> None:
         existing = [r[1] for r in conn.execute("PRAGMA table_info(user_progress)")]
         if 'updated_at' not in existing:
             conn.execute(
-                "ALTER TABLE user_progress ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                "ALTER TABLE user_progress ADD COLUMN updated_at TIMESTAMP"
             )
+
+    # Fix filas existentes con updated_at NULL (migracion 10 incompleta)
+    conn.execute(
+        "UPDATE user_progress SET updated_at = datetime('now') WHERE updated_at IS NULL"
+    )
 
 
 def init_db() -> None:

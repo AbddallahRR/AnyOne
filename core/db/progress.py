@@ -14,7 +14,8 @@ def save_progress(content_ref: str, chapter: str, progress: str) -> None:
     conn = get_conn()
     with conn:
         conn.execute(
-            'INSERT OR REPLACE INTO user_progress (content_id, chapter, progress) VALUES (?, ?, ?)',
+            'INSERT INTO user_progress (content_id, chapter, progress, updated_at) VALUES (?, ?, ?, datetime(\'now\'))'
+            ' ON CONFLICT(content_id) DO UPDATE SET chapter=excluded.chapter, progress=excluded.progress, updated_at=excluded.updated_at',
             (content_ref, chapter, progress)
         )
 
