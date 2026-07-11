@@ -108,6 +108,6 @@ class DiskCache:
             f.unlink(missing_ok=True)
 
 
-search_cache = DiskCache(ttl=_DEFAULT_TTL, namespace='search')
+search_cache = DiskCache(ttl=1800, namespace='search')
 details_cache = DiskCache(ttl=3600, namespace='details')
 chapters_cache = DiskCache(ttl=1800, namespace='chapters')

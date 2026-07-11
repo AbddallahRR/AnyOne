@@ -10,7 +10,7 @@ from core.database import (
     mark_series_checked,
     set_series_updates,
 )
-from core.disk_cache import chapters_cache
+from core.disk_cache import chapters_cache, search_cache
 from core.settings import settings
 from core.sources import get_source
 
@@ -48,6 +48,7 @@ def _check_series_for_new_chapters(content_ref: str) -> dict:
             return {'content_ref': content_ref, 'new_chapters': [], 'error': f"Fuente '{source_name}' no disponible"}
 
         chapters_cache.delete(f'{content_type}:{source_name}:{content_id}')
+        search_cache.delete(f'{source_name}:chapters:{content_id}')
         remote_chapters = src.get_chapters_sync(content_id)
 
         if content_type == 'anime':

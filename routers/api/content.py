@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from core.database import save_content_to_db
-from core.disk_cache import chapters_cache, details_cache
+from core.disk_cache import chapters_cache, details_cache, search_cache
 from core.sources import get_source
 from core.utils import normalize_title
 
@@ -152,4 +152,5 @@ def api_clear_content_cache(content_type: str, source: str, content_id: str):
     cache_key = f'{content_type}:{source}:{content_id}'
     details_cache.delete(cache_key)
     chapters_cache.delete(cache_key)
+    search_cache.delete(f'{source}:chapters:{content_id}')
     return {'cleared': True}
