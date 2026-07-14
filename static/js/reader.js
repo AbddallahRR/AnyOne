@@ -138,23 +138,33 @@
   async function loadAnimeChapter() {
     try {
       const chapterArg = source === 'local' ? currentChapterNum : currentChapterId();
-      const videoUrl = source === 'local'
-        ? `/api/play/local/anime/${content_id}/${chapterArg}`
-        : `/api/play/remote/anime/${source}/${content_id}/${chapterArg}`;
+      const isLocal = source === 'local';
 
-      let savedTime = 0;
-      let duration  = 0;
+      if (isLocal) {
+        await loadLocalAnimeChapter(chapterArg);
+      } else {
+        await loadRemoteAnimeChapter(chapterArg);
+      }
+    } catch (err) {
+      console.error(err);
+      if (chapterWrapper) chapterWrapper.innerHTML =
+        `<div style="color:var(--accent2); text-align:center; padding:20px;">
+           Error al cargar capítulo: ${err.message}
+         </div>`;
+    }
+  }
+
+  async function loadLocalAnimeChapter(chapterArg) {
+    const videoUrl = `/api/play/local/anime/${content_id}/${chapterArg}`;
+
+    let savedTime = 0;
+    let duration  = 0;
     let hasMarked = false;
 
-    // [OPT-1] Progreso + duración en paralelo (eran secuenciales)
     const fetches = [
       api.get(`/api/progress/${type}/${source}/${content_id}`).catch(() => null),
+      api.get(`/api/video-duration/anime/${content_id}/${currentChapterNum}`).catch(() => null),
     ];
-    if (source === 'local') {
-      fetches.push(
-        api.get(`/api/video-duration/anime/${content_id}/${currentChapterNum}`).catch(() => null)
-      );
-    }
 
     const [prog, durData] = await Promise.all(fetches);
     if (prog && String(prog.chapter) === String(currentChapterNum) && prog.progress)
@@ -162,11 +172,10 @@
     if (durData?.duration > 0) duration = durData.duration;
 
     if (chapterWrapper) {
-      const oldVideo = chapterWrapper.querySelector('video');
-      if (oldVideo) {
-        oldVideo.pause();
-        oldVideo.removeAttribute('src');
-        oldVideo.load();
+      const oldMedia = chapterWrapper.querySelector('video, iframe');
+      if (oldMedia) {
+        if (oldMedia.tagName === 'VIDEO') { oldMedia.pause(); oldMedia.removeAttribute('src'); oldMedia.load(); }
+        oldMedia.remove();
       }
       chapterWrapper.innerHTML = `
       <video id="anime-video" autoplay playsinline
@@ -178,7 +187,6 @@
     const video = document.getElementById('anime-video');
     if (!video) return;
 
-    // ── Wire custom controls ──
     wirePlayerControls(video, duration);
 
     if (savedTime > 0)
@@ -186,15 +194,13 @@
         video.currentTime = savedTime;
       }, { once: true });
 
-    // [OPT-4] Guardar progreso solo cuando el video está reproduciendo,
-    // suspender si está en pausa o la pestaña no es visible
     let intervalActive = false;
 
     function startInterval() {
       if (intervalActive) return;
       intervalActive = true;
       progressInterval = setInterval(() => {
-        if (document.hidden || video.paused) return; // no gastar fetches en pausa
+        if (document.hidden || video.paused) return;
         const t = Math.floor(video.currentTime);
         api.post(`/api/progress/${type}/${source}/${content_id}`, { chapter: currentChapterNum, progress: t }).catch(console.error);
 
@@ -221,13 +227,60 @@
       if (!hasMarked) { hasMarked = true; markCurrentAsWatched(); }
       if (currentChapterIndex < chaptersList.length - 1) nextChapter();
     });
-    } catch (err) {
-      console.error(err);
+  }
+
+  async function loadRemoteAnimeChapter(chapterArg) {
+    const apiUrl = `/api/play/remote/anime/${source}/${content_id}/${chapterArg}`;
+    const data = await api.get(apiUrl);
+
+    const embedUrl = data && data.url ? data.url : null;
+    if (!embedUrl) throw new Error('No se encontró enlace de reproducción');
+
+    let hasMarked = false;
+
+    if (chapterWrapper) {
+      const oldMedia = chapterWrapper.querySelector('video, iframe');
+      if (oldMedia) {
+        if (oldMedia.tagName === 'VIDEO') { oldMedia.pause(); oldMedia.removeAttribute('src'); oldMedia.load(); }
+        oldMedia.remove();
+      }
+      chapterWrapper.innerHTML = `
+      <iframe id="anime-iframe" src="${embedUrl}"
+              style="width:100%; height:100%; border:none; background:#000;"
+              allowfullscreen
+              referrerpolicy="no-referrer"
+              sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals">
+      </iframe>`;
+    }
+
+    const iframe = document.getElementById('anime-iframe');
+    if (!iframe) return;
+
+    // Keep overlay visible for navigation (top bar), but hide playback controls
+    const centerPlay = document.getElementById('po-center-play');
+    const bottomBar  = document.querySelector('.po-bottom');
+    if (centerPlay) centerPlay.classList.add('hidden');
+    if (bottomBar)  bottomBar.style.display = 'none';
+
+    // Auto-mark as watched after estimated duration (fallback since we can't track embed progress)
+    const timer = setTimeout(() => {
+      if (!hasMarked) { hasMarked = true; markCurrentAsWatched(); }
+    }, 15 * 60 * 1000);
+
+    iframe.addEventListener('load', () => {
+      clearTimeout(timer);
+    });
+
+    iframe.addEventListener('error', () => {
       if (chapterWrapper) chapterWrapper.innerHTML =
         `<div style="color:var(--accent2); text-align:center; padding:20px;">
-           Error al cargar capítulo: ${err.message}
+           Error al cargar el reproductor remoto.
+           <br><a href="${embedUrl}" target="_blank" rel="noopener"
+                  style="color:var(--accent); text-decoration:underline; margin-top:10px; display:inline-block;">
+             Abrir enlace directo
+           </a>
          </div>`;
-    }
+    });
   }
 
   // ── Player controls wiring (anime) ─────────────────────────────────────

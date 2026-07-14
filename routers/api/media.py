@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 
 from fastapi import HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
 from core.database import save_content_to_db
 from core.settings import settings
@@ -214,7 +214,7 @@ async def api_play_remote(content_type: str, source: str, content_id: str, chapt
             raise HTTPException(status_code=502, detail='Error al obtener enlace de reproducción')
         if not stream_url:
             raise HTTPException(status_code=404, detail='Esta fuente no soporta streaming remoto')
-        return RedirectResponse(url=stream_url, status_code=307)
+        return JSONResponse(content={'url': stream_url, 'type': 'embed'})
     else:
         try:
             images = await src.get_chapter_images(content_id, chapter)
