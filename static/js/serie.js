@@ -410,11 +410,8 @@
           ? `1 capítulo nuevo (cap. ${newChaps[0]})`
           : `${newChaps.length} capítulos nuevos (${newChaps[0]}–${newChaps[newChaps.length - 1]})`;
         notify(`🆕 ${label} — descargando…`, 'info');
-  
+
         _showUpdateBadge(newChaps.length);
-  
-        // Descargar automáticamente los nuevos capítulos
-        await downloadNewChapters(refSource, refId, newChapIds);
       }
   
       checkUpdatesBtn.title = `Última comprobación: ${new Date().toLocaleTimeString()}`;
@@ -426,29 +423,6 @@
     }
   }
 
-  async function downloadNewChapters(refSource, refId, chapterIds) {
-    if (!chapterIds.length) return;
-
-    _restoreCheckBtn(true);
-    const icon = checkUpdatesBtn.querySelector('i');
-    if (icon) icon.className = 'fas fa-spinner fa-spin';
-    checkUpdatesBtn.querySelector('.btn-label').textContent = 'Descargando…';
-
-    try {
-      const data = await api.post('/api/download/chapters', {
-        type:        type,
-        source:      refSource,
-        content_id:  refId,
-        title:       titleEl.textContent,
-        chapter_ids: chapterIds,
-      });
-      notify(`${data.message}`, 'success');
-      if (window.showDownloadIndicator) window.showDownloadIndicator();
-      _showUpdateBadge(0);
-    } catch (err) {
-      notify(`Error al descargar: ${err.message}`, 'error');
-    }
-  }
 
   function _restoreCheckBtn(skipIconRestore) {
     checkUpdatesBtn.disabled = false;

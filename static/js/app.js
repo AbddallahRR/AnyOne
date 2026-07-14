@@ -60,6 +60,11 @@
     btn.addEventListener('click', () => setActiveTab(type));
   });
 
+  // ── Bell button → open updates popup ──────────────────────────────────
+  document.getElementById('nav-bell')?.addEventListener('click', () => {
+    _showUpdatesPopup();
+  });
+
   // ── CoverObserver — lazy load + liberación de VRAM ────────────────────
   // [OPT-7] unobserve tras cargar: una vez que la imagen cargó al menos una
   // vez ya no necesitamos seguir rastreando su entrada; solo rastreamos
@@ -403,14 +408,18 @@
   }
 
   // ── Badge global de novedades ─────────────────────────────────────────
+  let _lastUpdatesData = null;
+
   async function fetchUpdatesBadge() {
     try {
       const data = await api.get('/api/library/updates');
       const total = data.total || 0;
 
-      // Quitar badge anterior si existe
       const oldBadge = tabLibrary.querySelector('.update-badge-global');
       if (oldBadge) oldBadge.remove();
+
+      _lastUpdatesData = (total > 0) ? data : null;
+      _updateBellBadge(total);
 
       if (total > 0) {
         const badge = document.createElement('span');
@@ -436,8 +445,141 @@
       }
     } catch (err) {
       console.warn('fetchUpdatesBadge:', err);
-      showNotification('Error al cargar actualizaciones', 'error');
     }
+  }
+
+  function _updateBellBadge(total) {
+    const bell = document.getElementById('nav-bell');
+    if (!bell) return;
+    let b = bell.querySelector('.bell-badge');
+    if (total > 0) {
+      if (!b) {
+        b = document.createElement('span');
+        b.className = 'bell-badge';
+        Object.assign(b.style, {
+          position: 'absolute',
+          top: '-3px',
+          right: '-3px',
+          background: 'var(--accent2, #f59e0b)',
+          color: '#000',
+          fontSize: '8px',
+          fontWeight: '700',
+          borderRadius: '999px',
+          minWidth: '14px',
+          height: '14px',
+          lineHeight: '14px',
+          textAlign: 'center',
+          padding: '0 3px',
+          pointerEvents: 'none',
+        });
+        bell.style.position = 'relative';
+        bell.appendChild(b);
+      }
+      b.textContent = total > 99 ? '99+' : total;
+    } else if (b) {
+      b.remove();
+    }
+  }
+
+  function _showUpdatesPopup() {
+    const existing = document.getElementById('updates-popup');
+    if (existing) {
+      if (!existing.classList.contains('updates-popup-visible')) {
+        existing.classList.add('updates-popup-visible');
+      }
+      return;
+    }
+
+    const data = _lastUpdatesData;
+    const series = data ? data.series : [];
+    const total = data ? data.total : 0;
+
+    const items = series.slice(0, 5).map(s => {
+      const chs = Array.isArray(s.new_chapters) ? s.new_chapters : [];
+      const chText = chs.length > 0
+        ? (chs.length <= 3 ? chs.join(', ') : `${chs.slice(0, 2).join(', ')} y ${chs.length - 2} más`)
+        : '';
+      return `<div class="updates-popup-item">
+        <span class="updates-popup-title">${s.title}</span>
+        ${chText ? `<span class="updates-popup-chs">Cap. ${chText}</span>` : ''}
+      </div>`;
+    }).join('');
+
+    const extra = total > 5 ? `<div class="updates-popup-more">y ${total - 5} serie${total - 5 !== 1 ? 's' : ''} más…</div>` : '';
+    const bodyContent = total > 0 ? items + extra : '<div class="updates-popup-empty">No hay capítulos nuevos por ahora</div>';
+
+    const popup = document.createElement('div');
+    popup.id = 'updates-popup';
+    popup.innerHTML = `
+      <div class="updates-popup-content">
+        <div class="updates-popup-header">
+          <i class="fas fa-inbox"></i>
+          <span>Notificaciones</span>
+          <button class="updates-popup-close">&times;</button>
+        </div>
+        <div class="updates-popup-body">${bodyContent}</div>
+        <div class="updates-popup-footer">
+          <button class="updates-popup-check"><i class="fas fa-sync-alt"></i> Buscar actualizaciones</button>
+        </div>
+      </div>`;
+    document.body.appendChild(popup);
+
+    popup.addEventListener('click', (e) => {
+      if (e.target === popup) {
+        popup.classList.add('updates-popup-hiding');
+        setTimeout(() => popup.remove(), 300);
+      }
+    });
+
+    popup.querySelector('.updates-popup-close').addEventListener('click', () => {
+      popup.classList.add('updates-popup-hiding');
+      setTimeout(() => popup.remove(), 300);
+    });
+
+    popup.querySelector('.updates-popup-check').addEventListener('click', async () => {
+      const btn = popup.querySelector('.updates-popup-check');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner"></i> Buscando\u2026';
+      try {
+        const result = await api.post('/api/library/check-all-updates');
+        await fetchUpdatesBadge();
+        const newData = _lastUpdatesData;
+        const newSeries = newData ? newData.series : [];
+        const newTotal = newData ? newData.total : 0;
+        const results = result.results || [];
+        const totalQueued = results.reduce((sum, r) => sum + (r.queued || 0), 0);
+        const body = popup.querySelector('.updates-popup-body');
+        if (newTotal > 0) {
+          const newItems = newSeries.slice(0, 5).map(s => {
+            const chs = Array.isArray(s.new_chapters) ? s.new_chapters : [];
+            const chText = chs.length > 0
+              ? (chs.length <= 3 ? chs.join(', ') : `${chs.slice(0, 2).join(', ')} y ${chs.length - 2} más`)
+              : '';
+            return `<div class="updates-popup-item">
+              <span class="updates-popup-title">${s.title}</span>
+              ${chText ? `<span class="updates-popup-chs">Cap. ${chText}</span>` : ''}
+            </div>`;
+          }).join('');
+          const newExtra = newTotal > 5 ? `<div class="updates-popup-more">y ${newTotal - 5} serie${newTotal - 5 !== 1 ? 's' : ''} más…</div>` : '';
+          body.innerHTML = newItems + newExtra;
+          const msg = totalQueued > 0
+            ? `${newTotal} serie${newTotal !== 1 ? 's' : ''} con novedades — ${totalQueued} capítulo${totalQueued !== 1 ? 's' : ''} encolado${totalQueued !== 1 ? 's' : ''}`
+            : `${newTotal} serie${newTotal !== 1 ? 's' : ''} con capítulos nuevos`;
+          showNotification(msg, 'success');
+        } else {
+          body.innerHTML = '<div class="updates-popup-empty">No hay capítulos nuevos</div>';
+          showNotification('No se encontraron actualizaciones', 'info');
+        }
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-sync-alt"></i> Buscar actualizaciones';
+      } catch (err) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-sync-alt"></i> Buscar actualizaciones';
+        showNotification('Error al buscar actualizaciones', 'error');
+      }
+    });
+
+    requestAnimationFrame(() => popup.classList.add('updates-popup-visible'));
   }
 
   // ── Series recientes ──────────────────────────────────────────────────
@@ -635,7 +777,7 @@
     const status      = _libraryStatuses[ref] || 'none';
     const meta        = STATUS_META[status];
     const resumeChapter = item.progress_chapter && item.progress_chapter !== '0'
-      ? item.progress_chapter : (item.last_chapter || '1');
+      ? item.progress_chapter : (item.first_chapter || '1');
     const isAnime     = item.type === 'anime';
     const typeLabel   = isAnime ? 'Anime' : 'Manga';
 

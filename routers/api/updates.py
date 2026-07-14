@@ -1,17 +1,25 @@
 import asyncio
 import concurrent.futures
+import json
 import logging
 from pathlib import Path
+from queue import Full
 
 from fastapi import HTTPException
 
 from core.chapter_utils import chapter_float_key
 from core.database import (
+    clear_series_updates,
     get_series_to_check,
     mark_series_checked,
+    queue_find_active,
+    queue_insert,
+    save_content_to_db,
     set_series_updates,
 )
 from core.disk_cache import chapters_cache, search_cache
+from core.download_worker import download_queue
+from core.models import DownloadJob
 from core.settings import settings
 from core.sources import get_source
 
@@ -27,22 +35,41 @@ logger = logging.getLogger(__name__)
 
 def _check_series_for_new_chapters(content_ref: str) -> dict:
     try:
+        source_name = None
+        content_id = None
+        local_dir = None
+
         if content_ref.startswith('local:'):
-            return {'content_ref': content_ref, 'new_chapters': [], 'error': 'Serie solo local, sin fuente remota'}
-
-        source_name, content_id = content_ref.split(':', 1)
-
-        content_type = None
-        for ct, base in [('anime', settings.anime_download_dir), ('manga', settings.manga_download_dir)]:
-            base_path = Path(base)
-            serie_dir = _find_local_serie_dir(base_path, content_id)
-            if serie_dir:
-                content_type = ct
-                local_dir = serie_dir
-                break
-
-        if not content_type:
-            return {'content_ref': content_ref, 'new_chapters': [], 'error': 'Serie no encontrada en disco'}
+            folder_name = content_ref[6:]
+            for ct, base in [('anime', settings.anime_download_dir), ('manga', settings.manga_download_dir)]:
+                candidate = Path(base) / folder_name
+                if candidate.is_dir():
+                    local_dir = candidate
+                    content_type = ct
+                    info_path = candidate / 'series_info.json'
+                    if info_path.exists():
+                        import json
+                        with open(info_path, 'r', encoding='utf-8') as f:
+                            info = json.load(f)
+                        source_name = info.get('source')
+                        content_id = info.get('content_id')
+                    break
+            if not local_dir:
+                return {'content_ref': content_ref, 'new_chapters': [], 'error': 'Serie no encontrada en disco'}
+            if not source_name or not content_id:
+                return {'content_ref': content_ref, 'new_chapters': [], 'error': 'Serie local sin fuente remota asociada'}
+        else:
+            source_name, content_id = content_ref.split(':', 1)
+            content_type = None
+            for ct, base in [('anime', settings.anime_download_dir), ('manga', settings.manga_download_dir)]:
+                base_path = Path(base)
+                serie_dir = _find_local_serie_dir(base_path, content_id)
+                if serie_dir:
+                    content_type = ct
+                    local_dir = serie_dir
+                    break
+            if not content_type:
+                return {'content_ref': content_ref, 'new_chapters': [], 'error': 'Serie no encontrada en disco'}
 
         src = get_source(content_type, source_name)
         if not src:
@@ -75,12 +102,50 @@ def _check_series_for_new_chapters(content_ref: str) -> dict:
         mark_series_checked(content_ref)
         set_series_updates(content_ref, new_nums)
 
+        queued = 0
+        if new_chapter_ids:
+            title = local_dir.name if local_dir else content_ref
+            info_path = local_dir / 'series_info.json' if local_dir else None
+            if info_path and info_path.exists():
+                try:
+                    with open(info_path, 'r', encoding='utf-8') as f:
+                        title = json.load(f).get('title', title)
+                except Exception:
+                    pass
+            ref = f'{source_name}:{content_id}'
+            try:
+                save_content_to_db(content_type, source_name, content_id, title, '')
+            except Exception:
+                pass
+            for ch_id in new_chapter_ids:
+                if queue_find_active(ref, ch_id):
+                    continue
+                try:
+                    job_id = queue_insert(ref, content_type, title, ch_id)
+                    download_queue.put(DownloadJob(
+                        id=job_id,
+                        content_ref=ref,
+                        type=content_type,
+                        title=title,
+                        chapter_id=ch_id,
+                    ), timeout=5)
+                    queued += 1
+                except Full:
+                    logger.warning(f"Cola de descarga llena, no se pudo encolar {ch_id}")
+                    break
+                except Exception as exc:
+                    logger.warning(f"Error encolando {ch_id}: {exc}")
+
+            if queued > 0:
+                clear_series_updates(content_ref)
+
         return {
             'content_ref': content_ref,
             'new_chapters': new_nums,
             'new_chapter_ids': new_chapter_ids,
             'total_remote': len(remote_chapters),
             'total_local': len(local_list),
+            'queued': queued,
             'error': None,
         }
 

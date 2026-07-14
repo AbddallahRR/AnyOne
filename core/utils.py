@@ -60,6 +60,7 @@ def _scan_series_dir(serie_dir: Path, content_type: str) -> dict | None:
             match = re.search(r'^(\d+)\.mp4$', f.name)
             if match:
                 chapters.append(int(match.group(1)))
+        first_chapter = min(chapters) if chapters else 1
         last_chapter = max(chapters) if chapters else 0
     else:
         cap_dirs = [d for d in serie_dir.iterdir() if d.is_dir() and d.name.startswith('cap_')]
@@ -71,8 +72,10 @@ def _scan_series_dir(serie_dir: Path, content_type: str) -> dict | None:
             if match:
                 chapters.append(normalize_chapter_number(match.group(1)))
         if chapters:
+            first_chapter = min(chapters, key=lambda c: chapter_float_key(c.split('_')[0]))
             last_chapter = max(chapters, key=lambda c: chapter_float_key(c.split('_')[0]))
         else:
+            first_chapter = 1
             last_chapter = 0
 
     cover_url = ''
@@ -106,6 +109,7 @@ def _scan_series_dir(serie_dir: Path, content_type: str) -> dict | None:
         'id': serie_dir.name,
         'title': serie_dir.name.replace('_', ' ').title(),
         'cover': cover_url,
+        'first_chapter': str(first_chapter),
         'last_chapter': str(last_chapter),
         'progress': '0'
     }

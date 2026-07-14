@@ -27,9 +27,17 @@ logger = logging.getLogger(__name__)
 
 
 def _start_update_scheduler():
-    CHECK_INTERVAL = 24 * 60 * 60
-    CACHE_EVICT_INTERVAL = 24 * 60 * 60
+    import datetime
+    TARGET_HOUR = 10
+    TARGET_MINUTE = 0
     INITIAL_DELAY = 60
+
+    def _seconds_until_target():
+        now = datetime.datetime.now()
+        target = now.replace(hour=TARGET_HOUR, minute=TARGET_MINUTE, second=0, microsecond=0)
+        if target <= now:
+            target += datetime.timedelta(days=1)
+        return (target - now).total_seconds()
 
     def _run():
         import time
@@ -38,6 +46,13 @@ def _start_update_scheduler():
         time.sleep(INITIAL_DELAY)
         last_cache_evict = 0.0
         while True:
+            sleep_seconds = _seconds_until_target()
+            logger.info(
+                f"[Scheduler] Próxima comprobación en {int(sleep_seconds // 3600)}h "
+                f"{int((sleep_seconds % 3600) // 60)}m (a las {TARGET_HOUR:02d}:{TARGET_MINUTE:02d})"
+            )
+            time.sleep(sleep_seconds)
+
             try:
                 data = _check_all_updates_core()
                 checked = data.get('checked', 0)
@@ -49,7 +64,7 @@ def _start_update_scheduler():
             except Exception as exc:
                 logger.exception(f"[Scheduler] Error en comprobación diaria: {exc}")
 
-            if time.time() - last_cache_evict >= CACHE_EVICT_INTERVAL:
+            if time.time() - last_cache_evict >= 24 * 60 * 60:
                 try:
                     removed = search_cache.evict_expired()
                     if removed:
@@ -59,8 +74,6 @@ def _start_update_scheduler():
                 except Exception as exc:
                     logger.warning(f"[Scheduler] Error limpiando caché: {exc}")
                 last_cache_evict = time.time()
-
-            time.sleep(CHECK_INTERVAL)
 
     t = threading.Thread(target=_run, daemon=True, name="update-scheduler")
     t.start()
