@@ -3,10 +3,19 @@ import threading
 
 import cloudscraper
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 logger = logging.getLogger(__name__)
 
 HTTP_TIMEOUT = 30
+
+_RETRY_STRATEGY = Retry(
+    total=3,
+    backoff_factor=0.5,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["HEAD", "GET", "OPTIONS"],
+)
 
 
 class HttpPool:
@@ -16,10 +25,10 @@ class HttpPool:
     def get_session(cls) -> requests.Session:
         if not hasattr(cls._local, 'session') or cls._local.session is None:
             session = requests.Session()
-            adapter = requests.adapters.HTTPAdapter(
+            adapter = HTTPAdapter(
                 pool_connections=20,
                 pool_maxsize=40,
-                max_retries=2,
+                max_retries=_RETRY_STRATEGY,
             )
             session.mount('https://', adapter)
             session.mount('http://', adapter)
@@ -30,10 +39,10 @@ class HttpPool:
     def get_scraper(cls) -> cloudscraper.CloudScraper:
         if not hasattr(cls._local, 'scraper') or cls._local.scraper is None:
             scraper = cloudscraper.create_scraper()
-            adapter = requests.adapters.HTTPAdapter(
+            adapter = HTTPAdapter(
                 pool_connections=20,
                 pool_maxsize=40,
-                max_retries=2,
+                max_retries=_RETRY_STRATEGY,
             )
             scraper.mount('https://', adapter)
             scraper.mount('http://', adapter)

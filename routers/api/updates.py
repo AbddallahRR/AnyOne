@@ -1,3 +1,4 @@
+import asyncio
 import concurrent.futures
 import logging
 from pathlib import Path
@@ -89,8 +90,8 @@ def _check_series_for_new_chapters(content_ref: str) -> dict:
 
 
 @api_router.post('/library/check-updates/{content_ref:path}')
-def api_check_updates(content_ref: str):
-    result = _check_series_for_new_chapters(content_ref)
+async def api_check_updates(content_ref: str):
+    result = await asyncio.to_thread(_check_series_for_new_chapters, content_ref)
     if result.get('error'):
         raise HTTPException(status_code=500, detail='Error interno al comprobar actualizaciones')
     return result
@@ -124,5 +125,5 @@ def _check_all_updates_core() -> dict:
 
 
 @api_router.post('/library/check-all-updates')
-def api_check_all_updates():
-    return _check_all_updates_core()
+async def api_check_all_updates():
+    return await asyncio.to_thread(_check_all_updates_core)

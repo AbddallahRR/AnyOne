@@ -183,4 +183,5 @@ async def api_search_all_stream(qs: SearchQuery = Depends()):
         yield "event: done\ndata: {}\n\n"
 
     return StreamingResponse(generate(), media_type='text/event-stream',
-                             headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive'})
+                             headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive',
+                                      'X-Accel-Buffering': 'no'})

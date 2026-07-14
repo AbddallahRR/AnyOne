@@ -57,4 +57,4 @@ class RateLimiter:
             self._last_calls[domain] = time.time()
 
 
-rate_limiter = RateLimiter(min_interval=2.0)
+rate_limiter = RateLimiter(min_interval=1.0)

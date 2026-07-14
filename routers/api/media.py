@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import subprocess
+from functools import lru_cache
 from pathlib import Path
 
 from fastapi import HTTPException, Request
@@ -244,17 +245,8 @@ def api_manga_images(subpath: str, request: Request):
     })
 
 
-_duration_cache: dict[str, tuple[float, float]] = {}
-
-def _get_cached_duration(filepath: str) -> float | None:
-    key = filepath
-    try:
-        mtime = os.path.getmtime(filepath)
-    except OSError:
-        return None
-    cached = _duration_cache.get(key)
-    if cached is not None and cached[0] == mtime:
-        return cached[1]
+@lru_cache(maxsize=256)
+def _probe_duration(filepath: str) -> float | None:
     try:
         result = subprocess.run(
             ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
@@ -262,12 +254,14 @@ def _get_cached_duration(filepath: str) -> float | None:
             capture_output=True, text=True, timeout=10
         )
         if result.returncode == 0:
-            duration = float(result.stdout.strip())
-            _duration_cache[key] = (mtime, duration)
-            return duration
+            return float(result.stdout.strip())
     except Exception as exc:
         logger.exception(f"Error obteniendo duración: {exc}")
     return None
+
+
+def _get_cached_duration(filepath: str) -> float | None:
+    return _probe_duration(filepath)
 
 
 @api_router.get('/video-duration/anime/{content_id}/{chapter}')

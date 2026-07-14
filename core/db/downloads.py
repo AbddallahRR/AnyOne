@@ -42,14 +42,12 @@ def queue_insert(content_ref: str, content_type: str, title: str,
 
 def queue_get_status() -> tuple[list, list]:
     conn = get_conn()
-    active = [dict(r) for r in conn.execute(
+    rows = conn.execute(
         'SELECT id, content_ref, type, title, status, total_chapters, '
         'current_chapter, current_progress AS progress, error '
-        'FROM download_queue WHERE status = "downloading" ORDER BY created_at ASC'
-    ).fetchall()]
-    pending = [dict(r) for r in conn.execute(
-        'SELECT id, content_ref, type, title, status, total_chapters, '
-        'current_chapter, current_progress AS progress '
-        'FROM download_queue WHERE status = "pending" ORDER BY created_at ASC'
-    ).fetchall()]
+        'FROM download_queue WHERE status IN ("downloading", "pending") '
+        'ORDER BY status = "pending", created_at ASC'
+    ).fetchall()
+    active = [dict(r) for r in rows if r['status'] == 'downloading']
+    pending = [dict(r) for r in rows if r['status'] == 'pending']
     return active, pending

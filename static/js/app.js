@@ -607,6 +607,11 @@
         _renderedCards.set(item.id, wrapper);
         frag.appendChild(wrapper);
       }
+      // Reordenar nodos existentes según filtered
+      const node = _renderedCards.get(item.id);
+      if (node && node.parentNode === container) {
+        frag.appendChild(node);
+      }
     });
     if (frag.childElementCount > 0) {
       // Limpiar cualquier nodo residual (spinner de carga, empty-state previo)
@@ -619,14 +624,6 @@
       observeCovers(container);
       if (window.animateCards) window.animateCards('#library-results');
     }
-
-    // Reordenar nodos según filtered (solo si el orden cambió)
-    filtered.forEach(item => {
-      const node = _renderedCards.get(item.id);
-      if (node && node.parentNode === container) {
-        container.appendChild(node); // mover al final en orden correcto
-      }
-    });
   }
 
   function _buildLibraryCard(item) {

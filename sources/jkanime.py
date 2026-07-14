@@ -38,10 +38,23 @@ class JkanimeSource(HttpClientMixin, BaseSource):
     type = 'anime'
     label = 'JKanime'
     BASE_URL = "https://jkanime.net"
+    _episode_html_cache: dict[str, str] = {}
 
     # -----------------------------------------------------------------------
     # Parsing helpers
     # -----------------------------------------------------------------------
+
+    def _fetch_episode_html(self, content_id: str, chapter_id: str) -> str:
+        cache_key = f"{content_id}/{chapter_id}"
+        cached = self._episode_html_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        cap_url = f"{self.BASE_URL}/{content_id}/{chapter_id}/"
+        html = self._get(cap_url).text
+        self._episode_html_cache[cache_key] = html
+        if len(self._episode_html_cache) > 128:
+            self._episode_html_cache.clear()
+        return html
 
     @staticmethod
     def _get_csrf_token(html: str) -> str:
@@ -539,8 +552,7 @@ class JkanimeSource(HttpClientMixin, BaseSource):
         return chapters
 
     def download_chapter_sync(self, content_id: str, chapter_id: str, dest_folder: str, chapter_number: str | None = None) -> str:
-        cap_url = f"{self.BASE_URL}/{content_id}/{chapter_id}/"
-        html    = self._get(cap_url).text
+        html    = self._fetch_episode_html(content_id, chapter_id)
         soup    = BeautifulSoup(html, 'html.parser')
 
         # Resolver lista de servidores
@@ -613,9 +625,8 @@ class JkanimeSource(HttpClientMixin, BaseSource):
 
         Devuelve None si no se encuentra ninguna opción.
         """
-        cap_url = f"{self.BASE_URL}/{content_id}/{chapter_id}/"
         try:
-            html = self._get(cap_url).text
+            html = self._fetch_episode_html(content_id, chapter_id)
         except Exception as exc:
             logger.exception(f"Jkanime get_stream_url error: {exc}")
             return None
@@ -667,9 +678,8 @@ class JkanimeSource(HttpClientMixin, BaseSource):
         }
         Cada entry: { 'server': str, 'url': str }
         """
-        cap_url = f"{self.BASE_URL}/{content_id}/{chapter_id}/"
         try:
-            html = self._get(cap_url).text
+            html = self._fetch_episode_html(content_id, chapter_id)
         except Exception as exc:
             logger.exception(f"Jkanime get_episode_links error: {exc}")
             return EpisodeLinks()

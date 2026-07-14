@@ -287,7 +287,6 @@ select.input-field {
 .media-card img {
   width: 100%; height: 100%; object-fit: cover; display: block;
   transform: translateZ(0);
-  will-change: transform;
   transition: transform 0.3s ease;
   backface-visibility: hidden;
   image-rendering: auto;
