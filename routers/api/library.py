@@ -92,13 +92,16 @@ def api_library_recent():
         folder = entry['content_ref'][6:]
         item = library.get(folder)
         if item:
+            total_episodes = int(item.get('last_chapter', '1') or '1')
+            current_chapter = entry['chapter']
             result.append({
                 'id': folder,
                 'title': item['title'],
                 'cover': item['cover'],
                 'type': item['type'],
-                'chapter': entry['chapter'],
+                'chapter': current_chapter,
                 'progress': entry['progress'],
+                'total_episodes': total_episodes,
             })
     return result
 

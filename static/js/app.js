@@ -457,6 +457,9 @@
       const typeLabel = isAnime ? 'Anime' : 'Manga';
       const chapter   = item.chapter || '1';
       const cover = item.cover || '';
+      const total = item.total_episodes || 0;
+      const chapNum = parseFloat(chapter) || 0;
+      const pct = total > 0 ? Math.min(Math.round((chapNum / total) * 100), 100) : 0;
       return `
         <div class="recent-card" data-id="${item.id}" data-type="${item.type}" data-chapter="${chapter}">
           <div class="recent-cover-wrap">
@@ -469,7 +472,8 @@
           </div>
           <div class="recent-info">
             <div class="recent-card-title" title="${item.title}">${item.title}</div>
-            <div class="recent-meta">Cap. ${chapter}</div>
+            <div class="recent-meta">Cap. ${chapter} de ${total}</div>
+            ${total > 0 ? `<div class="recent-progress-bar"><div class="recent-progress-fill" style="width:${pct}%"></div></div>` : ''}
           </div>
         </div>`;
     }).join('');
