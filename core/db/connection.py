@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 _local = threading.local()
 _db_write_lock = threading.Lock()
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 
 def execute_with_retry(sql: str, params: tuple = ()) -> sqlite3.Cursor:
@@ -212,6 +212,13 @@ def _run_migrations(conn: sqlite3.Connection, current: int) -> None:
     conn.execute(
         "UPDATE user_progress SET updated_at = datetime('now') WHERE updated_at IS NULL"
     )
+
+    if current < 11:
+        logger.info("Migracion 11: indice compuesto en user_progress para get_recent_progress")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_progress_updated "
+            "ON user_progress(content_id, updated_at DESC)"
+        )
 
 
 def init_db() -> None:

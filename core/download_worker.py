@@ -7,13 +7,14 @@ import os
 import subprocess
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from queue import Queue
 
 from core.database import update_queue_status
-from core.settings import settings
 from core.http_pool import HttpPool
 from core.models import DownloadJob
+from core.settings import settings
 from core.sources import get_source
 from core.utils import _invalidate_scan_cache, normalize_title
 
@@ -28,6 +29,8 @@ _downloading_chapters: dict[str, set[str]] = {}
 _dl_lock = threading.Lock()
 
 _stop_event = threading.Event()
+
+_postprocess_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ffmpeg")
 
 
 def mark_downloading(folder: str, num: str) -> None:
@@ -226,7 +229,7 @@ def _download_worker(worker_id: int) -> None:
                     unmark_downloading(series_folder, chap_num)
 
                 if content_type == 'anime' and result_path:
-                    _post_process_video(result_path)
+                    _postprocess_pool.submit(_post_process_video, result_path)
 
                 percent = int((idx / total) * 100)
                 if chapter_id:

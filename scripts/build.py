@@ -22,11 +22,15 @@ def write(p: Path, content: str):
     p.write_text(content, encoding="utf-8")
 
 # ── CSS bundles ───────────────────────────────────────────────────────────
+# Shared base files that are identical across all pages.
+# Extracted into a single cached chunk to avoid re-downloading on navigation.
+SHARED_CSS = ["inter.css", "fa-subset.css", "base.css", "layout.css"]
+
 CSS_BUNDLES = {
-    "index":    ["inter.css", "fa-subset.css", "base.css", "layout.css", "index.css"],
-    "serie":    ["inter.css", "fa-subset.css", "base.css", "layout.css", "serie.css"],
-    "reader":   ["inter.css", "fa-subset.css", "base.css", "layout.css", "reader.css"],
-    "settings": ["inter.css", "fa-subset.css", "base.css", "layout.css", "settings.css"],
+    "index":    ["index.css"],
+    "serie":    ["serie.css"],
+    "reader":   ["reader.css"],
+    "settings": ["settings.css"],
 }
 
 # ── JS bundles ────────────────────────────────────────────────────────────
@@ -97,7 +101,12 @@ def main():
 
     bundles = {}
 
-    print("\n--- CSS Bundles ---")
+    # Shared CSS chunk (fonts + base + layout) — cached once across all pages
+    print("\n--- Shared CSS Chunk ---")
+    out_name, _, _ = bundle_css("shared", SHARED_CSS)
+    bundles["css:shared"] = out_name
+
+    print("\n--- CSS Page Bundles ---")
     for name, sources in CSS_BUNDLES.items():
         out_name, _, _ = bundle_css(name, sources)
         bundles[f"css:{name}"] = out_name
@@ -110,7 +119,7 @@ def main():
     # Write manifest
     manifest = {
         "bundles": bundles,
-        "version": 1,
+        "version": 2,
     }
     write(BUILD_INFO, json.dumps(manifest, indent=2))
     print(f"\n✓ Manifest written to {BUILD_INFO}")

@@ -67,7 +67,8 @@
       const url = source === 'local'
         ? `/api/chapters/local/${type}/${content_id}`
         : `/api/chapters/${type}/${source}/${content_id}`;
-      chaptersList = await api.get(url);
+      const res = await api.get(url);
+      chaptersList = res || [];
 
       currentChapterIndex = chaptersList.findIndex(
         ch => String(ch.number) === String(current_chapter)

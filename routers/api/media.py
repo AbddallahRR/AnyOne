@@ -1,4 +1,3 @@
-import functools
 import json
 import logging
 import os
@@ -86,13 +85,11 @@ def _serve_video(filepath: str, request: Request) -> Response:
                     break
                 yield chunk
 
-    return StreamingResponse(
-        full_gen(),
-        status_code=200,
+    return FileResponse(
+        filepath,
         media_type='video/mp4',
         headers={
             'Accept-Ranges': 'bytes',
-            'Content-Length': str(file_size),
             'Cache-Control': 'public, max-age=86400',
             'ETag': etag,
         },
