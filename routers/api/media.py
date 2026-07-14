@@ -12,7 +12,7 @@ from core.database import save_content_to_db
 from core.settings import settings
 from core.models import chapter_to_filename
 from core.sources import get_source
-from core.utils import normalize_title
+from core.utils import filter_manga_images, normalize_title
 
 from . import api_router
 from .common import (
@@ -223,6 +223,8 @@ async def api_play_remote(content_type: str, source: str, content_id: str, chapt
             raise HTTPException(status_code=502, detail='Error al obtener imagenes del capitulo')
         if not images:
             raise HTTPException(status_code=404, detail='No se encontraron imagenes para este capitulo')
+        # Filter out small images (logos, ads, thumbnails) that cause jumps
+        images = filter_manga_images(images, min_dimension=300)
         return JSONResponse(content=images)
 
 

@@ -188,3 +188,140 @@ def count_images_in_dir(cap_dir: str) -> int:
         )
     except FileNotFoundError:
         return 0
+
+
+def _get_image_dimensions_from_bytes(data: bytes) -> tuple[int, int] | None:
+    """
+    Extract image dimensions from raw bytes without full decode.
+    Returns (width, height) or None if unable to determine.
+    """
+    if len(data) < 8:
+        return None
+
+    # PNG: IHDR chunk at offset 16 contains width (4 bytes BE) and height (4 bytes BE)
+    if data[:8] == b'\x89PNG\r\n\x1a\n':
+        if len(data) >= 24:
+            width = int.from_bytes(data[16:20], 'big')
+            height = int.from_bytes(data[20:24], 'big')
+            return (width, height)
+        return None
+
+    # JPEG: look for SOF0 (0xFFC0) or SOF2 (0xFFC2) marker
+    if data[:2] == b'\xff\xd8':
+        i = 2
+        while i < len(data) - 9:
+            if data[i] != 0xFF:
+                break
+            marker = data[i + 1]
+            if marker in (0xC0, 0xC2):  # SOF0 or SOF2
+                height = int.from_bytes(data[i + 5:i + 7], 'big')
+                width = int.from_bytes(data[i + 7:i + 9], 'big')
+                return (width, height)
+            # Skip to next marker
+            if marker == 0xD9 or marker == 0xDA:  # EOI or SOS
+                break
+            seg_len = int.from_bytes(data[i + 2:i + 4], 'big')
+            i += 2 + seg_len
+        return None
+
+    # WebP: RIFF header, then check for VP8 or VP8L chunk
+    if data[:4] == b'RIFF' and data[8:12] == b'WEBP':
+        if data[12:16] == b'VP8 ' and len(data) >= 30:
+            # Lossy WebP: dimensions at offset 26 (3 bytes each)
+            width = int.from_bytes(data[26:28], 'little') & 0x3FFF
+            height = int.from_bytes(data[28:30], 'little') & 0x3FFF
+            return (width, height)
+        if data[12:16] == b'VP8L' and len(data) >= 25:
+            # Lossless WebP: dimensions packed in 4 bytes at offset 21
+            bits = int.from_bytes(data[21:25], 'little')
+            width = (bits & 0x3FFF) + 1
+            height = ((bits >> 14) & 0x3FFF) + 1
+            return (width, height)
+        return None
+
+    # GIF: dimensions at offset 6
+    if data[:6] in (b'GIF87a', b'GIF89a') and len(data) >= 10:
+        width = int.from_bytes(data[6:8], 'little')
+        height = int.from_bytes(data[8:10], 'little')
+        return (width, height)
+
+    # BMP: dimensions at offset 18
+    if data[:2] == b'BM' and len(data) >= 26:
+        width = int.from_bytes(data[18:22], 'little')
+        height = abs(int.from_bytes(data[22:26], 'little'))
+        return (width, height)
+
+    return None
+
+
+def filter_manga_images(
+    image_urls: list[str],
+    min_dimension: int = 300,
+    max_workers: int = 16,
+) -> list[str]:
+    """
+    Filter manga image URLs by checking actual image dimensions.
+    Streams only the first bytes of each image to read headers.
+    Returns only URLs where both width AND height >= min_dimension.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from core.http_pool import HttpPool
+    from core.throttle import rate_limiter
+
+    if not image_urls:
+        return []
+
+    _HEADER_BYTES = 32768  # 32KB — enough for PNG IHDR, JPEG SOF, WebP VP8 headers
+
+    def _check_one(url: str) -> str | None:
+        try:
+            rate_limiter.wait(url)
+            sc = HttpPool.get_scraper()
+            resp = sc.get(
+                url,
+                headers={'Range': f'bytes=0-{_HEADER_BYTES - 1}'},
+                timeout=10,
+                stream=True,
+            )
+            # Read only up to _HEADER_BYTES even if server ignores Range
+            data = b''
+            for chunk in resp.iter_content(chunk_size=8192):
+                data += chunk
+                if len(data) >= _HEADER_BYTES:
+                    break
+            resp.close()
+
+            dims = _get_image_dimensions_from_bytes(data)
+            if dims is None:
+                return None  # can't determine → keep it to be safe
+            w, h = dims
+            if w < min_dimension or h < min_dimension:
+                logger.debug(f"filter_manga_images: descartada imagen pequeña {w}x{h}: {url[:80]}")
+                return None
+            return url
+        except Exception as exc:
+            logger.debug(f"filter_manga_images: error verificando {url[:80]}: {exc}")
+            return None  # on error → keep the image
+
+    filtered: list[str] = []
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_check_one, url): url for url in image_urls}
+        for future in as_completed(futures):
+            original_url = futures[future]
+            try:
+                result = future.result()
+                if result is not None:
+                    filtered.append(result)
+            except Exception:
+                filtered.append(original_url)  # keep on error
+
+    # Maintain original order
+    url_set = set(filtered)
+    ordered = [u for u in image_urls if u in url_set]
+
+    logger.info(
+        f"filter_manga_images: {len(ordered)}/{len(image_urls)} imágenes "
+        f"pasan el filtro (min {min_dimension}px)"
+    )
+    return ordered

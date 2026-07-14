@@ -473,6 +473,8 @@
       let   hasMarked   = false;
       let   saveTimeout = null;
       let   rafId       = null;
+      let   _initialScrollApplied = false;
+      let   _pendingDecode = 0;
 
       // [OPT-3] Array de sumas de prefijo: prefixSums[i] = suma de pageHeights[0..i-1]
       // prefixSums[0] = 0, prefixSums[total] = altura total
@@ -489,6 +491,32 @@
 
       // O(1) gracias a prefixSums
       function offsetBefore(i) { return prefixSums[i]; }
+
+      // Corrige el scroll después de que imágenes pequeñas colapsan durante la carga inicial
+      function _fixInitialScroll() {
+        if (_initialScrollApplied) return;
+        if (_pendingDecode > 0) return; // esperar a que terminen de decodificar
+        _initialScrollApplied = true;
+
+        // Buscar la primera imagen con altura real > 0 empezando desde savedIndex
+        let target = savedIndex;
+        while (target < total && pageHeights[target] === 0) target++;
+        if (target >= total) {
+          // Todas las imágenes son pequeñas — buscar desde el inicio
+          for (let j = 0; j < total; j++) {
+            if (pageHeights[j] > 0) { target = j; break; }
+          }
+        }
+        target = Math.min(target, total - 1);
+
+        currentPage = target;
+        viewerDiv.scrollTop = offsetBefore(target);
+
+        // Forzar re-montaje de la ventana con las alturas reales
+        prevLo = -1;
+        prevHi = -1;
+        updateWindow(target);
+      }
 
       // [OPT-2] Búsqueda binaria: O(log n) en vez de O(n)
       function getVisibleIndex() {
@@ -526,6 +554,7 @@
         const slot = slots[i];
         if (slot.dataset.mounted === '1') return;
         slot.dataset.mounted = '1';
+        _pendingDecode++;
 
         const img = document.createElement('img');
         img.src           = imageUrls[i];
@@ -537,6 +566,12 @@
           if (!settled) {
             settled = true;
             slot.dataset.mounted = '0'; // liberar para reintentos
+            if (pageHeights[i] !== 0) {
+              pageHeights[i] = 0;
+              rebuildSums(i);
+            }
+            _pendingDecode--;
+            _fixInitialScroll();
           }
         }, 12000);
 
@@ -546,15 +581,17 @@
             clearTimeout(decodeTimeout);
             if (slot.dataset.mounted !== '1') return;
 
-            const MIN_PX = 150;
-            if (img.naturalWidth < MIN_PX || img.naturalHeight < MIN_PX) {
+            // Filter small images (logos, ads, thumbnails) that slip past server filter
+            if (img.naturalWidth < 300 || img.naturalHeight < 300) {
               slot.style.height    = '0';
               slot.style.overflow  = 'hidden';
               slot.dataset.mounted = '0';
               if (pageHeights[i] !== 0) {
                 pageHeights[i] = 0;
-                rebuildSums(i); // [OPT-3] actualizar sumas desde este índice
+                rebuildSums(i);
               }
+              _pendingDecode--;
+              _fixInitialScroll();
               return;
             }
 
@@ -584,6 +621,8 @@
               pageHeights[i] = rendered;
               rebuildSums(i); // [OPT-3]
             }
+            _pendingDecode--;
+            _fixInitialScroll();
           })
           .catch(() => {
             settled = true;
@@ -591,6 +630,12 @@
             slot.dataset.mounted = '0';
             slot.style.height    = '0';
             slot.style.overflow  = 'hidden';
+            if (pageHeights[i] !== 0) {
+              pageHeights[i] = 0;
+              rebuildSums(i);
+            }
+            _pendingDecode--;
+            _fixInitialScroll();
           });
       }
 
@@ -696,7 +741,6 @@
 
       currentPage = savedIndex;
       updateWindow(savedIndex);
-      viewerDiv.scrollTop = offsetBefore(savedIndex); // O(1) con prefixSums
 
     } catch (err) {
       console.error(err);
