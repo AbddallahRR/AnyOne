@@ -174,12 +174,11 @@ def api_delete_series(data: DeleteSeriesRequest):
         # series_status
         conn.execute('DELETE FROM series_status WHERE content_ref = ?', (data.content_ref,))
 
-    # Limpiar entrada en tabla content si existe
-    if source_name and orig_content_id:
-        orig_ref = f"{source_name}:{orig_content_id}"
-        delete_content_from_db(orig_ref)
-        # También limpiar cola de descarga asociada
-        conn.execute('DELETE FROM download_queue WHERE content_ref = ?', (orig_ref,))
+        # Limpiar entrada en tabla content si existe
+        if source_name and orig_content_id:
+            orig_ref = f"{source_name}:{orig_content_id}"
+            delete_content_from_db(orig_ref)
+            conn.execute('DELETE FROM download_queue WHERE content_ref = ?', (orig_ref,))
 
     # Invalidar caches
     _invalidate_series_index(base)

@@ -1,4 +1,6 @@
 import logging
+import os
+import shutil
 import sqlite3
 import threading
 import time
@@ -213,7 +215,6 @@ def _run_migrations(conn: sqlite3.Connection, current: int) -> None:
 
 
 def init_db() -> None:
-    import time
     for attempt in range(6):
         try:
             conn = get_conn()
@@ -242,7 +243,6 @@ def init_db() -> None:
 
 
 def cleanup_download_queue() -> None:
-    import time
     for attempt in range(6):
         try:
             conn = get_conn()
@@ -287,7 +287,6 @@ def cleanup_download_queue() -> None:
                 else:
                     filepath = os.path.join(series_folder, f"cap_{cap_num}")
                     if os.path.exists(filepath):
-                        import shutil
                         shutil.rmtree(filepath)
                         logger.info(f"[CLEANUP] Carpeta parcial eliminada: {filepath}")
         except Exception as exc:

@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     host: str = '0.0.0.0'
     port: int = 5000
     download_num_workers: int = 3
+    cors_origins: str = Field(default='*')
 
     @property
     def anime_download_dir(self) -> Path:
@@ -24,6 +25,10 @@ class Settings(BaseSettings):
     @property
     def db_path(self) -> Path:
         return self.db_dir / 'history.db'
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(',') if o.strip()]
 
     model_config = {'env_prefix': ''}
 

@@ -116,7 +116,7 @@ def scan_downloaded_series():
     now = time.time()
     with _scan_cache_lock:
         if _scan_cache is not None and now - _scan_cache_time < _SCAN_CACHE_TTL:
-            return _scan_cache
+            return list(_scan_cache)
         _scan_cache = None  # invalidate while scanning
         start_gen = _scan_cache_gen
 
@@ -173,7 +173,7 @@ def scan_downloaded_series():
 
     with _scan_cache_lock:
         if _scan_cache_gen == start_gen:
-            _scan_cache = series
+            _scan_cache = list(series)
             _scan_cache_time = time.time()
     return series
 

@@ -69,6 +69,7 @@ class DiskCache:
             'expires': time.time() + effective_ttl,
             'value':   value,
         }
+        tmp_path = None
         try:
             fd, tmp_path = tempfile.mkstemp(dir=CACHE_DIR, suffix='.json.tmp')
             with os.fdopen(fd, 'w', encoding='utf-8') as f:

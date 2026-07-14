@@ -5,3 +5,4 @@ __pycache__/
 debug.py
 static/dist/
 anyone-mobile/
+data.db
