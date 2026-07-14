@@ -161,11 +161,19 @@
       savedTime = parseInt(prog.progress);
     if (durData?.duration > 0) duration = durData.duration;
 
-    if (chapterWrapper) chapterWrapper.innerHTML = `
+    if (chapterWrapper) {
+      const oldVideo = chapterWrapper.querySelector('video');
+      if (oldVideo) {
+        oldVideo.pause();
+        oldVideo.removeAttribute('src');
+        oldVideo.load();
+      }
+      chapterWrapper.innerHTML = `
       <video id="anime-video" autoplay playsinline
              style="width:100%; height:100%; object-fit:contain;">
         <source src="${videoUrl}" type="video/mp4">
       </video>`;
+    }
 
     const video = document.getElementById('anime-video');
     if (!video) return;
@@ -270,6 +278,9 @@
     function getDurationSec() {
       return (duration > 0 ? duration : (video.duration || 0));
     }
+    let _drag = false;
+    let _wasPlayingBeforeSeek = false;
+
     function seekFromClientX(clientX) {
       const d = getDurationSec();
       if (d <= 0 || !isFinite(d)) return;
@@ -277,6 +288,9 @@
       const x    = Math.max(0, Math.min(clientX - rect.left, rect.width));
       const pct  = x / rect.width;
       const target = pct * d;
+      if (_drag && !video.paused) {
+        video.pause();
+      }
       video.currentTime = target;
       // Update visual directly (no dependemos de video.currentTime aún)
       poProgress.value = Math.round(pct * 1000);
@@ -284,11 +298,20 @@
       if (poTime) poTime.textContent = `${fmt(target)} / ${fmt(d)}`;
     }
 
-    let _drag = false;
-
-    function onDown(clientX) { _drag = true; seekFromClientX(clientX); }
+    function onDown(clientX) {
+      _drag = true;
+      _wasPlayingBeforeSeek = !video.paused;
+      seekFromClientX(clientX);
+    }
     function onMove(clientX) { if (_drag) { seekFromClientX(clientX); } }
-    function onUp()          { _drag = false; updateUI(); }
+    function onUp() {
+      if (_drag && _wasPlayingBeforeSeek && video.paused) {
+        video.play();
+      }
+      _drag = false;
+      _wasPlayingBeforeSeek = false;
+      updateUI();
+    }
 
     progressWrap.addEventListener('mousedown',  e => onDown(e.clientX));
     document.addEventListener('mousemove',      e => { if (_drag) e.preventDefault(); onMove(e.clientX); });
