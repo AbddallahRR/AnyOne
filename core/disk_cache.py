@@ -79,8 +79,8 @@ class DiskCache:
             if tmp_path is not None:
                 try:
                     os.unlink(tmp_path)
-                except Exception:
-                    logger.warning('disk_cache: error limpiando archivo temporal %s', tmp_path)
+                except Exception as exc:
+                    logger.debug('disk_cache: error limpiando archivo temporal %s: %s', tmp_path, exc)
 
     async def aset(self, key: str, value, ttl: int | None = None) -> None:
         return await asyncio.to_thread(self.set, key, value, ttl)
@@ -95,7 +95,8 @@ class DiskCache:
                 if data.get('expires', 0) <= now:
                     f.unlink(missing_ok=True)
                     removed += 1
-            except Exception:
+            except Exception as exc:
+                logger.debug('disk_cache: error leyendo caché %s: %s', f, exc)
                 f.unlink(missing_ok=True)
                 removed += 1
         return removed

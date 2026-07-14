@@ -125,8 +125,8 @@ class JkanimeSource(HttpClientMixin, BaseSource):
                             'variant': self._normalize_variant(s.get('lang')),
                         })
                     return result
-                except Exception:
-                    logger.debug('Jkanime: fallo JSON en _parse_servers_from_js, usando regex')
+                except Exception as exc:
+                    logger.debug('Jkanime: fallo JSON en _parse_servers_from_js: %s, usando regex', exc)
 
         # Intento 2: regex directo sobre pares clave-valor
         servers = []
@@ -329,8 +329,8 @@ class JkanimeSource(HttpClientMixin, BaseSource):
             slug = None
             try:
                 slug = href.strip('/').split('/')[-1] or None
-            except Exception:
-                logger.debug('Jkanime: error extrayendo slug')
+            except Exception as exc:
+                logger.debug('Jkanime: error extrayendo slug: %s', exc)
 
             # Estado y tipo desde los <li> de la card
             li_items = card.select('.anime__item__text ul li')
@@ -489,8 +489,8 @@ class JkanimeSource(HttpClientMixin, BaseSource):
             data     = get_resp.json()
             if not data.get('total') and not data.get('data'):
                 data = None
-        except Exception:
-            logger.debug(f'Jkanime: GET AJAX falló para {content_id}, usando POST')
+        except Exception as exc:
+            logger.debug(f'Jkanime: GET AJAX falló para {content_id}: {exc}, usando POST')
             data = None
 
         if data is None:
@@ -701,8 +701,8 @@ class JkanimeSource(HttpClientMixin, BaseSource):
                     if stream_url.startswith('http') and stream_url not in seen_stream:
                         seen_stream.add(stream_url)
                         stream_links[variant].append(EpisodeLink(server=name, url=stream_url))
-                except Exception:
-                    logger.debug(f'Jkanime: error decodificando remote para {name}')
+                except Exception as exc:
+                    logger.debug(f'Jkanime: error decodificando remote para {name}: {exc}')
 
             # Download: construir URL desde remote_base + slug
             if remote_base and slug:

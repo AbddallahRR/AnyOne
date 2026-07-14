@@ -25,8 +25,8 @@ def _load_bundles() -> dict:
             bundles[key.replace(':', '_')] = f"dist/{filename}"
         _manifest_cache = bundles
         return bundles
-    except Exception:
-        logging.warning('pages: error cargando manifest.json')
+    except Exception as exc:
+        logging.warning('pages: error cargando manifest.json: %s', exc)
         _manifest_cache = {}
         return {}
 

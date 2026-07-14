@@ -160,7 +160,8 @@ def _download_worker(worker_id: int) -> None:
     while not _stop_event.is_set():
         try:
             job: DownloadJob = download_queue.get(timeout=1)
-        except Exception:
+        except Exception as exc:
+            logger.debug(f"Worker {worker_id}: queue timeout o interrupción: {exc}")
             continue
 
         with _active_jobs_lock:
@@ -244,8 +245,8 @@ def _download_worker(worker_id: int) -> None:
                 from routers.api.common import _invalidate_series_index
                 base = Path(str(settings.anime_download_dir) if content_type == 'anime' else str(settings.manga_download_dir))
                 _invalidate_series_index(base)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(f"Job {job_id}: error invalidando índice de series: {exc}")
             _invalidate_scan_cache()
 
             logger.info(f"Job {job_id} completado: '{title}'")

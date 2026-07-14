@@ -47,8 +47,8 @@ def api_local_content_details(type: str, id: str):
             synopsis = info.get('synopsis', synopsis)
             source_name = info.get('source', '') or ''
             remote_id = info.get('content_id', '') or ''
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"api_local_content_details: error leyendo series_info.json para '{id}': {exc}")
 
     return {
         'title': title,

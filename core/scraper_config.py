@@ -92,8 +92,8 @@ def create_config(name: str, source_type: str, label: str,
     try:
         from core.database import ensure_source_in_db
         ensure_source_in_db(name, source_type)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning(f"Error registrando fuente '{name}' en source_settings: {exc}")
     logger.info(f"Scraper config created: {name} ({source_type})")
     return get_config(name)
 
@@ -105,8 +105,8 @@ def _reload_dynamic_source(name: str) -> None:
             src = type_dict.get(name)
             if src is not None and hasattr(src, 'reload_config'):
                 src.reload_config()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug(f"_reload_dynamic_source: error recargando config de '{name}': {exc}")
 
 
 def update_config(name: str, label: str | None = None,
@@ -130,8 +130,8 @@ def update_config(name: str, label: str | None = None,
             try:
                 conn.execute('UPDATE source_settings SET enabled = ? WHERE name = ?',
                              (1 if enabled else 0, name))
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(f"update_config: no se pudo actualizar source_settings para '{name}': {exc}")
         if config is not None:
             conn.execute('UPDATE scraper_configs SET config_json = ? WHERE name = ?',
                          (json.dumps(config), name))
@@ -168,18 +168,18 @@ def delete_config(name: str) -> bool:
     try:
         from core.database import get_conn as _get_conn
         _get_conn().execute('DELETE FROM source_settings WHERE name = ?', (name,))
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug(f"delete_config: error limpiando source_settings para '{name}': {exc}")
     try:
         from core.scraper_health import clear_source_health
         clear_source_health(name)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug(f"delete_config: error limpiando salud de '{name}': {exc}")
     try:
         from core.disk_cache import search_cache
         search_cache.clear()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug(f"delete_config: error limpiando caché para '{name}': {exc}")
     logger.info(f"Scraper config deleted: {name}")
     return True
 

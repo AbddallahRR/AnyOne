@@ -278,15 +278,15 @@ class ManhwawebSource(HttpClientMixin, BaseSource):
                             or [])
             if img_urls:
                 return img_urls
-        except Exception:
-            logger.debug(f'ManhwaWeb: API falló para {content_id}/{chapter_id}, usando scraping')
+        except Exception as exc:
+            logger.debug(f'ManhwaWeb: API falló para {content_id}/{chapter_id}: {exc}, usando scraping')
 
         num     = self._chapter_num_from_id(chapter_id)
         web_url = f"{self.BASE_URL}/leer/{content_id}-{num}"
         try:
             resp = self._get(web_url, headers={'Referer': self.BASE_URL})
-        except Exception:
-            logger.warning(f'ManhwaWeb: error obteniendo pagina de lectura para {content_id}/{num}')
+        except Exception as exc:
+            logger.warning(f'ManhwaWeb: error obteniendo pagina de lectura para {content_id}/{num}: {exc}')
             return []
 
         soup = BeautifulSoup(resp.text, 'html.parser')

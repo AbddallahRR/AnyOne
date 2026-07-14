@@ -53,8 +53,8 @@ def _build_series_index(base_dir: Path) -> dict[str, Path]:
                 cid, cand_dir = future.result()
                 if cid and cand_dir:
                     index[cid] = cand_dir
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("_build_series_index: error procesando directorio de serie: %s", exc)
     return index
 
 
@@ -79,8 +79,8 @@ def _safe_path(base: str, untrusted: str) -> Path | None:
         resolved = Path(base, untrusted).resolve()
         if resolved.is_relative_to(Path(base).resolve()):
             return resolved
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("_safe_path: ruta no válida o fuera del directorio base: %s", exc)
     return None
 
 
@@ -164,6 +164,6 @@ def _resolve_series_title(source_name: str, content_id: str) -> str:
                 try:
                     info = json.loads(info_path.read_text(encoding='utf-8'))
                     return info.get('title', content_id)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("_resolve_series_title: error leyendo series_info.json: %s", exc)
     return content_id

@@ -120,8 +120,8 @@ class DynamicSource(HttpClientMixin, BaseSource):
             return ''
         try:
             elem = soup.select_one(selector)
-        except Exception:
-            logger.debug(f'{self.CONFIG_NAME}: error en selector CSS: {selector}')
+        except Exception as exc:
+            logger.debug(f'{self.CONFIG_NAME}: error en selector CSS: {selector}: {exc}')
             self._set_error(f'Invalid CSS selector: {selector}')
             return ''
         if not elem:
@@ -594,8 +594,8 @@ class DynamicSource(HttpClientMixin, BaseSource):
         url = self._build_url(tmpl, content_id=content_id, chapter_id=chapter_id)
         try:
             resp = self._get(url)
-        except Exception:
-            logger.warning(f'{self.CONFIG_NAME}: error obteniendo pagina de video: {url}')
+        except Exception as exc:
+            logger.warning(f'{self.CONFIG_NAME}: error obteniendo pagina de video: {url}: {exc}')
             return None
 
         vid_sel = cfg.get('content_video_selector', '')

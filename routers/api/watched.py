@@ -156,8 +156,8 @@ def api_delete_series(data: DeleteSeriesRequest):
             info = json.loads(info_path.read_text(encoding='utf-8'))
             source_name = info.get('source')
             orig_content_id = info.get('content_id')
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"No se pudo leer series_info.json para '{data.content_ref}': {exc}")
 
     # Eliminar directorio completo del disco
     try:

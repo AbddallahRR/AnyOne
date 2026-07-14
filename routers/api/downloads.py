@@ -6,9 +6,11 @@ from fastapi import HTTPException
 from core.database import (
     get_content_ref,
     get_watched_chapters,
+    queue_find_active,
+    queue_get_status,
+    queue_insert,
     save_content_to_db,
 )
-from core.db.downloads import queue_find_active, queue_get_status, queue_insert
 from core.download_worker import download_queue
 from core.models import (
     DownloadChapterRequest,

@@ -109,8 +109,8 @@ def sync_source_settings():
         try:
             ensure_source_in_db(src['name'], src['type'])
             valid_names.add(src['name'])
-        except Exception:
-            logger.warning(f"No se pudo registrar {src['name']} en source_settings")
+        except Exception as exc:
+            logger.warning(f"No se pudo registrar {src['name']} en source_settings: {exc}")
 
     # Also sync from scraper_configs table (dynamic sources that may have
     # been created after module import, or missed during early import
@@ -121,8 +121,8 @@ def sync_source_settings():
             if not cfg.get('built_in'):
                 ensure_source_in_db(cfg['name'], cfg['type'])
                 valid_names.add(cfg['name'])
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug(f"sync_source_settings: error sincronizando scraper_configs: {exc}")
 
     # Clean up orphaned entries (e.g. from sources deleted before
     # delete_config() cleaned source_settings)
@@ -134,8 +134,8 @@ def sync_source_settings():
                 f'DELETE FROM source_settings WHERE name NOT IN ({placeholders})',
                 list(valid_names)
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"sync_source_settings: error limpiando entradas huérfanas: {exc}")
 
 
 _discover_sources()

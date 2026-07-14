@@ -111,8 +111,8 @@ def get_all_status() -> dict[str, dict]:
             dyn_err = get_last_error(name)
             if dyn_err and not result[name].get('last_error'):
                 result[name]['last_error'] = dyn_err
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug(f"get_all_status: no se pudo importar get_last_error: {exc}")
 
     return result
 
