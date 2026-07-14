@@ -600,8 +600,20 @@
       const chapter   = item.chapter || '1';
       const cover = item.cover || '';
       const total = item.total_episodes || 0;
-      const chapNum = parseFloat(chapter) || 0;
-      const pct = total > 0 ? Math.min(Math.round((chapNum / total) * 100), 100) : 0;
+      const progress = parseInt(item.progress) || 0;
+      const chapterTotal = item.chapter_total || 0;
+      let metaText;
+      let pct = 0;
+      if (isAnime) {
+        const mins = Math.floor(progress / 60);
+        const secs = progress % 60;
+        metaText = total > 0 ? `Cap. ${chapter}/${total} · ${mins}:${secs.toString().padStart(2, '0')}` : `Cap. ${chapter} · ${mins}:${secs.toString().padStart(2, '0')}`;
+        if (chapterTotal > 0) pct = Math.min(Math.round((progress / chapterTotal) * 100), 100);
+      } else {
+        const pageInfo = progress > 0 ? ` · Pág. ${progress}` : '';
+        metaText = total > 0 ? `Cap. ${chapter}/${total}${pageInfo}` : `Cap. ${chapter}${pageInfo}`;
+        if (chapterTotal > 1) pct = Math.min(Math.round((progress / (chapterTotal - 1)) * 100), 100);
+      }
       return `
         <div class="recent-card" data-id="${item.id}" data-type="${item.type}" data-chapter="${chapter}">
           <div class="recent-cover-wrap">
@@ -614,8 +626,8 @@
           </div>
           <div class="recent-info">
             <div class="recent-card-title" title="${item.title}">${item.title}</div>
-            <div class="recent-meta">Cap. ${chapter} de ${total}</div>
-            ${total > 0 ? `<div class="recent-progress-bar"><div class="recent-progress-fill" style="width:${pct}%"></div></div>` : ''}
+            <div class="recent-meta">${metaText}</div>
+            ${chapterTotal > 0 ? `<div class="recent-progress-bar"><div class="recent-progress-fill" style="width:${pct}%"></div></div>` : ''}
           </div>
         </div>`;
     }).join('');

@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 
 from fastapi import HTTPException
 
@@ -15,7 +16,7 @@ from core.models import (
     AcknowledgeUpdatesRequest,
     StatusUpdateRequest,
 )
-from core.utils import scan_downloaded_series
+from core.utils import normalize_title, scan_downloaded_series
 from core.settings import settings
 
 from . import api_router
@@ -94,14 +95,48 @@ def api_library_recent():
         if item:
             total_episodes = int(item.get('last_chapter', '1') or '1')
             current_chapter = entry['chapter']
+            content_type = item['type']
+            chapter_total = 0
+            if content_type == 'manga':
+                base = Path(str(settings.manga_download_dir)) / normalize_title(folder)
+                for suffix in (f'cap_{current_chapter}', f'cap_{current_chapter.zfill(4)}'):
+                    cap_dir = base / suffix
+                    if cap_dir.is_dir():
+                        chapter_total = len([f for f in cap_dir.iterdir()
+                                             if f.is_file() and f.suffix.lower() in ('.jpg', '.jpeg', '.png', '.webp')])
+                        break
+            elif content_type == 'anime':
+                base = Path(str(settings.anime_download_dir)) / normalize_title(folder)
+                try:
+                    chap_int = int(float(current_chapter))
+                except (ValueError, TypeError):
+                    chap_int = None
+                matched_file = None
+                for pattern in (f'*_{current_chapter}.mp4', f'{current_chapter}.mp4',
+                                f'{chap_int:03d}.mp4') if chap_int else ():
+                    for f in base.glob(pattern):
+                        if f.is_file():
+                            matched_file = f
+                            break
+                    if matched_file:
+                        break
+                if matched_file:
+                    try:
+                        from .media import _get_cached_duration
+                        dur = _get_cached_duration(str(matched_file))
+                        if dur is not None:
+                            chapter_total = int(dur)
+                    except Exception:
+                        pass
             result.append({
                 'id': folder,
                 'title': item['title'],
                 'cover': item['cover'],
-                'type': item['type'],
+                'type': content_type,
                 'chapter': current_chapter,
                 'progress': entry['progress'],
                 'total_episodes': total_episodes,
+                'chapter_total': chapter_total,
             })
     return result
 
