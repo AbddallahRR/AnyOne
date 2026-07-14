@@ -106,10 +106,16 @@
   }
 
   // ── Navegación ─────────────────────────────────────────────────────────
+  function updateUrl() {
+    const url = `/reader/${type}/${source}/${content_id}/${currentChapterNum}`;
+    history.pushState({}, '', url);
+  }
+
   function prevChapter() {
     if (currentChapterIndex <= 0) return;
     currentChapterIndex--;
     currentChapterNum = chaptersList[currentChapterIndex].number;
+    updateUrl();
     updateChapterLabel();
     loadCurrentChapter();
   }
@@ -119,6 +125,7 @@
     markCurrentAsWatched();
     currentChapterIndex++;
     currentChapterNum = chaptersList[currentChapterIndex].number;
+    updateUrl();
     updateChapterLabel();
     loadCurrentChapter();
   }
