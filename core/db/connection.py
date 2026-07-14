@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 _local = threading.local()
 _db_write_lock = threading.Lock()
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 
 def execute_with_retry(sql: str, params: tuple = ()) -> sqlite3.Cursor:
@@ -219,6 +219,11 @@ def _run_migrations(conn: sqlite3.Connection, current: int) -> None:
             "CREATE INDEX IF NOT EXISTS idx_progress_updated "
             "ON user_progress(content_id, updated_at DESC)"
         )
+
+    if current < 12:
+        logger.info("Migracion 12: eliminar fuentes obsoletas nartag y manhwaweb")
+        conn.execute("DELETE FROM scraper_configs WHERE name IN ('nartag', 'manhwaweb')")
+        conn.execute("DELETE FROM source_settings WHERE name IN ('nartag', 'manhwaweb')")
 
 
 def init_db() -> None:
