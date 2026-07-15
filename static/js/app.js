@@ -493,16 +493,25 @@
     const series = data ? data.series : [];
     const total = data ? data.total : 0;
 
-    const items = series.slice(0, 5).map(s => {
+    function _buildItemHtml(s) {
       const chs = Array.isArray(s.new_chapters) ? s.new_chapters : [];
       const chText = chs.length > 0
         ? (chs.length <= 3 ? chs.join(', ') : `${chs.slice(0, 2).join(', ')} y ${chs.length - 2} más`)
         : '';
-      return `<div class="updates-popup-item">
-        <span class="updates-popup-title">${s.title}</span>
+      const link = (s.content_type && s.local_id)
+        ? `/serie/${s.content_type}/local/${encodeURIComponent(s.local_id)}`
+        : '';
+      return `<div class="updates-popup-item" data-ref="${s.content_ref}">
+        <div class="updates-popup-item-top">
+          <span class="updates-popup-title">${s.title}</span>
+          <button class="updates-popup-dismiss" data-ref="${s.content_ref}" title="Eliminar">&times;</button>
+        </div>
         ${chText ? `<span class="updates-popup-chs">Cap. ${chText}</span>` : ''}
+        ${link ? `<a class="updates-popup-view" href="${link}"><i class="fas fa-eye"></i> Ver serie</a>` : ''}
       </div>`;
-    }).join('');
+    }
+
+    const items = series.slice(0, 5).map(_buildItemHtml).join('');
 
     const extra = total > 5 ? `<div class="updates-popup-more">y ${total - 5} serie${total - 5 !== 1 ? 's' : ''} más…</div>` : '';
     const bodyContent = total > 0 ? items + extra : '<div class="updates-popup-empty">No hay capítulos nuevos por ahora</div>';
@@ -518,6 +527,7 @@
         </div>
         <div class="updates-popup-body">${bodyContent}</div>
         <div class="updates-popup-footer">
+          ${total > 0 ? '<button class="updates-popup-clear-all"><i class="fas fa-check-double"></i> Marcar todo leído</button>' : ''}
           <button class="updates-popup-check"><i class="fas fa-sync-alt"></i> Buscar actualizaciones</button>
         </div>
       </div>`;
@@ -535,6 +545,36 @@
       setTimeout(() => popup.remove(), 300);
     });
 
+    popup.addEventListener('click', async (e) => {
+      const dismissBtn = e.target.closest('.updates-popup-dismiss');
+      if (dismissBtn) {
+        e.stopPropagation();
+        const ref = dismissBtn.dataset.ref;
+        const item = dismissBtn.closest('.updates-popup-item');
+        await api.post('/api/library/acknowledge-updates', { content_ref: ref }).catch(() => {});
+        item?.remove();
+        await fetchUpdatesBadge();
+        const body = popup.querySelector('.updates-popup-body');
+        if (!body.querySelector('.updates-popup-item')) {
+          body.innerHTML = '<div class="updates-popup-empty">No hay capítulos nuevos por ahora</div>';
+          popup.querySelector('.updates-popup-clear-all')?.remove();
+        }
+        return;
+      }
+    });
+
+    const clearAllBtn = popup.querySelector('.updates-popup-clear-all');
+    if (clearAllBtn) {
+      clearAllBtn.addEventListener('click', async () => {
+        const refs = series.map(s => s.content_ref);
+        await api.post('/api/library/acknowledge-updates', { content_refs: refs }).catch(() => {});
+        const body = popup.querySelector('.updates-popup-body');
+        body.innerHTML = '<div class="updates-popup-empty">No hay capítulos nuevos por ahora</div>';
+        clearAllBtn.remove();
+        await fetchUpdatesBadge();
+      });
+    }
+
     popup.querySelector('.updates-popup-check').addEventListener('click', async () => {
       const btn = popup.querySelector('.updates-popup-check');
       btn.disabled = true;
@@ -549,24 +589,30 @@
         const totalQueued = results.reduce((sum, r) => sum + (r.queued || 0), 0);
         const body = popup.querySelector('.updates-popup-body');
         if (newTotal > 0) {
-          const newItems = newSeries.slice(0, 5).map(s => {
-            const chs = Array.isArray(s.new_chapters) ? s.new_chapters : [];
-            const chText = chs.length > 0
-              ? (chs.length <= 3 ? chs.join(', ') : `${chs.slice(0, 2).join(', ')} y ${chs.length - 2} más`)
-              : '';
-            return `<div class="updates-popup-item">
-              <span class="updates-popup-title">${s.title}</span>
-              ${chText ? `<span class="updates-popup-chs">Cap. ${chText}</span>` : ''}
-            </div>`;
-          }).join('');
-          const newExtra = newTotal > 5 ? `<div class="updates-popup-more">y ${newTotal - 5} serie${newTotal - 5 !== 1 ? 's' : ''} más…</div>` : '';
-          body.innerHTML = newItems + newExtra;
+          body.innerHTML = newSeries.slice(0, 5).map(_buildItemHtml).join('')
+            + (newTotal > 5 ? `<div class="updates-popup-more">y ${newTotal - 5} serie${newTotal - 5 !== 1 ? 's' : ''} más…</div>` : '');
+          if (!popup.querySelector('.updates-popup-clear-all')) {
+            const footer = popup.querySelector('.updates-popup-footer');
+            const checkBtn = popup.querySelector('.updates-popup-check');
+            const clearBtn = document.createElement('button');
+            clearBtn.className = 'updates-popup-clear-all';
+            clearBtn.innerHTML = '<i class="fas fa-check-double"></i> Marcar todo leído';
+            footer.insertBefore(clearBtn, checkBtn);
+            clearBtn.addEventListener('click', async () => {
+              const allRefs = newSeries.map(s => s.content_ref);
+              await api.post('/api/library/acknowledge-updates', { content_refs: allRefs }).catch(() => {});
+              body.innerHTML = '<div class="updates-popup-empty">No hay capítulos nuevos por ahora</div>';
+              clearBtn.remove();
+              await fetchUpdatesBadge();
+            });
+          }
           const msg = totalQueued > 0
             ? `${newTotal} serie${newTotal !== 1 ? 's' : ''} con novedades — ${totalQueued} capítulo${totalQueued !== 1 ? 's' : ''} encolado${totalQueued !== 1 ? 's' : ''}`
             : `${newTotal} serie${newTotal !== 1 ? 's' : ''} con capítulos nuevos`;
           showNotification(msg, 'success');
         } else {
           body.innerHTML = '<div class="updates-popup-empty">No hay capítulos nuevos</div>';
+          popup.querySelector('.updates-popup-clear-all')?.remove();
           showNotification('No se encontraron actualizaciones', 'info');
         }
         btn.disabled = false;

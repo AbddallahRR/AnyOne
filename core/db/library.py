@@ -107,3 +107,9 @@ def clear_series_updates(content_ref: str) -> None:
         "UPDATE series_status SET new_chapters_found = '' WHERE content_ref = ?",
         (content_ref,)
     )
+
+
+def clear_all_series_updates() -> None:
+    execute_with_retry(
+        "UPDATE series_status SET new_chapters_found = '' WHERE new_chapters_found != ''"
+    )

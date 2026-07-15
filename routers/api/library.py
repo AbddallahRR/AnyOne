@@ -144,16 +144,51 @@ def api_library_updates():
     for s in series:
         ref = s['content_ref']
         title = title_map.get(ref)
-        if not title:
+        content_type = None
+        local_id = None
+
+        if ref.startswith('local:'):
+            folder = ref[6:]
+            for ct in ('anime', 'manga'):
+                base = Path(str(getattr(settings, f'{ct}_download_dir'))) / folder
+                if base.is_dir():
+                    content_type = ct
+                    if not title:
+                        info_path = base / 'series_info.json'
+                        if info_path.exists():
+                            try:
+                                import json as _json
+                                title = _json.loads(info_path.read_text(encoding='utf-8')).get('title', folder)
+                            except Exception:
+                                pass
+                    break
+            if not title:
+                title = folder.replace('_', ' ').title()
+            local_id = folder
+        else:
             parts = ref.split(':', 1)
             if len(parts) == 2:
-                title = _resolve_series_title(parts[0], parts[1])
-            else:
+                if not title:
+                    title = _resolve_series_title(parts[0], parts[1])
+                for ct in ('anime', 'manga'):
+                    from .common import _find_local_serie_dir
+                    base_path = Path(str(getattr(settings, f'{ct}_download_dir')))
+                    serie_dir = _find_local_serie_dir(base_path, parts[1])
+                    if serie_dir:
+                        content_type = ct
+                        local_id = serie_dir.name
+                        break
+            if not title:
                 title = ref
+            if content_type is None:
+                local_id = ref
+
         results.append({
             'content_ref': ref,
             'title': title,
             'new_chapters': s['new_chapters'],
+            'content_type': content_type,
+            'local_id': local_id,
         })
     return {
         'total': len(results),

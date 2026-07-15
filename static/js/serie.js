@@ -547,14 +547,6 @@
     ]);
     await loadProgress(); // ahora chapters[] está listo
 
-    // ── Acknowledge updates ────────────────────────────────────────────
-    // Al visitar una serie local con fuente remota, limpiar el flag de
-    // novedades para que el badge global se actualice.
-    if (isLocal && originalSource) {
-      const contentRef = `${originalSource}:${originalId}`;
-      api.post('/api/library/acknowledge-updates', { content_ref: contentRef }).catch(() => {});
-    }
-
     // Botones según contexto
     if (isLocal) {
       if (downloadAllBtn)   downloadAllBtn.classList.add('hidden');

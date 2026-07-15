@@ -2,6 +2,7 @@ from core.db.connection import cleanup_download_queue, get_conn, init_db
 from core.db.content import get_content_ref, save_content_to_db
 from core.db.downloads import update_queue_status
 from core.db.library import (
+    clear_all_series_updates,
     clear_series_updates,
     get_all_series_statuses,
     get_last_checked,

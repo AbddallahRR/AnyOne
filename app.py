@@ -54,6 +54,8 @@ def _start_update_scheduler():
             time.sleep(sleep_seconds)
 
             try:
+                from core.database import clear_all_series_updates
+                clear_all_series_updates()
                 data = _check_all_updates_core()
                 checked = data.get('checked', 0)
                 with_updates = data.get('with_updates', 0)

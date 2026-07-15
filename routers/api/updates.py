@@ -9,7 +9,6 @@ from fastapi import HTTPException
 
 from core.chapter_utils import chapter_float_key
 from core.database import (
-    clear_series_updates,
     get_series_to_check,
     mark_series_checked,
     queue_find_active,
@@ -135,9 +134,6 @@ def _check_series_for_new_chapters(content_ref: str) -> dict:
                     break
                 except Exception as exc:
                     logger.warning(f"Error encolando {ch_id}: {exc}")
-
-            if queued > 0:
-                clear_series_updates(content_ref)
 
         return {
             'content_ref': content_ref,
