@@ -548,8 +548,9 @@
       const imageUrls = isRemote ? rawData : rawData.map(p => `/api/manga/images/${p}`);
       const total     = imageUrls.length;
 
-      const WINDOW     = 2;
-      const IMG_HEIGHT = 1200;
+      const WINDOW       = 2;
+      const IMG_HEIGHT   = 1200;
+      const DECODE_AHEAD = 15;
 
       // Estado
       const pageHeights = new Array(total).fill(IMG_HEIGHT);
@@ -576,6 +577,24 @@
       // O(1) gracias a prefixSums
       function offsetBefore(i) { return prefixSums[i]; }
 
+      // Decodificar imágenes en un rango amplio para estabilizar el layout
+      function _decodeAhead() {
+        const lo = Math.max(0, currentPage - DECODE_AHEAD);
+        const hi = Math.min(total - 1, currentPage + DECODE_AHEAD);
+        for (let i = lo; i <= hi; i++) {
+          if (slots[i].dataset.mounted !== '1') mountImage(i);
+        }
+      }
+
+      // Compensar el scroll cuando una imagen pequeña colapsa a 0
+      function _compensateScroll(i, prevH) {
+        if (!_initialScrollApplied || prevH <= 0) return;
+        const slotTop = offsetBefore(i);
+        if (slotTop + prevH <= viewerDiv.scrollTop + 2) {
+          viewerDiv.scrollTop -= prevH;
+        }
+      }
+
       // Corrige el scroll después de que imágenes pequeñas colapsan durante la carga inicial
       function _fixInitialScroll() {
         if (_initialScrollApplied) return;
@@ -600,6 +619,9 @@
         prevLo = -1;
         prevHi = -1;
         updateWindow(target);
+
+        // Decodificar un rango amplio para estabilizar el layout antes de scrollear
+        _decodeAhead();
       }
 
       // [OPT-2] Búsqueda binaria: O(log n) en vez de O(n)
@@ -649,10 +671,12 @@
         const decodeTimeout = setTimeout(() => {
           if (!settled) {
             settled = true;
+            const prevH = pageHeights[i];
             slot.dataset.mounted = '0'; // liberar para reintentos
-            if (pageHeights[i] !== 0) {
+            if (prevH !== 0) {
               pageHeights[i] = 0;
               rebuildSums(i);
+              _compensateScroll(i, prevH);
             }
             _pendingDecode--;
             _fixInitialScroll();
@@ -667,12 +691,14 @@
 
             // Filter small images (logos, ads, thumbnails) that slip past server filter
             if (img.naturalWidth < 300 || img.naturalHeight < 300) {
+              const prevH = pageHeights[i];
               slot.style.height    = '0';
               slot.style.overflow  = 'hidden';
               slot.dataset.mounted = '0';
-              if (pageHeights[i] !== 0) {
+              if (prevH !== 0) {
                 pageHeights[i] = 0;
                 rebuildSums(i);
+                _compensateScroll(i, prevH);
               }
               _pendingDecode--;
               _fixInitialScroll();
@@ -711,12 +737,14 @@
           .catch(() => {
             settled = true;
             clearTimeout(decodeTimeout);
+            const prevH = pageHeights[i];
             slot.dataset.mounted = '0';
             slot.style.height    = '0';
             slot.style.overflow  = 'hidden';
-            if (pageHeights[i] !== 0) {
+            if (prevH !== 0) {
               pageHeights[i] = 0;
               rebuildSums(i);
+              _compensateScroll(i, prevH);
             }
             _pendingDecode--;
             _fixInitialScroll();
