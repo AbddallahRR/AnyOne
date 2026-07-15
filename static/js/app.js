@@ -387,17 +387,16 @@
         <p>Cargando biblioteca…</p>
       </div>`;
     try {
-      const [items, statusData, recentData] = await Promise.all([
+      const [libData, statusData] = await Promise.all([
         api.get('/api/library'),
         api.get('/api/library/status').catch(() => ({})),
-        api.get('/api/library/recent').catch(() => []),
       ]);
-      _libraryItems    = items;
+      _libraryItems    = libData.items;
       _libraryStatuses = statusData;
       _initLibraryControls();
       applyLibraryView();
       fetchUpdatesBadge();
-      renderRecentSeries(recentData);
+      renderRecentSeries(libData.recent || []);
     } catch (err) {
       container.innerHTML = `
         <div class="empty-state">

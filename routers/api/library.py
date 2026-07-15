@@ -1,4 +1,6 @@
 import logging
+import threading
+import time
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -24,10 +26,88 @@ from .common import _resolve_series_title
 
 logger = logging.getLogger(__name__)
 
+_chapter_total_cache: dict[str, tuple[float, int]] = {}
+_chapter_total_lock = threading.Lock()
+_CHAPTER_TOTAL_TTL = 300.0
+
+
+def _get_chapter_total(folder: str, content_type: str, chapter: str) -> int:
+    cache_key = f'{folder}:{chapter}'
+    now = time.time()
+    with _chapter_total_lock:
+        cached = _chapter_total_cache.get(cache_key)
+        if cached and now - cached[0] < _CHAPTER_TOTAL_TTL:
+            return cached[1]
+
+    total = 0
+    if content_type == 'manga':
+        base = Path(str(settings.manga_download_dir)) / normalize_title(folder)
+        for suffix in (f'cap_{chapter}', f'cap_{chapter.zfill(4)}'):
+            cap_dir = base / suffix
+            if cap_dir.is_dir():
+                total = len([f for f in cap_dir.iterdir()
+                             if f.is_file() and f.suffix.lower() in ('.jpg', '.jpeg', '.png', '.webp')])
+                break
+    elif content_type == 'anime':
+        base = Path(str(settings.anime_download_dir)) / normalize_title(folder)
+        try:
+            chap_int = int(float(chapter))
+        except (ValueError, TypeError):
+            chap_int = None
+        matched_file = None
+        for pattern in (f'*_{chapter}.mp4', f'{chapter}.mp4',
+                        f'{chap_int:03d}.mp4') if chap_int else ():
+            for f in base.glob(pattern):
+                if f.is_file():
+                    matched_file = f
+                    break
+            if matched_file:
+                break
+        if matched_file:
+            try:
+                from .media import _get_cached_duration
+                dur = _get_cached_duration(str(matched_file))
+                if dur is not None:
+                    total = int(dur)
+            except Exception:
+                pass
+
+    with _chapter_total_lock:
+        _chapter_total_cache[cache_key] = (now, total)
+    return total
+
+
+def _build_recent(library: dict) -> list[dict]:
+    recent = get_recent_progress(limit=10)
+    if not recent:
+        return []
+    result = []
+    for entry in recent:
+        folder = entry['content_ref'][6:]
+        item = library.get(folder)
+        if item:
+            total_episodes = int(item.get('last_chapter', '1') or '1')
+            current_chapter = entry['chapter']
+            content_type = item['type']
+            chapter_total = _get_chapter_total(folder, content_type, current_chapter)
+            result.append({
+                'id': folder,
+                'title': item['title'],
+                'cover': item['cover'],
+                'type': content_type,
+                'chapter': current_chapter,
+                'progress': entry['progress'],
+                'total_episodes': total_episodes,
+                'chapter_total': chapter_total,
+            })
+    return result
+
 
 @api_router.get('/library')
 def api_library():
-    return scan_downloaded_series()
+    items = scan_downloaded_series()
+    library = {item['id']: item for item in items}
+    return {'items': items, 'recent': _build_recent(library)}
 
 
 @api_router.get('/library/status')
@@ -83,62 +163,9 @@ def api_library_updates():
 
 @api_router.get('/library/recent')
 def api_library_recent():
-    recent = get_recent_progress(limit=10)
-    if not recent:
-        return []
-
-    library = {item['id']: item for item in scan_downloaded_series()}
-    result = []
-    for entry in recent:
-        folder = entry['content_ref'][6:]
-        item = library.get(folder)
-        if item:
-            total_episodes = int(item.get('last_chapter', '1') or '1')
-            current_chapter = entry['chapter']
-            content_type = item['type']
-            chapter_total = 0
-            if content_type == 'manga':
-                base = Path(str(settings.manga_download_dir)) / normalize_title(folder)
-                for suffix in (f'cap_{current_chapter}', f'cap_{current_chapter.zfill(4)}'):
-                    cap_dir = base / suffix
-                    if cap_dir.is_dir():
-                        chapter_total = len([f for f in cap_dir.iterdir()
-                                             if f.is_file() and f.suffix.lower() in ('.jpg', '.jpeg', '.png', '.webp')])
-                        break
-            elif content_type == 'anime':
-                base = Path(str(settings.anime_download_dir)) / normalize_title(folder)
-                try:
-                    chap_int = int(float(current_chapter))
-                except (ValueError, TypeError):
-                    chap_int = None
-                matched_file = None
-                for pattern in (f'*_{current_chapter}.mp4', f'{current_chapter}.mp4',
-                                f'{chap_int:03d}.mp4') if chap_int else ():
-                    for f in base.glob(pattern):
-                        if f.is_file():
-                            matched_file = f
-                            break
-                    if matched_file:
-                        break
-                if matched_file:
-                    try:
-                        from .media import _get_cached_duration
-                        dur = _get_cached_duration(str(matched_file))
-                        if dur is not None:
-                            chapter_total = int(dur)
-                    except Exception:
-                        pass
-            result.append({
-                'id': folder,
-                'title': item['title'],
-                'cover': item['cover'],
-                'type': content_type,
-                'chapter': current_chapter,
-                'progress': entry['progress'],
-                'total_episodes': total_episodes,
-                'chapter_total': chapter_total,
-            })
-    return result
+    items = scan_downloaded_series()
+    library = {item['id']: item for item in items}
+    return _build_recent(library)
 
 
 @api_router.post('/library/acknowledge-updates')
