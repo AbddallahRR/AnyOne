@@ -816,7 +816,7 @@
       bottomChip: statusChipHtml,
       extra:  `<div class="card-actions-row">
                   <button class="resume-btn" data-last-chapter="${resumeChapter}">
-                    <i class="fas fa-play" style="font-size:9px;"></i> Cap. ${resumeChapter}
+                    <i class="fas fa-play" style="font-size:9px;"></i> Cap. ${resumeChapter}/${item.last_chapter || '?'}
                   </button>
                   ${statusBtn}
                 </div>`,
