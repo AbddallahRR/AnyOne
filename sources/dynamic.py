@@ -112,8 +112,18 @@ class DynamicSource(HttpClientMixin, BaseSource):
         headers = {'User-Agent': self.UA}
         if self._cfg:
             extra = self._cfg.get('config', {}).get('extra_headers', {})
-            headers.update(extra)
+            if isinstance(extra, dict):
+                headers.update(extra)
         return headers
+
+    @property
+    def _cookies(self) -> dict:
+        self._load_config()
+        if self._cfg:
+            cookies = self._cfg.get('config', {}).get('extra_cookies', {})
+            if isinstance(cookies, dict) and cookies:
+                return cookies
+        return {}
 
     def _extract_attr(self, soup, selector: str, attr: str = 'text') -> str:
         if not selector:
@@ -262,7 +272,9 @@ class DynamicSource(HttpClientMixin, BaseSource):
                     k, v = pair.split('=', 1)
                     data[k] = v.replace('{query}', '')
             data = {k: (v.replace('{query}', '') if isinstance(v, str) else v) for k, v in data.items()}
-            resp = self.scraper.post(url, headers=self._headers, data=data, timeout=HTTP_TIMEOUT)
+            cookies = self._cookies or None
+            resp = self.scraper.post(url, headers=self._headers, data=data,
+                                     cookies=cookies, timeout=HTTP_TIMEOUT)
             resp.raise_for_status()
             return resp.text
         return self._get(url).text
@@ -614,6 +626,8 @@ class DynamicSource(HttpClientMixin, BaseSource):
         )
 
     def _download_images(self, content_id: str, chapter_id: str, dest_folder: str, chapter_number: str | None = None) -> str:
+        import concurrent.futures
+
         img_urls = self.get_chapter_images_sync(content_id, chapter_id)
         if not img_urls:
             raise Exception(f"{self.CONFIG_NAME}: no images found for chapter {chapter_id}")
@@ -626,16 +640,22 @@ class DynamicSource(HttpClientMixin, BaseSource):
         cap_dir = os.path.join(dest_folder, dir_name)
         os.makedirs(cap_dir, exist_ok=True)
 
-        for i, img_url in enumerate(img_urls, start=1):
+        cfg = self._load_config().get('config', {})
+        max_workers = min(cfg.get('download_concurrency', 4), 10)
+
+        def _download_one(args):
+            i, img_url = args
             ext = url_ext(img_url)
             filepath = os.path.join(cap_dir, f"{i:04d}.{ext}")
             if os.path.exists(filepath):
-                continue
+                return True
             try:
                 rate_limiter.wait(img_url)
+                cookies = self._cookies or None
                 with HttpPool.get_session().get(
                     img_url,
                     headers={**self._headers, 'Referer': self.BASE_URL},
+                    cookies=cookies,
                     timeout=HTTP_TIMEOUT,
                     stream=True,
                 ) as resp:
@@ -643,7 +663,19 @@ class DynamicSource(HttpClientMixin, BaseSource):
                     with open(filepath, 'wb') as f:
                         for chunk in resp.iter_content(8192):
                             f.write(chunk)
+                return True
             except Exception as exc:
                 logger.warning(f"{self.CONFIG_NAME}: error downloading image {i}: {exc}")
+                return False
+
+        tasks = list(enumerate(img_urls, start=1))
+        failures = 0
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+            for success in pool.map(_download_one, tasks):
+                if not success:
+                    failures += 1
+
+        if failures:
+            logger.warning(f"{self.CONFIG_NAME}: {failures}/{len(img_urls)} images failed to download")
 
         return cap_dir

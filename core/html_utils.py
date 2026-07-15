@@ -176,16 +176,75 @@ def extract_images_from_noscript(soup: BeautifulSoup) -> list[dict]:
     return results
 
 
+_IMAGE_URL_RE = re.compile(
+    r'https?://[^\s"\'\\]+\.(?:jpg|jpeg|png|webp|gif)(?:\?[^\s"\'\\]*)?',
+    re.IGNORECASE,
+)
+
+_SSR_STATE_RE = re.compile(
+    r'window\.(__\w+__)\s*=\s*(\{.+?\})\s*;',
+    re.DOTALL,
+)
+
+_IMAGE_ARRAY_VAR_RE = re.compile(
+    r'(?:var|const|let)\s+'
+    r'(?:chapterImages|images|imgUrls|pageImages|chapter_images|manga_images|'
+    r'imageList|pageList|chapterPages|pages|srcList|fileList|items)\s*'
+    r'=\s*(\[.+?\])\s*;',
+    re.DOTALL | re.IGNORECASE,
+)
+
+_JSON_PARSE_RE = re.compile(
+    r'JSON\.parse\s*\(\s*[\'"](.+?)[\'"]\s*\)',
+    re.DOTALL,
+)
+
+_IMAGE_KEY_OBJ_RE = re.compile(
+    r'(?:["\']?(?:images|pages|chapter_images|pageList|imgList|fileList|srcList)["\']?\s*:\s*)(\[(?:"[^"]*"|\'[^\']*\')(?:\s*,\s*(?:"[^"]*"|\'[^\']*\'))*\])',
+    re.DOTALL,
+)
+
+
+def _collect_url(url: str, base_url: str, urls: list[str], seen: set[str]) -> None:
+    norm = normalize_image_url(url, base_url)
+    if norm and norm not in seen:
+        seen.add(norm)
+        urls.append(norm)
+
+
+def _walk_json(obj, urls: list[str], seen: set[str], base_url: str, depth: int = 0) -> None:
+    if depth > 12:
+        return
+    if isinstance(obj, dict):
+        for v in obj.values():
+            _walk_json(v, urls, seen, base_url, depth + 1)
+    elif isinstance(obj, list):
+        for v in obj:
+            _walk_json(v, urls, seen, base_url, depth + 1)
+    elif isinstance(obj, str):
+        if _IMAGE_URL_RE.search(obj):
+            _collect_url(obj, base_url, urls, seen)
+
+
+def _try_parse_json(raw: str) -> object | None:
+    try:
+        return _json.loads(raw)
+    except Exception:
+        return None
+
+
 def extract_images_from_scripts(soup: BeautifulSoup, base_url: str = '') -> list[str]:
     """Extract image URLs from JavaScript blocks in the page.
 
     Handles:
     - ts_reader.run() / ts_reader_data() JSON config
-    - window.__INITIAL_STATE__, window.__DATA__, window.__NUXT__
-    - var images = [...], const chapterImages = [...]
-    - JSON.parse(...) containing URLs
-    - Qwik JSON (<script type="qwik/json">) URLs
-    - WordPress madara_* JS variables
+    - SSR state objects (window.__INITIAL_STATE__, __NUXT__, __NEXT_DATA__, etc.)
+    - Generic variable assignments with image URL arrays
+    - JSON.parse(...) containing image URLs
+    - Inline objects with image/page keys
+    - Qwik JSON (<script type="qwik/json">)
+    - WordPress madara_* variables
+    - Image URL regex fallback across all scripts
     """
     urls: list[str] = []
     seen: set[str] = set()
@@ -202,82 +261,61 @@ def extract_images_from_scripts(soup: BeautifulSoup, base_url: str = '') -> list
                 text, re.DOTALL,
             )
             if match:
-                try:
-                    raw = _html.unescape(match.group(1)).replace('\\/', '/')
-                    data = _json.loads(raw)
+                data = _try_parse_json(_html.unescape(match.group(1)).replace('\\/', '/'))
+                if isinstance(data, dict):
                     for src_group in data.get('sources', []):
-                        for img_url in src_group.get('images', []):
-                            norm = normalize_image_url(img_url, base_url)
-                            if norm and norm not in seen:
-                                seen.add(norm)
-                                urls.append(norm)
-                except Exception:
-                    pass
+                        if isinstance(src_group, dict):
+                            for img_url in src_group.get('images', []):
+                                _collect_url(img_url, base_url, urls, seen)
 
         # Qwik JSON (<script type="qwik/json">)
         if script.get('type') == 'qwik/json':
-            # Generic CDN URL extraction from qwik JSON
-            for match in re.finditer(r'https?://[^"\'\\\s]+\.(?:jpg|jpeg|png|webp|gif)', script.string or ''):
-                u = match.group(0)
-                norm = normalize_image_url(u, base_url)
-                if norm and norm not in seen:
-                    seen.add(norm)
-                    urls.append(norm)
+            for m in _IMAGE_URL_RE.finditer(script.string or ''):
+                _collect_url(m.group(0), base_url, urls, seen)
 
-        # window.__INITIAL_STATE__, window.__DATA__, etc.
-        for pattern in [r'window\.__INITIAL_STATE__\s*=\s*(\{.+?\});',
-                        r'window\.__DATA__\s*=\s*(\{.+?\});',
-                        r'window\.__NUXT__\s*=\s*(\{.+?\});']:
-            match = re.search(pattern, text, re.DOTALL)
-            if match:
-                try:
-                    data = _json.loads(match.group(1))
-                    # Recursively find all string values that look like image URLs
-                    def _find_urls(obj, depth=0):
-                        if depth > 10:
-                            return
-                        if isinstance(obj, dict):
-                            for v in obj.values():
-                                _find_urls(v, depth + 1)
-                        elif isinstance(obj, list):
-                            for v in obj:
-                                _find_urls(v, depth + 1)
-                        elif isinstance(obj, str) and re.search(r'https?://.+\.(jpg|jpeg|png|webp|gif)', obj, re.I):
-                            norm = normalize_image_url(obj, base_url)
-                            if norm and norm not in seen:
-                                seen.add(norm)
-                                urls.append(norm)
-                    _find_urls(data)
-                except Exception:
-                    pass
+        # SSR state objects: window.__INITIAL_STATE__, __NUXT__, __NEXT_DATA__,
+        # __APP_STATE__, __PRELOADED_STATE__, __SERVER_DATA__, __APOLLO_STATE__,
+        # __INITIAL_PROPS__, __remixContext, __APP_DATA__
+        for m in _SSR_STATE_RE.finditer(text):
+            var_name = m.group(1)
+            data = _try_parse_json(m.group(2))
+            if data is not None:
+                _walk_json(data, urls, seen, base_url)
 
-        # var/const images = [...]  or  let chapterImages = [...]
-        for match in re.finditer(
-            r'(?:var|const|let)\s+(?:chapterImages|images|imgUrls|pageImages|chapter_images|manga_images)\s*=\s*(\[.+?\])\s*;',
-            text, re.DOTALL | re.IGNORECASE,
-        ):
-            try:
-                data = _json.loads(match.group(1))
+        # Generic variable arrays: var images = [...], const chapterPages = [...]
+        for m in _IMAGE_ARRAY_VAR_RE.finditer(text):
+            data = _try_parse_json(m.group(1))
+            if isinstance(data, list):
                 for item in data:
                     if isinstance(item, str):
-                        norm = normalize_image_url(item, base_url)
-                        if norm and norm not in seen:
-                            seen.add(norm)
-                            urls.append(norm)
-            except Exception:
-                pass
+                        _collect_url(item, base_url, urls, seen)
+
+        # JSON.parse("...") — unescaped JSON string with image arrays
+        for m in _JSON_PARSE_RE.finditer(text):
+            raw = m.group(1).replace('\\"', '"').replace("\\'", "'").replace('\\\\', '\\')
+            data = _try_parse_json(raw)
+            if data is not None:
+                _walk_json(data, urls, seen, base_url)
+
+        # Inline objects with image/page key arrays:
+        # { "images": ["url1", "url2"] } or { pages: ['url1'] }
+        for m in _IMAGE_KEY_OBJ_RE.finditer(text):
+            data = _try_parse_json(m.group(1))
+            if isinstance(data, list):
+                for item in data:
+                    if isinstance(item, str):
+                        _collect_url(item, base_url, urls, seen)
 
         # WordPress Madara: madara_* variables
-        for match in re.finditer(
-            r'madara_\w+\s*=\s*["\']([^"\']+)["\']',
-            text,
-        ):
-            u = match.group(1)
-            if re.search(r'\.(jpg|jpeg|png|webp|gif)', u, re.I):
-                norm = normalize_image_url(u, base_url)
-                if norm and norm not in seen:
-                    seen.add(norm)
-                    urls.append(norm)
+        for m in re.finditer(r'madara_\w+\s*=\s*["\']([^"\']+)["\']', text):
+            u = m.group(1)
+            if _IMAGE_URL_RE.search(u):
+                _collect_url(u, base_url, urls, seen)
+
+        # Broad fallback: find any image-like URLs in the entire script text
+        if not urls:
+            for m in _IMAGE_URL_RE.finditer(text):
+                _collect_url(m.group(0), base_url, urls, seen)
 
     return urls
 

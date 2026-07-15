@@ -193,6 +193,7 @@ class ScraperConfigSchema(BaseModel):
     use_cloudscraper: bool = False
     has_pagination: bool = False
     pagination_param: str = 'page'
+    download_concurrency: int = 4
 
 
 # ---------------------------------------------------------------------------

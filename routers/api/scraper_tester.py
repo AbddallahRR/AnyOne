@@ -402,15 +402,17 @@ async def api_auto_detect(request: Request):
 
 @api_router.post('/scraper-configs/detect-selectors')
 async def api_detect_selectors(request: Request):
-    """Detect CSS selectors by finding elements that contain a given text.
+    """Detect CSS selectors by finding elements that contain a given text
+    or match a URL pattern.
 
     Accepts:
     ```json
     {
-      \"url\": \"https://example.com/search?q=one+piece\",
-      \"stage\": \"details|search|chapters|content\",
-      \"text\": \"One Piece\",                    // sample text visible on page
-      \"base_url\": \"https://example.com\"       // optional, for cover URL normalization
+      "url": "https://example.com/search?q=one+piece",
+      "stage": "details|search|chapters|content",
+      "text": "One Piece",                    // sample text visible on page
+      "url_pattern": "cdn.example.com/img",   // OR: partial image URL to match
+      "base_url": "https://example.com"       // optional, for cover URL normalization
     }
     ```
     """
@@ -418,12 +420,13 @@ async def api_detect_selectors(request: Request):
     url = body.get('url', '').strip()
     stage = body.get('stage', 'details')
     text = body.get('text', '').strip()
+    url_pattern = body.get('url_pattern', '').strip()
     base_url = body.get('base_url', '').rstrip('/')
 
     if not url:
         raise HTTPException(status_code=400, detail='url is required')
-    if not text:
-        raise HTTPException(status_code=400, detail='text (sample text) is required')
+    if not text and not url_pattern:
+        raise HTTPException(status_code=400, detail='text or url_pattern is required')
     # Safety net: replace any leftover template variables (e.g. {page})
     # so detection still works even if the frontend forgot to fill them.
     url = _fill_template(url, page='1', content_id='', chapter_id='')
@@ -436,6 +439,13 @@ async def api_detect_selectors(request: Request):
     except Exception as exc:
         logger.exception(f'Fetch error en detect_selector: {exc}')
         raise HTTPException(status_code=502, detail='Error al obtener la pagina para deteccion de selector')
+
+    if url_pattern:
+        from core.selector_detector import detect_by_url_pattern
+        results = detect_by_url_pattern(html, url_pattern, base_url)
+        if not results:
+            return {'detected': {}, 'warning': f'No se encontraron elementos con URL que contenga "{url_pattern}".'}
+        return {'detected': results[0], 'all_results': results}
 
     from core.selector_detector import detect_selector_by_text
 

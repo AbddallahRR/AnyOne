@@ -27,6 +27,9 @@ class HttpClientMixin:
             headers['Referer'] = referer
         extra = kwargs.pop('headers', {})
         headers.update(extra)
+        cookies = getattr(self, '_cookies', None)
+        if cookies:
+            kwargs.setdefault('cookies', cookies)
         resp = self.scraper.get(url, headers=headers, **kwargs)
         resp.raise_for_status()
         return resp
@@ -42,6 +45,9 @@ class HttpClientMixin:
             headers['Referer'] = referer
         extra = kwargs.pop('headers', {})
         headers.update(extra)
+        cookies = getattr(self, '_cookies', None)
+        if cookies:
+            kwargs.setdefault('cookies', cookies)
         kwargs.setdefault('timeout', HTTP_TIMEOUT)
         resp = self.scraper.post(url, headers=headers, data=data, **kwargs)
         resp.raise_for_status()

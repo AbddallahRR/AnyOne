@@ -34,18 +34,31 @@ def _score_candidate(container: Tag, depth: int = 0) -> float:
     score = 0.0
     links = container.find_all('a', href=True)
     images = container.find_all('img')
+    pictures = container.find_all('picture')
     text_len = len(container.get_text(strip=True))
 
     if len(links) >= 1:
         score += 1.0
     if len(images) >= 1:
         score += 1.5
+    if pictures:
+        score += 1.0
+    # Bonus: card with both link and image (typical result card)
+    if links and images:
+        score += 0.8
     if 20 < text_len < 500:
         score += 0.5
 
     # Bonus for data- attributes (common in JS-rendered items)
     data_attrs = [a for a in (container.attrs or {}) if a.startswith('data-')]
     score += len(data_attrs) * 0.3
+
+    # Bonus for lazy-loaded images (data-src, data-lazy, etc.)
+    for img in images:
+        for attr in ('data-src', 'data-lazy-src', 'data-original', 'data-lazy'):
+            if img.get(attr):
+                score += 0.4
+                break
 
     children = [c for c in container.children if isinstance(c, Tag)]
     score -= len(children) * 0.05
@@ -412,6 +425,43 @@ def detect_selector_by_text(html: str, text: str,
                 })
                 detected_pattern = 'noscript'
 
+        # Strategy 2b: <picture> / <source> elements
+        if not result:
+            for picture in soup.find_all('picture'):
+                source = picture.find('source')
+                img = picture.find('img')
+                if source:
+                    srcset = source.get('srcset') or ''
+                    if srcset:
+                        # Pick the largest source from srcset
+                        best_url = extract_from_srcset(source) or ''
+                        if best_url:
+                            norm = normalize_image_url(best_url, base_url)
+                            if norm:
+                                result.update({
+                                    'selector': 'picture > source',
+                                    'attr': 'srcset',
+                                    'confidence': 2.0,
+                                    'detected_pattern': 'picture',
+                                })
+                                detected_pattern = 'picture'
+                                break
+                # Fallback to the <img> inside <picture>
+                if img and not result:
+                    best_attr = 'src'
+                    for attr_name in ATTR_PRIORITY:
+                        if img.get(attr_name):
+                            best_attr = attr_name
+                            break
+                    result.update({
+                        'selector': _make_selector(img),
+                        'attr': best_attr,
+                        'confidence': 1.8,
+                        'detected_pattern': 'picture',
+                    })
+                    detected_pattern = 'picture'
+                    break
+
         # Strategy 3: Extract from JS scripts
         if not result:
             script_urls = extract_images_from_scripts(soup, base_url)
@@ -522,3 +572,94 @@ def detect_search_selectors(html: str, base_url: str) -> list[dict]:
             })
 
     return suggestions[:3]
+
+
+def detect_by_url_pattern(html: str, url_pattern: str, base_url: str) -> list[dict]:
+    """Detect CSS selectors by finding elements whose image src/attributes
+    match a given URL pattern (substring match).
+
+    Useful when the user provides a known image URL from the page instead of
+    visible text.
+
+    Returns a list of candidates sorted by confidence.
+    """
+    soup = BeautifulSoup(html, 'html.parser')
+    pattern_lower = url_pattern.lower()
+    results: list[dict] = []
+    seen_selectors: set[str] = set()
+
+    def _check_img(img: Tag) -> dict | None:
+        for attr_name in ATTR_PRIORITY:
+            val = img.get(attr_name, '') or ''
+            if pattern_lower in val.lower():
+                sel = _make_selector(img)
+                if sel and sel not in seen_selectors:
+                    seen_selectors.add(sel)
+                    return {
+                        'selector': sel,
+                        'attr': attr_name,
+                        'confidence': 2.5,
+                        'detected_pattern': 'url_pattern',
+                    }
+        # Check srcset
+        srcset = img.get('srcset', '') or img.get('data-srcset', '') or ''
+        if pattern_lower in srcset.lower():
+            sel = _make_selector(img)
+            if sel and sel not in seen_selectors:
+                seen_selectors.add(sel)
+                return {
+                    'selector': sel,
+                    'attr': 'srcset',
+                    'confidence': 2.0,
+                    'detected_pattern': 'url_pattern',
+                }
+        return None
+
+    # Strategy 1: Direct <img> match
+    for img in soup.find_all('img'):
+        r = _check_img(img)
+        if r:
+            results.append(r)
+
+    # Strategy 2: <noscript> images
+    if not results:
+        for entry in extract_images_from_noscript(soup):
+            r = _check_img(entry['element'])
+            if r:
+                r['confidence'] = 2.0
+                r['detected_pattern'] = 'noscript_url'
+                results.append(r)
+
+    # Strategy 3: <source> inside <picture>
+    if not results:
+        for source in soup.find_all('source'):
+            srcset = source.get('srcset', '') or ''
+            if pattern_lower in srcset.lower():
+                parent = source.parent
+                if parent and parent.name == 'picture':
+                    sel = 'picture > source'
+                    if sel not in seen_selectors:
+                        seen_selectors.add(sel)
+                        results.append({
+                            'selector': sel,
+                            'attr': 'srcset',
+                            'confidence': 2.0,
+                            'detected_pattern': 'picture_url',
+                        })
+
+    # Strategy 4: CSS background-image
+    if not results:
+        for el in soup.find_all(True):
+            style = el.get('style', '') or ''
+            if pattern_lower in style.lower():
+                sel = _make_selector(el)
+                if sel and sel not in seen_selectors:
+                    seen_selectors.add(sel)
+                    results.append({
+                        'selector': sel,
+                        'attr': 'style',
+                        'confidence': 1.5,
+                        'detected_pattern': 'background_url',
+                    })
+
+    return results[:5]

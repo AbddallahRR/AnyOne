@@ -277,6 +277,15 @@
     setVal('wiz-search-cover', data.search_cover_selector || '');
     setVal('wiz-search-cover-attr', data.search_cover_attr || 'src');
     setVal('wiz-search-cache-ttl', data.search_cache_ttl || 0);
+    setVal('wiz-search-method', data.search_method || 'GET');
+    setVal('wiz-search-post-body', data.search_post_template || '');
+    setVal('wiz-extra-headers', data.extra_headers ? (typeof data.extra_headers === 'object' ? JSON.stringify(data.extra_headers) : data.extra_headers) : '');
+    setVal('wiz-extra-cookies', data.extra_cookies ? (typeof data.extra_cookies === 'object' ? JSON.stringify(data.extra_cookies) : data.extra_cookies) : '');
+    // Toggle POST section visibility
+    if (data.search_method === 'POST') {
+      const postSection = document.querySelector('.wiz-post-section');
+      if (postSection) postSection.style.display = '';
+    }
 
     // Catalog fields
     $('wiz-has-catalog').checked = data.has_catalog || false;
@@ -314,6 +323,7 @@
     setVal('wiz-content-img-attr', data.content_image_attr || 'src');
     setVal('wiz-content-vid', data.content_video_selector || '');
     setVal('wiz-content-vid-attr', data.content_video_attr || 'src');
+    setVal('wiz-download-concurrency', data.download_concurrency || 4);
 
     toggleContentConfig();
   }
@@ -461,6 +471,15 @@
     $('wiz-catalog-section').classList.toggle('hidden', !isCatalog);
   }
 
+  // ── POST method toggle ──
+  if ($('wiz-search-method')) {
+    $('wiz-search-method').addEventListener('change', () => {
+      const isPost = $('wiz-search-method').value === 'POST';
+      const postSection = document.querySelector('.wiz-post-section');
+      if (postSection) postSection.style.display = isPost ? '' : 'none';
+    });
+  }
+
   function saveDraft() {
     try {
       const name = _editingName || getVal('wiz-name') || 'new';
@@ -534,6 +553,10 @@
           _wizardData.search_cover_selector = getVal('wiz-search-cover');
           _wizardData.search_cover_attr = getVal('wiz-search-cover-attr');
           _wizardData.search_cache_ttl = parseInt(getVal('wiz-search-cache-ttl')) || 0;
+          _wizardData.search_method = getVal('wiz-search-method') || 'GET';
+          _wizardData.search_post_template = getVal('wiz-search-post-body') || '';
+          _wizardData.extra_headers = getVal('wiz-extra-headers') || '';
+          _wizardData.extra_cookies = getVal('wiz-extra-cookies') || '';
         }
         break;
       case 3:
@@ -561,6 +584,7 @@
         _wizardData.content_image_attr = getVal('wiz-content-img-attr');
         _wizardData.content_video_selector = getVal('wiz-content-vid');
         _wizardData.content_video_attr = getVal('wiz-content-vid-attr');
+        _wizardData.download_concurrency = parseInt(getVal('wiz-download-concurrency')) || 4;
         break;
     }
   }
@@ -672,6 +696,7 @@
           'background': 'CSS background',
           'data-src': 'data-* attrs',
           'fallback': 'Fallback',
+          'picture': '&lt;picture&gt;/&lt;source&gt;',
         };
         const label = patternLabels[data.detected_pattern] || data.detected_pattern;
         html += `<div class="detect-success" style="margin-bottom:8px;"><strong>Método de detección:</strong> <code>${label}</code>`;
@@ -679,6 +704,12 @@
           html += ` &middot; <strong>Atributo:</strong> <code>${escHtml(data.suggested_attr)}</code>`;
         }
         html += '</div>';
+      }
+
+      // Auto-apply suggested_attr if it differs from current
+      if (data.suggested_attr && data.suggested_attr !== getVal('wiz-content-img-attr')) {
+        setVal('wiz-content-img-attr', data.suggested_attr);
+        showToast(`Atributo actualizado a "${data.suggested_attr}"`, 'success');
       }
 
       if (data.images && data.images.length) {
@@ -932,6 +963,10 @@
       search_cover_selector: getVal('wiz-search-cover'),
       search_cover_attr: getVal('wiz-search-cover-attr'),
       search_cache_ttl: parseInt(getVal('wiz-search-cache-ttl')) || 0,
+      search_method: getVal('wiz-search-method') || 'GET',
+      search_post_template: getVal('wiz-search-post-body') || '',
+      extra_headers: getVal('wiz-extra-headers') || '',
+      extra_cookies: getVal('wiz-extra-cookies') || '',
     };
   }
 
@@ -967,6 +1002,7 @@
       content_image_attr: getVal('wiz-content-img-attr'),
       content_video_selector: getVal('wiz-content-vid'),
       content_video_attr: getVal('wiz-content-vid-attr'),
+      download_concurrency: parseInt(getVal('wiz-download-concurrency')) || 4,
     };
   }
 
@@ -1026,6 +1062,26 @@
     openWizardFor(null);
   });
 
+  // ── Enter key triggers test buttons ──
+  const _enterTestMap = {
+    'wiz-search-test-query': 'wiz-search-test-btn',
+    'wiz-details-test-id': 'wiz-details-test-btn',
+    'wiz-chapters-test-id': 'wiz-chapters-test-btn',
+    'wiz-content-test-chapter': 'wiz-content-test-btn',
+  };
+  for (const [inputId, btnId] of Object.entries(_enterTestMap)) {
+    const input = $(inputId);
+    const btn = $(btnId);
+    if (input && btn) {
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          btn.click();
+        }
+      });
+    }
+  }
+
   // URL reachability check on blur
   $('wiz-base-url').addEventListener('blur', () => {
     const url = getVal('wiz-base-url').trim();
@@ -1056,17 +1112,20 @@
     const baseUrl = getVal('wiz-base-url');
 
     const isCatalog = $('wiz-has-catalog').checked;
+    const searchMethod = getVal('wiz-search-method') || 'GET';
+    const concurrency = getVal('wiz-download-concurrency') || '4';
     const items = [
       ['Nombre interno', name || '—'],
       ['Tipo', type],
       ['Etiqueta', label || '—'],
       ['URL base', baseUrl || '—'],
       [isCatalog ? 'URL catálogo' : 'URL busqueda', isCatalog ? (getVal('wiz-catalog-url') || '—') : (getVal('wiz-search-url') || '—')],
-      [isCatalog ? 'Catálogo cacheado' : '', isCatalog ? 'Sí' : ''],
+      [isCatalog ? 'Catálogo cacheado' : (!isCatalog && searchMethod !== 'GET') ? `Método: ${searchMethod}` : '', isCatalog ? 'Sí' : ''],
       ['URL detalles', getVal('wiz-details-url') || '—'],
       ['URL capitulos', getVal('wiz-chapters-url') || '—'],
       ['Tipo contenido', getVal('wiz-content-type') === 'video' ? 'Video' : 'Imagenes'],
       ['URL contenido', getVal('wiz-content-url') || '—'],
+      ['Conc. descarga', `${concurrency} hilos`],
     ].filter(row => row[1] !== '');
 
     $('wiz-summary').innerHTML = items.map(([label, value]) =>

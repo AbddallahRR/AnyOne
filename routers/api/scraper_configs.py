@@ -1,3 +1,4 @@
+import json as _json
 import logging
 import re
 
@@ -37,6 +38,36 @@ def _validate_config_selectors(config: dict) -> list[str]:
     return errors
 
 
+def _parse_json_fields(config: dict) -> dict:
+    """Parse JSON string fields (extra_headers, extra_cookies) into dicts."""
+    for field in ('extra_headers', 'extra_cookies'):
+        val = config.get(field)
+        if isinstance(val, str) and val.strip():
+            try:
+                config[field] = _json.loads(val)
+            except (_json.JSONDecodeError, ValueError):
+                config[field] = {}
+        elif not isinstance(val, dict):
+            config[field] = {}
+    return config
+
+
+def _validate_url_templates(config: dict) -> list[str]:
+    """Validate that URL templates contain required placeholders."""
+    errors = []
+    templates = {
+        'search_url_template': ('{query}', 'search'),
+        'details_url_template': ('{content_id}', 'details'),
+        'chapters_url_template': ('{content_id}', 'chapters'),
+        'content_page_template': ('{chapter_id}', 'content'),
+    }
+    for field, (required_placeholder, stage) in templates.items():
+        tmpl = config.get(field, '')
+        if tmpl and required_placeholder not in tmpl:
+            errors.append(f'URL de {stage} ({field}) debe contener {required_placeholder}')
+    return errors
+
+
 @api_router.get('/scraper-configs')
 async def api_list_configs():
     return get_all_configs()
@@ -69,6 +100,7 @@ async def api_create_config(data: CreateScraperConfigRequest):
         raise HTTPException(status_code=400, detail='Base URL is required')
 
     config = data.config
+    config = _parse_json_fields(config)
     try:
         validated = ScraperConfigSchema(**config)
         config = validated.model_dump()
@@ -79,6 +111,11 @@ async def api_create_config(data: CreateScraperConfigRequest):
     selector_errors = _validate_config_selectors(config)
     if selector_errors:
         raise HTTPException(status_code=400, detail='; '.join(selector_errors))
+
+    # Validate URL templates
+    url_errors = _validate_url_templates(config)
+    if url_errors:
+        raise HTTPException(status_code=400, detail='; '.join(url_errors))
 
     try:
         result = create_config(name, data.type, data.label, data.base_url, config)
@@ -100,6 +137,7 @@ async def api_update_config(name: str, data: UpdateScraperConfigRequest):
     config = data.config
 
     if config is not None:
+        config = _parse_json_fields(config)
         try:
             validated = ScraperConfigSchema(**config)
             config = validated.model_dump()
@@ -110,6 +148,11 @@ async def api_update_config(name: str, data: UpdateScraperConfigRequest):
         selector_errors = _validate_config_selectors(config)
         if selector_errors:
             raise HTTPException(status_code=400, detail='; '.join(selector_errors))
+
+        # Validate URL templates
+        url_errors = _validate_url_templates(config)
+        if url_errors:
+            raise HTTPException(status_code=400, detail='; '.join(url_errors))
 
     try:
         result = update_config(name, label=label, base_url=base_url,

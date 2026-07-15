@@ -199,6 +199,29 @@
                       </select>
                     </div>
                   </div>
+
+                  <hr style="border-color:var(--border);margin:12px 0;">
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label>Método HTTP</label>
+                      <select id="wiz-search-method" class="input-field">
+                        <option value="GET">GET</option>
+                        <option value="POST">POST</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="form-group wiz-post-section" style="display:none;">
+                    <label>Body POST (JSON template, usa {query}, {page}, {base})</label>
+                    <input id="wiz-search-post-body" type="text" class="input-field input-mono" placeholder='{"search":"{query}","page":{page}}'>
+                  </div>
+                  <div class="form-group">
+                    <label>Headers extra (JSON, opcional)</label>
+                    <input id="wiz-extra-headers" type="text" class="input-field input-mono" placeholder='{"Referer":"https://example.com","X-Custom":"value"}'>
+                  </div>
+                  <div class="form-group">
+                    <label>Cookies extra (JSON, opcional)</label>
+                    <input id="wiz-extra-cookies" type="text" class="input-field input-mono" placeholder='{"session_id":"abc123"}'>
+                  </div>
                 </div>
               </div>
 
@@ -541,6 +564,12 @@
                       <option value="data-src">data-src</option>
                     </select>
                   </div>
+                </div>
+                <hr style="border-color:var(--border);margin:12px 0;">
+                <div class="form-group">
+                  <label>Concurrencia de descarga (imágenes)</label>
+                  <input id="wiz-download-concurrency" type="number" class="input-field input-mono" value="4" min="1" max="10" style="max-width:100px;">
+                  <small>Número de imágenes a descargar en paralelo (1-10). Default: 4</small>
                 </div>
               </div>
             </div>
