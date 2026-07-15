@@ -634,6 +634,7 @@ select.input-field {
   z-index: 10002;
   display: flex;
   justify-content: center;
+  align-items: flex-start;
   padding-top: 16px;
 }
 #updates-popup.updates-popup-visible .updates-popup-content {
@@ -651,6 +652,7 @@ select.input-field {
   box-shadow: 0 8px 32px rgba(0,0,0,0.45);
   width: 340px;
   max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
   overflow: hidden;
   transform: translateY(-16px);
   opacity: 0;
@@ -684,7 +686,7 @@ select.input-field {
 .updates-popup-close:hover { color: var(--text); }
 .updates-popup-body {
   padding: 8px 0;
-  max-height: 40vh;
+  max-height: 240px;
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
