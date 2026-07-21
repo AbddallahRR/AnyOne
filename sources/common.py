@@ -1,7 +1,6 @@
 import logging
 import os
 import time
-from pathlib import Path
 
 from core.http_pool import HTTP_TIMEOUT, HttpPool
 from core.throttle import rate_limiter
@@ -81,14 +80,8 @@ class HttpClientMixin:
 class MangaDownloadHelper:
     @staticmethod
     def count_images(cap_dir: str) -> int:
-        exts = {'.jpg', '.jpeg', '.png', '.webp'}
-        try:
-            return sum(
-                1 for f in Path(cap_dir).iterdir()
-                if f.is_file() and f.suffix.lower() in exts
-            )
-        except FileNotFoundError:
-            return 0
+        from core.utils import count_images_in_dir
+        return count_images_in_dir(cap_dir)
 
     @staticmethod
     def make_chapter_dir(dest_folder: str, chapter_number: str) -> str:

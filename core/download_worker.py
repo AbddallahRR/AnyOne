@@ -40,7 +40,11 @@ def mark_downloading(folder: str, num: str) -> None:
 
 def unmark_downloading(folder: str, num: str) -> None:
     with _dl_lock:
-        _downloading_chapters.get(folder, set()).discard(num)
+        s = _downloading_chapters.get(folder)
+        if s:
+            s.discard(num)
+            if not s:
+                del _downloading_chapters[folder]
 
 
 def is_downloading(folder: str, num: str) -> bool:

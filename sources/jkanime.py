@@ -7,6 +7,8 @@ import logging
 import os
 import re
 import subprocess
+import threading
+from collections import OrderedDict
 from urllib.parse import quote as _url_quote
 
 from bs4 import BeautifulSoup
@@ -38,7 +40,9 @@ class JkanimeSource(HttpClientMixin, BaseSource):
     type = 'anime'
     label = 'JKanime'
     BASE_URL = "https://jkanime.net"
-    _episode_html_cache: dict[str, str] = {}
+    _episode_html_cache: OrderedDict[str, str] = OrderedDict()
+    _cache_lock = threading.Lock()
+    _CACHE_MAX = 128
 
     # -----------------------------------------------------------------------
     # Parsing helpers
@@ -46,14 +50,17 @@ class JkanimeSource(HttpClientMixin, BaseSource):
 
     def _fetch_episode_html(self, content_id: str, chapter_id: str) -> str:
         cache_key = f"{content_id}/{chapter_id}"
-        cached = self._episode_html_cache.get(cache_key)
-        if cached is not None:
-            return cached
+        with self._cache_lock:
+            cached = self._episode_html_cache.get(cache_key)
+            if cached is not None:
+                self._episode_html_cache.move_to_end(cache_key)
+                return cached
         cap_url = f"{self.BASE_URL}/{content_id}/{chapter_id}/"
         html = self._get(cap_url).text
-        self._episode_html_cache[cache_key] = html
-        if len(self._episode_html_cache) > 128:
-            self._episode_html_cache.clear()
+        with self._cache_lock:
+            self._episode_html_cache[cache_key] = html
+            while len(self._episode_html_cache) > self._CACHE_MAX:
+                self._episode_html_cache.popitem(last=False)
         return html
 
     @staticmethod

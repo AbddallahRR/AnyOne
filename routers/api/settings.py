@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 @api_router.get('/settings/sources')
-async def api_get_source_settings():
+def api_get_source_settings():
     settings = get_source_settings()
     meta = get_all_sources_meta()
     return [
@@ -26,7 +26,7 @@ async def api_get_source_settings():
 
 
 @api_router.put('/settings/sources')
-async def api_update_source_settings(body: dict[str, bool] = Body(...)):
+def api_update_source_settings(body: dict[str, bool] = Body(...)):
     meta = get_all_sources_meta()
     valid_names = {s['name'] for s in meta}
     unknown = set(body.keys()) - valid_names

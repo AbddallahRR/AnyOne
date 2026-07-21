@@ -15,6 +15,7 @@ from .common import (
     _find_local_serie_dir,
     _local_chapters_anime,
     _local_chapters_manga,
+    _safe_path,
 )
 
 logger = logging.getLogger(__name__)
@@ -22,16 +23,19 @@ logger = logging.getLogger(__name__)
 
 @api_router.get('/content/local/{type}/{id}')
 def api_local_content_details(type: str, id: str):
-    normalized_id = normalize_title(id)
-    serie_path = Path(_base_folder(type)) / normalized_id
+    base = _base_folder(type)
+    safe = _safe_path(base, normalize_title(id))
+    if safe is None:
+        raise HTTPException(status_code=400, detail='ID no válido')
+    serie_path = safe
 
     cover_url = ''
     if (serie_path / 'thumb.webp').exists() and not (serie_path / 'cover.webp').exists():
-        cover_url = f'/api/local-cover/{type}/{normalized_id}/thumb.webp?thumb=1'
+        cover_url = f'/api/local-cover/{type}/{safe.name}/thumb.webp?thumb=1'
     else:
         for ext in ['jpg', 'jpeg', 'png', 'webp']:
             if (serie_path / f'cover.{ext}').exists():
-                cover_url = f'/api/local-cover/{type}/{normalized_id}/cover.{ext}'
+                cover_url = f'/api/local-cover/{type}/{safe.name}/cover.{ext}'
                 break
 
     title = id

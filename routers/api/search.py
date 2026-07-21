@@ -36,7 +36,7 @@ async def api_search(qs: SearchQuery = Depends()):
     if not source:
         raise HTTPException(status_code=404, detail='Fuente no encontrada')
 
-    enabled_names = get_enabled_source_names()
+    enabled_names = await asyncio.to_thread(get_enabled_source_names)
     if qs.source not in enabled_names:
         raise HTTPException(status_code=400, detail='Fuente desactivada en configuración')
 
@@ -47,15 +47,19 @@ async def api_search(qs: SearchQuery = Depends()):
         refs = [get_content_ref(qs.source, r.id) for r in results]
         if refs:
             placeholders = ','.join('?' * len(refs))
-            conn = get_conn()
-            progress_map = {
-                row[0]: (row[1], row[2])
-                for row in conn.execute(
-                    f'SELECT content_id, chapter, progress FROM user_progress '
-                    f'WHERE content_id IN ({placeholders})',
-                    refs
-                ).fetchall()
-            }
+
+            def _fetch_progress():
+                conn = get_conn()
+                return {
+                    row[0]: (row[1], row[2])
+                    for row in conn.execute(
+                        f'SELECT content_id, chapter, progress FROM user_progress '
+                        f'WHERE content_id IN ({placeholders})',
+                        refs
+                    ).fetchall()
+                }
+
+            progress_map = await asyncio.to_thread(_fetch_progress)
         else:
             progress_map = {}
 
@@ -76,7 +80,7 @@ async def api_search(qs: SearchQuery = Depends()):
 
 @api_router.get('/search-all')
 async def api_search_all(qs: SearchQuery = Depends()):
-    sources_dict = get_enabled_sources(qs.type)
+    sources_dict = await asyncio.to_thread(get_enabled_sources, qs.type)
     if not sources_dict:
         raise HTTPException(status_code=400, detail='Tipo no soportado')
 
@@ -86,8 +90,6 @@ async def api_search_all(qs: SearchQuery = Depends()):
         cached = await search_cache.aget(cache_key)
         if cached is not None:
             return cached
-    if not sources_dict:
-        raise HTTPException(status_code=400, detail='Tipo no soportado')
 
     async def search_in_source(source_name: str, src) -> list:
         try:
@@ -120,7 +122,7 @@ async def api_search_all_stream(qs: SearchQuery = Depends()):
     if not qs.q:
         raise HTTPException(status_code=400, detail='Faltan parámetros type y q')
 
-    sources_dict = get_enabled_sources(qs.type)
+    sources_dict = await asyncio.to_thread(get_enabled_sources, qs.type)
     if not sources_dict:
         raise HTTPException(status_code=400, detail='Tipo no soportado')
 

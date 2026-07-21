@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 _series_index: dict[str, dict[str, Path]] = {}
 _series_index_lock = threading.Lock()
+_build_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="series-idx")
 
 
 def _read_series_info(cand_dir: Path) -> tuple[str | None, Path | None]:
@@ -46,15 +47,14 @@ def _build_series_index(base_dir: Path) -> dict[str, Path]:
     if not dirs:
         return index
 
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        futures = {executor.submit(_read_series_info, d): d for d in dirs}
-        for future in as_completed(futures):
-            try:
-                cid, cand_dir = future.result()
-                if cid and cand_dir:
-                    index[cid] = cand_dir
-            except Exception as exc:
-                logger.debug("_build_series_index: error procesando directorio de serie: %s", exc)
+    futures = {_build_executor.submit(_read_series_info, d): d for d in dirs}
+    for future in as_completed(futures):
+        try:
+            cid, cand_dir = future.result()
+            if cid and cand_dir:
+                index[cid] = cand_dir
+        except Exception as exc:
+            logger.debug("_build_series_index: error procesando directorio de serie: %s", exc)
     return index
 
 

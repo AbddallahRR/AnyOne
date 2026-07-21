@@ -69,12 +69,12 @@ def _validate_url_templates(config: dict) -> list[str]:
 
 
 @api_router.get('/scraper-configs')
-async def api_list_configs():
+def api_list_configs():
     return get_all_configs()
 
 
 @api_router.get('/scraper-configs/{name}')
-async def api_get_config(name: str):
+def api_get_config(name: str):
     cfg = get_config(name)
     if not cfg:
         raise HTTPException(status_code=404, detail='Config not found')
@@ -82,7 +82,7 @@ async def api_get_config(name: str):
 
 
 @api_router.post('/scraper-configs')
-async def api_create_config(data: CreateScraperConfigRequest):
+def api_create_config(data: CreateScraperConfigRequest):
     name = data.name.strip().lower().replace(' ', '-')
     if not re.match(r'^[a-z][a-z0-9_-]+$', name):
         raise HTTPException(
@@ -126,7 +126,7 @@ async def api_create_config(data: CreateScraperConfigRequest):
 
 
 @api_router.put('/scraper-configs/{name}')
-async def api_update_config(name: str, data: UpdateScraperConfigRequest):
+def api_update_config(name: str, data: UpdateScraperConfigRequest):
     existing = get_config(name)
     if not existing:
         raise HTTPException(status_code=404, detail='Config not found')
@@ -164,7 +164,7 @@ async def api_update_config(name: str, data: UpdateScraperConfigRequest):
 
 
 @api_router.delete('/scraper-configs/{name}')
-async def api_delete_config(name: str):
+def api_delete_config(name: str):
     deleted = delete_config(name)
     if not deleted:
         raise HTTPException(status_code=404, detail='Config not found or is built-in')

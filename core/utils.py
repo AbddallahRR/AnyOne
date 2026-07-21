@@ -13,6 +13,8 @@ from core.settings import settings
 
 logger = logging.getLogger(__name__)
 
+_scan_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="scan")
+
 
 def normalize_title(raw_title):
     """Limpia títulos para usarlos como nombre de carpeta."""
@@ -127,23 +129,22 @@ def scan_downloaded_series():
     series = []
     futures = []
 
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        for content_type, base_path in [('anime', str(settings.anime_download_dir)), ('manga', str(settings.manga_download_dir))]:
-            base = Path(base_path)
-            if not base.exists():
+    for content_type, base_path in [('anime', str(settings.anime_download_dir)), ('manga', str(settings.manga_download_dir))]:
+        base = Path(base_path)
+        if not base.exists():
+            continue
+        for serie_dir in base.iterdir():
+            if not serie_dir.is_dir():
                 continue
-            for serie_dir in base.iterdir():
-                if not serie_dir.is_dir():
-                    continue
-                futures.append(executor.submit(_scan_series_dir, serie_dir, content_type))
+            futures.append(_scan_executor.submit(_scan_series_dir, serie_dir, content_type))
 
-        for future in as_completed(futures):
-            try:
-                result = future.result()
-                if result is not None:
-                    series.append(result)
-            except Exception as exc:
-                logger.debug('utils: error en future.result() para serie local: %s', exc)
+    for future in as_completed(futures):
+        try:
+            result = future.result()
+            if result is not None:
+                series.append(result)
+        except Exception as exc:
+            logger.debug('utils: error en future.result() para serie local: %s', exc)
 
     # Enriquecer con BD (progreso + portada) — JOIN único
     from core.database import get_conn

@@ -41,21 +41,6 @@ class IkigaiSource(HttpClientMixin, BaseSource):
     def _fetch_url(self, url: str, **kwargs) -> str:
         return self._get(url, **kwargs).text
 
-    def _get_with_retry(self, url: str, retries: int = 3,
-                        backoff: float = 1.0, **kwargs):
-        last_exc = None
-        for attempt in range(retries):
-            try:
-                return self._get(url, **kwargs)
-            except Exception as exc:
-                last_exc = exc
-                if attempt < retries - 1:
-                    wait = backoff * (2 ** attempt)
-                    logger.warning(f"Ikigai: reintento {attempt + 1}/{retries - 1} "
-                                   f"para {url} (espera {wait:.1f}s): {exc}")
-                    time.sleep(wait)
-        raise last_exc
-
     # -----------------------------------------------------------------------
     # URL helpers
     # -----------------------------------------------------------------------

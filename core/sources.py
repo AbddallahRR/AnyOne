@@ -17,6 +17,7 @@ ALL_SOURCES_META: list[dict] = []
 
 def _discover_sources():
     import sources as sources_pkg
+    from sources import BaseSource
 
     for importer, modname, ispkg in pkgutil.iter_modules(sources_pkg.__path__):
         if modname == '__init__':
@@ -35,8 +36,6 @@ def _discover_sources():
         except Exception as exc:
             logger.warning(f'Error importando sources.{modname}: {exc}')
             continue
-
-        from sources import BaseSource
 
         for name, cls in inspect.getmembers(module, inspect.isclass):
             if issubclass(cls, BaseSource) and cls is not BaseSource:

@@ -10,7 +10,6 @@ from core.settings import settings
 logger = logging.getLogger(__name__)
 
 _local = threading.local()
-_db_write_lock = threading.Lock()
 SCHEMA_VERSION = 12
 
 
@@ -255,6 +254,7 @@ def init_db() -> None:
 
 
 def cleanup_download_queue() -> None:
+    conn = None
     for attempt in range(6):
         try:
             conn = get_conn()
@@ -273,6 +273,9 @@ def cleanup_download_queue() -> None:
                 logger.warning("cleanup_download_queue: DB persistentemente bloqueada, omitiendo.")
                 return
             raise
+
+    if conn is None:
+        return
 
     for row in rows:
         job_id, content_ref, content_type, title, current_chapter, chapter_id = row
