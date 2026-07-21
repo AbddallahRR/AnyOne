@@ -10,6 +10,7 @@
   let progressInterval    = null;
   var _unloadSaveHandler  = null;
   var _unloadClearHandler = null;
+  let _wireAbort          = null;
 
   // ── Elementos DOM ──────────────────────────────────────────────────────
   const mediaContainer  = document.getElementById('media-content');
@@ -92,6 +93,12 @@
     if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
 
     const doLoad = () => {
+      const stale = chapterWrapper?.querySelector('video, iframe');
+      if (stale) {
+        if (stale.tagName === 'VIDEO') { stale.pause(); stale.removeAttribute('src'); stale.load(); }
+        stale.remove();
+      }
+
       if (chapterWrapper) chapterWrapper.innerHTML = `
         <div style="display:flex; align-items:center; justify-content:center;
                     width:100%; height:100%;">
@@ -288,6 +295,10 @@
   function wirePlayerControls(video, duration) {
     if (!poPlayBtn || !poProgress) return;
 
+    if (_wireAbort) _wireAbort.abort();
+    _wireAbort = new AbortController();
+    const sig = _wireAbort.signal;
+
     // Format time helper
     function fmt(sec) {
       if (!isFinite(sec) || sec < 0) return '0:00';
@@ -319,8 +330,8 @@
     const togglePlay = () => {
       if (video.paused) video.play(); else video.pause();
     };
-    poPlayBtn?.addEventListener('click', togglePlay);
-    poCenterBtn?.addEventListener('click', togglePlay);
+    poPlayBtn?.addEventListener('click', togglePlay, { signal: sig });
+    poCenterBtn?.addEventListener('click', togglePlay, { signal: sig });
     video.addEventListener('play', updateUI);
     video.addEventListener('pause', updateUI);
 
@@ -367,12 +378,12 @@
       updateUI();
     }
 
-    progressWrap.addEventListener('mousedown',  e => onDown(e.clientX));
-    document.addEventListener('mousemove',      e => { if (_drag) e.preventDefault(); onMove(e.clientX); });
-    document.addEventListener('mouseup',        onUp);
-    progressWrap.addEventListener('touchstart', e => { e.preventDefault(); onDown(e.touches[0].clientX); }, { passive: false });
-    document.addEventListener('touchmove',      e => { if (_drag) e.preventDefault(); onMove(e.touches[0].clientX); }, { passive: false });
-    document.addEventListener('touchend',       onUp);
+    progressWrap.addEventListener('mousedown',  e => onDown(e.clientX), { signal: sig });
+    document.addEventListener('mousemove',      e => { if (_drag) e.preventDefault(); onMove(e.clientX); }, { signal: sig });
+    document.addEventListener('mouseup',        onUp, { signal: sig });
+    progressWrap.addEventListener('touchstart', e => { e.preventDefault(); onDown(e.touches[0].clientX); }, { passive: false, signal: sig });
+    document.addEventListener('touchmove',      e => { if (_drag) e.preventDefault(); onMove(e.touches[0].clientX); }, { passive: false, signal: sig });
+    document.addEventListener('touchend',       onUp, { signal: sig });
 
     video.addEventListener('timeupdate', () => { if (!_drag) updateUI(); });
     video.addEventListener('loadedmetadata', () => { updateUI(); });
@@ -399,11 +410,11 @@
       video.volume = parseFloat(poVolSlider.value);
       video.muted = false;
       updateVolUI();
-    });
+    }, { signal: sig });
     poVolBtn?.addEventListener('click', () => {
       video.muted = !video.muted;
       updateVolUI();
-    });
+    }, { signal: sig });
     video.addEventListener('volumechange', updateVolUI);
     updateVolUI();
 
@@ -415,17 +426,17 @@
       if (idx === -1 || idx >= SPEEDS.length - 1) idx = 0; else idx++;
       video.playbackRate = SPEEDS[idx];
       poSpeed.textContent = SPEEDS[idx] + '×';
-    });
+    }, { signal: sig });
 
     // ── Subtitles ──
-    poSubs?.addEventListener('click', () => cycleSubtitles(video));
+    poSubs?.addEventListener('click', () => cycleSubtitles(video), { signal: sig });
 
     // ── Click on empty overlay area → toggle play ──
     poOverlay?.addEventListener('click', e => {
       if (e.target === poOverlay || e.target.classList.contains('po-top') || e.target.classList.contains('po-bottom')) {
         if (video.paused) video.play(); else video.pause();
       }
-    });
+    }, { signal: sig });
 
     // ── Progress tooltip ──
     if (progressWrap && progressTooltip) {
@@ -445,11 +456,11 @@
         progressTooltip.textContent = fmtTooltip(sec);
         progressTooltip.style.left  = (pct * 100) + '%';
       }
-      progressWrap.addEventListener('mousemove', e => onProgressMove(e.clientX));
+      progressWrap.addEventListener('mousemove', e => onProgressMove(e.clientX), { signal: sig });
       progressWrap.addEventListener('touchmove', e => {
         const touch = e.touches[0];
         if (touch) onProgressMove(touch.clientX);
-      });
+      }, { signal: sig });
     }
 
     // ── Keyboard ──
