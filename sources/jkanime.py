@@ -249,6 +249,22 @@ class JkanimeSource(HttpClientMixin, BaseSource):
                 logger.warning(f"Archivo incompleto ({actual}/{expected} bytes), reintentando…")
                 continue
 
+            # Verificar que el archivo es un video real (magic bytes MP4: ftyp en offset 4)
+            if actual < 10240:
+                logger.warning(f"Archivo demasiado pequeño ({actual} bytes), probablemente no es video")
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+                raise Exception(f"Descarga inválida: archivo de {actual} bytes no es un video válido")
+            try:
+                with open(filepath, 'rb') as f:
+                    magic = f.read(12)
+            except (OSError, IOError):
+                break
+            if len(magic) >= 8 and magic[4:8] != b'ftyp':
+                logger.warning(f"Archivo no es MP4 válido (magic: {magic[:8]!r})")
+                os.remove(filepath)
+                raise Exception("Descarga inválida: el archivo no tiene formato MP4")
+
             break
 
         return filepath
@@ -257,7 +273,10 @@ class JkanimeSource(HttpClientMixin, BaseSource):
         """Devuelve la URL directa de descarga de Mediafire."""
         page_url = self._decode_remote(encoded)
         logger.debug(f"Mediafire: página remota {page_url}")
-        html = self._get(page_url).text
+        resp = self._get(page_url)
+        if resp.status_code >= 400:
+            raise Exception(f"Mediafire devolvió HTTP {resp.status_code}")
+        html = resp.text
 
         m = re.search(r'<a[^>]+id="downloadButton"[^>]+href="([^"]+)"', html)
         if m:
@@ -284,6 +303,22 @@ class JkanimeSource(HttpClientMixin, BaseSource):
         url = result.stdout.strip().split('\n')[0]
         if not url.startswith('http'):
             raise Exception(f"yt-dlp devolvió URL inválida: {url!r}")
+
+        try:
+            head = self.scraper.head(url, headers=self._headers, timeout=HTTP_TIMEOUT)
+            if head.status_code >= 400:
+                raise Exception(f"Mp4upload: URL devolvió HTTP {head.status_code}")
+            ct = head.headers.get('content-type', '')
+            cl = int(head.headers.get('content-length', 0))
+            if 'html' in ct:
+                raise Exception("Mp4upload: URL devolvió HTML en vez de video")
+            if cl and cl < 10240:
+                raise Exception(f"Mp4upload: archivo demasiado pequeño ({cl} bytes)")
+        except Exception as exc:
+            if 'devolvió' in str(exc) or 'demasiado' in str(exc):
+                raise
+            logger.debug(f"Mp4upload: HEAD no pudo validar URL: {exc}")
+
         return url
 
     def _resolve_generic(self, slug: str) -> str:

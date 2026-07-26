@@ -55,7 +55,7 @@ def is_downloading(folder: str, num: str) -> bool:
 def _post_process_video(filepath: str) -> None:
     tmp = filepath + '.faststart.mp4'
     try:
-        subprocess.run(
+        result = subprocess.run(
             ['ffmpeg', '-y', '-i', filepath, '-c', 'copy',
              '-movflags', '+faststart', tmp],
             capture_output=True, timeout=120,
@@ -63,7 +63,8 @@ def _post_process_video(filepath: str) -> None:
         if os.path.exists(tmp) and os.path.getsize(tmp) > 0:
             os.replace(tmp, filepath)
         else:
-            logger.warning(f"faststart falló para {filepath}, archivo original conservado")
+            stderr = (result.stderr or b'').decode(errors='replace').strip()
+            logger.warning(f"faststart falló para {filepath}: {stderr[-300:] if stderr else 'sin salida'}")
     except FileNotFoundError:
         logger.warning("ffmpeg no encontrado, faststart omitido")
     except Exception as exc:
