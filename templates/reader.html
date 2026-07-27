@@ -150,10 +150,7 @@
 
   // ── Fullscreen ────────────────────────────────────────────────────────
   function getFullscreenTarget() {
-    // Anime → reader-root incluye el overlay de controles
-    if (!isManga) return document.getElementById('reader-root');
-    return document.getElementById('media-content')
-        || document.getElementById('reader-root');
+    return document.getElementById('reader-root');
   }
 
   function updateFullscreenIcon() {
