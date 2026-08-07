@@ -18,7 +18,7 @@ from core.models import (
     AcknowledgeUpdatesRequest,
     StatusUpdateRequest,
 )
-from core.utils import normalize_title, scan_downloaded_series
+from core.utils import count_images_in_dir, normalize_title, scan_downloaded_series
 from core.settings import settings
 
 from . import api_router
@@ -45,8 +45,7 @@ def _get_chapter_total(folder: str, content_type: str, chapter: str) -> int:
         for suffix in (f'cap_{chapter}', f'cap_{chapter.zfill(4)}'):
             cap_dir = base / suffix
             if cap_dir.is_dir():
-                total = len([f for f in cap_dir.iterdir()
-                             if f.is_file() and f.suffix.lower() in ('.jpg', '.jpeg', '.png', '.webp')])
+                total = count_images_in_dir(str(cap_dir))
                 break
     elif content_type == 'anime':
         base = Path(str(settings.anime_download_dir)) / normalize_title(folder)

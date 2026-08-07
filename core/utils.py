@@ -32,12 +32,6 @@ def _normalize_path_name(text: str) -> str:
     text = re.sub(r'[-\s_?¿!¡]+', ' ', text)
     return text.strip()
 
-def normalize_for_comparison(text):
-    """Normaliza texto para comparación (sin tildes, minúsculas, solo alfanuméricos)."""
-    text = text.lower()
-    text = unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore').decode('ASCII')
-    text = re.sub(r'[^a-z0-9]+', ' ', text)
-    return re.sub(r'\s+', ' ', text).strip()
 _scan_cache: list | None = None
 _scan_cache_time: float = 0.0
 _scan_cache_lock = threading.Lock()
@@ -277,7 +271,7 @@ def filter_manga_images(
     if not image_urls:
         return []
 
-    _HEADER_BYTES = 32768  # 32KB — enough for PNG IHDR, JPEG SOF, WebP VP8 headers
+    _HEADER_BYTES = 8192  # headers PNG/JPEG/WebP caben en los primeros KB
 
     def _check_one(url: str) -> str | None:
         try:

@@ -121,8 +121,9 @@ class DiskCache:
         removed = 0
         for f in CACHE_DIR.glob("*.json"):
             try:
-                mtime = f.stat().st_mtime
-                if mtime <= now - self._ttl:
+                with open(f, 'r', encoding='utf-8') as fh:
+                    expires = json.load(fh).get('expires')
+                if expires is not None and expires <= now:
                     f.unlink(missing_ok=True)
                     removed += 1
             except Exception as exc:
@@ -145,3 +146,4 @@ class DiskCache:
 search_cache = DiskCache(ttl=1800, namespace='search')
 details_cache = DiskCache(ttl=3600, namespace='details')
 chapters_cache = DiskCache(ttl=1800, namespace='chapters')
+img_filter_cache = DiskCache(ttl=43200, namespace='imgfilter')
