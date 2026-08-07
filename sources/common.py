@@ -102,11 +102,13 @@ class MangaDownloadHelper:
         cap_dir: str,
         headers: dict | None = None,
         retry_get=None,
+        progress_cb=None,
     ) -> int:
         from core.html_utils import url_ext
         failures = 0
         dl_headers = dict(headers or {})
         get_fn = retry_get or (lambda url, **kw: __import__('requests').get(url, **kw))
+        total = len(img_urls)
 
         for i, img_url in enumerate(img_urls, start=1):
             ext = url_ext(img_url)
@@ -121,5 +123,7 @@ class MangaDownloadHelper:
             except Exception as exc:
                 logger.exception(f"Error descargando imagen {i} ({img_url[:60]}): {exc}")
                 failures += 1
+            if progress_cb:
+                progress_cb(i, total, f'Imagen {i}/{total}')
 
         return failures

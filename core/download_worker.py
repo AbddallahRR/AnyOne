@@ -12,6 +12,8 @@ from pathlib import Path
 from queue import Queue
 
 from core.database import update_queue_status
+from core.download_progress import clear as clear_progress
+from core.download_progress import report as report_progress
 from core.http_pool import HttpPool
 from core.models import DownloadJob
 from core.settings import settings
@@ -215,7 +217,10 @@ def _download_worker(worker_id: int) -> None:
                     last_exc = None
                     for attempt in range(1 + max_retries):
                         try:
-                            result_path = source.download_chapter_sync(content_id, chap_id, series_folder, chap_num)
+                            result_path = source.download_chapter_sync(
+                                content_id, chap_id, series_folder, chap_num,
+                                progress_cb=lambda done, total, label='': report_progress(job_id, done, total, label),
+                            )
                             last_exc = None
                             break
                         except Exception as exc:
@@ -231,6 +236,7 @@ def _download_worker(worker_id: int) -> None:
                     if last_exc is not None:
                         raise Exception(f"Error en capítulo {chap_num} tras {max_retries + 1} intentos: {last_exc}") from last_exc
                 finally:
+                    clear_progress(job_id)
                     unmark_downloading(series_folder, chap_num)
 
                 if content_type == 'anime' and result_path:

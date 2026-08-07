@@ -11,6 +11,7 @@ from core.database import (
     queue_insert,
     save_content_to_db,
 )
+from core.download_progress import get as get_file_progress
 from core.download_worker import download_queue
 from core.models import (
     DownloadChapterRequest,
@@ -29,6 +30,10 @@ logger = logging.getLogger(__name__)
 @api_router.get('/queue/status')
 def api_queue_status():
     active, pending = queue_get_status()
+    for job in active:
+        fp = get_file_progress(job['id'])
+        if fp:
+            job['file_progress'] = fp
     return {'active': active, 'queue': pending}
 
 

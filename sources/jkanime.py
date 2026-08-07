@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import threading
+import time
 from collections import OrderedDict
 from urllib.parse import quote as _url_quote
 from urllib.parse import urlsplit
@@ -269,7 +270,7 @@ class JkanimeSource(HttpClientMixin, BaseSource):
     # -----------------------------------------------------------------------
 
     def _download_stream(self, url: str, filepath: str,
-                         referer: str | None = None) -> str:
+                         referer: str | None = None, progress_cb=None) -> str:
         """
         Descarga un MP4 via requests con streaming.
         Elimina el archivo si falla a mitad.
@@ -278,9 +279,20 @@ class JkanimeSource(HttpClientMixin, BaseSource):
         if referer:
             headers['Referer'] = referer
 
+        _cb_throttle = [0.0]
+        _cb_interval  = 0.5
+
+        def _emit(downloaded: int, total: int | None) -> None:
+            if not progress_cb:
+                return
+            now = time.monotonic()
+            if now - _cb_throttle[0] >= _cb_interval:
+                _cb_throttle[0] = now
+                progress_cb(downloaded, total, 'Descargando video')
+
         with HttpPool.get_session().get(url, headers=headers, stream=True, timeout=60) as r:
             r.raise_for_status()
-            total = int(r.headers.get('content-length', 0))
+            total = int(r.headers.get('content-length', 0)) or None
             downloaded = 0
             with open(filepath, 'wb') as f:
                 for chunk in r.iter_content(8192):
@@ -289,11 +301,37 @@ class JkanimeSource(HttpClientMixin, BaseSource):
                         downloaded += len(chunk)
                         if total:
                             logger.debug(f"Progreso: {downloaded/total*100:.1f}%")
+                        _emit(downloaded, total)
         return filepath
+
+    def _run_curl_with_progress(self, cmd: list[str], filepath: str,
+                                expected: int | None, progress_cb, timeout: int) -> None:
+        """Ejecuta curl (Popen) y reporta progreso muestreando el tamaño del archivo."""
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        deadline = time.monotonic() + timeout
+        try:
+            while True:
+                try:
+                    rc = proc.wait(timeout=1)
+                    break
+                except subprocess.TimeoutExpired:
+                    if time.monotonic() >= deadline:
+                        proc.kill()
+                        proc.wait()
+                        raise subprocess.TimeoutExpired(cmd, timeout)
+                    if progress_cb:
+                        size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
+                        progress_cb(size, expected, 'Descargando video')
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+        if rc != 0:
+            raise subprocess.CalledProcessError(rc, cmd)
 
     def _download_curl(self, url: str, filepath: str,
                        referer: str = 'https://www.mp4upload.com/',
-                       origin: str  = 'https://www.mp4upload.com') -> str:
+                       origin: str  = 'https://www.mp4upload.com',
+                       progress_cb=None) -> str:
         """
         Descarga con curl. Soporta reanudación (-C -).
         Reintenta una vez si el archivo queda incompleto.
@@ -328,7 +366,7 @@ class JkanimeSource(HttpClientMixin, BaseSource):
 
         for attempt in range(2):
             try:
-                subprocess.run(cmd, check=True, timeout=_TIMEOUT_CURL)
+                self._run_curl_with_progress(cmd, filepath, expected, progress_cb, _TIMEOUT_CURL)
             except subprocess.TimeoutExpired:
                 logger.warning(f"curl timeout en intento {attempt + 1}")
                 if attempt == 1:
@@ -529,7 +567,7 @@ class JkanimeSource(HttpClientMixin, BaseSource):
         return hls_url, referer
 
     def _download_hls(self, url: str, filepath: str,
-                      referer: str | None = None) -> str:
+                      referer: str | None = None, progress_cb=None) -> str:
         """Descarga un stream HLS (m3u8) a MP4 usando ffmpeg."""
         if not shutil.which('ffmpeg'):
             raise Exception("ffmpeg no está instalado (requerido para HLS)")
@@ -545,6 +583,8 @@ class JkanimeSource(HttpClientMixin, BaseSource):
             '-c', 'copy', '-bsf:a', 'aac_adtstoasc',
             filepath,
         ]
+        if progress_cb:
+            progress_cb(0, None, 'Descargando HLS')
         try:
             subprocess.run(cmd, check=True, timeout=_TIMEOUT_CURL)
         except subprocess.TimeoutExpired as exc:
@@ -805,7 +845,8 @@ class JkanimeSource(HttpClientMixin, BaseSource):
         search_cache.set(cache_key, [c.model_dump() for c in chapters])
         return chapters
 
-    def download_chapter_sync(self, content_id: str, chapter_id: str, dest_folder: str, chapter_number: str | None = None) -> str:
+    def download_chapter_sync(self, content_id: str, chapter_id: str, dest_folder: str,
+                              chapter_number: str | None = None, progress_cb=None) -> str:
         html    = self._fetch_episode_html(content_id, chapter_id)
         soup    = BeautifulSoup(html, 'html.parser')
 
@@ -840,7 +881,7 @@ class JkanimeSource(HttpClientMixin, BaseSource):
             try:
                 if name == 'Mediafire' and remote:
                     direct = self._resolve_mediafire(remote)
-                    return self._download_stream(direct, filepath)
+                    return self._download_stream(direct, filepath, progress_cb=progress_cb)
 
                 elif name == 'Mp4upload' and remote:
                     # El token del CDN expira rápido: re-resolver con URL fresca
@@ -852,6 +893,7 @@ class JkanimeSource(HttpClientMixin, BaseSource):
                                 direct, filepath,
                                 referer=_MP4UPLOAD_REFERER,
                                 origin=_MP4UPLOAD_ORIGIN,
+                                progress_cb=progress_cb,
                             )
                         except Exception as exc:
                             if attempt == 1:
@@ -867,16 +909,19 @@ class JkanimeSource(HttpClientMixin, BaseSource):
                     direct, referer = self._resolve_mixdrop(remote)
                     origin = f"{urlsplit(referer).scheme}://{urlsplit(referer).netloc}"
                     return self._download_curl(direct, filepath,
-                                               referer=referer, origin=origin)
+                                               referer=referer, origin=origin,
+                                               progress_cb=progress_cb)
 
                 elif name in ('Streamwish', 'Vidhide') and remote:
                     hls_url, referer = self._resolve_wish_hls(remote)
-                    return self._download_hls(hls_url, filepath, referer=referer)
+                    return self._download_hls(hls_url, filepath, referer=referer,
+                                              progress_cb=progress_cb)
 
                 elif slug:
                     direct = self._resolve_generic(slug)
                     return self._download_stream(direct, filepath,
-                                                 referer=self.BASE_URL)
+                                                 referer=self.BASE_URL,
+                                                 progress_cb=progress_cb)
 
             except Exception as exc:
                 logger.warning(f"Jkanime: servidor {name!r} falló: {exc}")

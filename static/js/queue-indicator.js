@@ -54,9 +54,12 @@
     _bc = new BroadcastChannel('anyone:queue');
     _bc.onmessage = (ev) => {
       if (ev.data?.type === 'queue') {
-        _applyQueueData(ev.data.data);
+        const hasActivity = _applyQueueData(ev.data.data);
         forceUntil = Date.now() + 5000;
+        handleQueueSnapshot(hasActivity);
         scheduleNext(3000);
+      } else if (ev.data?.type === 'complete') {
+        window.dispatchEvent(new CustomEvent('anyone:downloads-complete'));
       }
     };
   } catch (_) { /* BroadcastChannel no soportado */ }
@@ -65,6 +68,7 @@
   let pollingTimer     = null;
   let forceUntil       = 0;
   let popupOpen        = false;
+  let hadActivity      = false;
 
   // ── Helpers ────────────────────────────────────────────────────────────
   function showIndicator() {
@@ -94,6 +98,8 @@
   function buildJobHtml(job) {
     const isDownloading = job.status === 'downloading';
     const isFailed      = job.status === 'failed';
+    const fp            = job.file_progress || null;
+    const singleChapter = !job.total_chapters || job.total_chapters <= 1;
     const pct           = job.progress || 0;
     const cap           = job.current_chapter || 0;
     const total         = job.total_chapters || '?';
@@ -103,16 +109,48 @@
     else if (isFailed)  statusBadge = `<span class="qi-job-status qi-status-failed">Error</span>`;
     else                statusBadge = `<span class="qi-job-status qi-status-pending">En cola</span>`;
 
+    // Barra principal: progreso por capítulos. En descargas de 1 capítulo
+    // (total_chapters <= 1) refleja el progreso del archivo en curso.
+    let mainPct  = pct;
+    let mainText = `Cap. ${cap}/${total}`;
+    let mainIndeterminate = false;
+    if (isDownloading && singleChapter && fp) {
+      mainText           = fp.label || 'Descargando…';
+      mainIndeterminate  = !!fp.indeterminate;
+      if (!mainIndeterminate) mainPct = fp.percent;
+    }
+
     let progressHtml = '';
     if (isDownloading) {
+      const fill = mainIndeterminate
+        ? '<div class="qi-progress-fill"></div>'
+        : `<div class="qi-progress-fill" style="width:${mainPct}%"></div>`;
       progressHtml = `
-        <div class="qi-progress-bar">
-          <div class="qi-progress-fill" style="width:${pct}%"></div>
+        <div class="qi-progress-bar${mainIndeterminate ? ' indeterminate' : ''}">
+          ${fill}
         </div>
         <div class="qi-progress-text">
-          <span>Cap. ${cap}/${total}</span>
-          <span>${pct}%</span>
+          <span>${mainText}</span>
+          <span>${mainIndeterminate ? '…' : mainPct + '%'}</span>
         </div>`;
+    }
+
+    // Barra del archivo en curso (descargas de serie con progreso de bytes)
+    let fileProgressHtml = '';
+    if (isDownloading && !singleChapter && fp) {
+      if (fp.indeterminate) {
+        fileProgressHtml = `
+          <div class="qi-file-progress">
+            <div class="qi-progress-bar indeterminate"><div class="qi-progress-fill"></div></div>
+            <div class="qi-progress-text"><span>${fp.label || 'Descargando…'}</span><span>…</span></div>
+          </div>`;
+      } else {
+        fileProgressHtml = `
+          <div class="qi-file-progress">
+            <div class="qi-progress-bar"><div class="qi-progress-fill" style="width:${fp.percent}%"></div></div>
+            <div class="qi-progress-text"><span>${fp.label || 'Descargando…'}</span><span>${fp.percent}%</span></div>
+          </div>`;
+      }
     }
 
     let errorHtml = '';
@@ -127,6 +165,7 @@
           ${statusBadge}
         </div>
         ${progressHtml}
+        ${fileProgressHtml}
         ${errorHtml}
       </div>`;
   }
@@ -185,12 +224,27 @@
     return hasActivity;
   }
 
+  // ── Aviso de descarga terminada ────────────────────────────────────────
+  function onQueueFinished() {
+    window.dispatchEvent(new CustomEvent('anyone:downloads-complete'));
+    if (_bc) _bc.postMessage({ type: 'complete' });
+  }
+
+  // Detecta la transición cola activa → vacía. Se llama con cada snapshot
+  // (fetch propio o broadcast de otra pestaña) sin depender de forceUntil.
+  function handleQueueSnapshot(hasActivity) {
+    if (hadActivity && !hasActivity) onQueueFinished();
+    hadActivity = hasActivity;
+  }
+
   // ── Fetch y render del estado de la cola ──────────────────────────────
   async function fetchQueueStatus() {
     try {
       const data = await api.get('/api/queue/status');
       const hasActivity = _applyQueueData(data);
       if (_bc) _bc.postMessage({ type: 'queue', data });
+
+      handleQueueSnapshot(hasActivity);
 
       if (hasActivity) {
         forceUntil = Date.now() + 5000;

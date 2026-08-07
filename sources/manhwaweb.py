@@ -314,7 +314,8 @@ class ManhwawebSource(HttpClientMixin, BaseSource):
     # -----------------------------------------------------------------------
 
     def download_chapter_sync(self, content_id: str, chapter_id: str,
-                         dest_folder: str, chapter_number: str | None = None) -> str:
+                         dest_folder: str, chapter_number: str | None = None,
+                         progress_cb=None) -> str:
         num = chapter_number or self._chapter_num_from_id(chapter_id)
         cap_dir = MangaDownloadHelper.make_chapter_dir(dest_folder, num)
 
@@ -323,7 +324,7 @@ class ManhwawebSource(HttpClientMixin, BaseSource):
         if not img_urls:
             logger.warning(f"ManhwaWeb: get_chapter_images_sync devolvió vacío para "
                            f"'{chapter_id}', usando fallback scrape+descarga")
-            return self._download_chapter_scrape(content_id, chapter_id, cap_dir)
+            return self._download_chapter_scrape(content_id, chapter_id, cap_dir, progress_cb)
 
         existing = count_images_in_dir(cap_dir)
         if existing >= len(img_urls):
@@ -332,7 +333,7 @@ class ManhwawebSource(HttpClientMixin, BaseSource):
 
         dl_headers = {'User-Agent': self.UA, 'Referer': self.BASE_URL}
         failures = MangaDownloadHelper.download_images(
-            img_urls, cap_dir, dl_headers, self._get_with_retry,
+            img_urls, cap_dir, dl_headers, self._get_with_retry, progress_cb,
         )
         if failures:
             raise Exception(
@@ -342,7 +343,7 @@ class ManhwawebSource(HttpClientMixin, BaseSource):
         return cap_dir
 
     def _download_chapter_scrape(self, content_id: str, chapter_id: str,
-                                  cap_dir: str) -> str:
+                                  cap_dir: str, progress_cb=None) -> str:
         num     = self._chapter_num_from_id(chapter_id)
         web_url = f"{self.BASE_URL}/leer/{content_id}-{num}"
         try:
@@ -377,7 +378,7 @@ class ManhwawebSource(HttpClientMixin, BaseSource):
 
         dl_headers = {'User-Agent': self.UA, 'Referer': self.BASE_URL}
         failures = MangaDownloadHelper.download_images(
-            img_urls, cap_dir, dl_headers, self._get_with_retry,
+            img_urls, cap_dir, dl_headers, self._get_with_retry, progress_cb,
         )
         if failures:
             raise Exception(

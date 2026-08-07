@@ -617,15 +617,18 @@ class DynamicSource(HttpClientMixin, BaseSource):
             return self._extract_attr(soup, vid_sel, vid_attr) or None
         return None
 
-    def download_chapter_sync(self, content_id: str, chapter_id: str, dest_folder: str, chapter_number: str | None = None) -> str:
+    def download_chapter_sync(self, content_id: str, chapter_id: str, dest_folder: str,
+                              chapter_number: str | None = None, progress_cb=None) -> str:
         cfg = self._load_config().get('config', {})
         if cfg.get('content_type') == 'image':
-            return self._download_images(content_id, chapter_id, dest_folder, chapter_number)
+            return self._download_images(content_id, chapter_id, dest_folder,
+                                         chapter_number, progress_cb)
         raise NotImplementedError(
             f"{self.CONFIG_NAME}: download not supported for content_type={cfg.get('content_type')}"
         )
 
-    def _download_images(self, content_id: str, chapter_id: str, dest_folder: str, chapter_number: str | None = None) -> str:
+    def _download_images(self, content_id: str, chapter_id: str, dest_folder: str,
+                         chapter_number: str | None = None, progress_cb=None) -> str:
         import concurrent.futures
 
         img_urls = self.get_chapter_images_sync(content_id, chapter_id)
@@ -671,9 +674,11 @@ class DynamicSource(HttpClientMixin, BaseSource):
         tasks = list(enumerate(img_urls, start=1))
         failures = 0
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
-            for success in pool.map(_download_one, tasks):
+            for i, success in enumerate(pool.imap(_download_one, tasks), start=1):
                 if not success:
                     failures += 1
+                if progress_cb:
+                    progress_cb(i, len(tasks), f'Imagen {i}/{len(tasks)}')
 
         if failures:
             logger.warning(f"{self.CONFIG_NAME}: {failures}/{len(img_urls)} images failed to download")

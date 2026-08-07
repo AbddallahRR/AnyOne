@@ -406,6 +406,35 @@
     }
   }
 
+  // Refresco silencioso de la biblioteca al terminar una descarga.
+  // Reconstruye los cards existentes para que muestren el nº de capítulos
+  // actualizado (el render diferencial no actualiza cards ya creados).
+  let _lastLibraryRefresh = 0;
+  async function refreshLibrary() {
+    if (!_libraryLoaded) return;
+    const now = Date.now();
+    if (now - _lastLibraryRefresh < 1000) return;
+    _lastLibraryRefresh = now;
+    try {
+      const [libData, statusData] = await Promise.all([
+        api.get('/api/library'),
+        api.get('/api/library/status').catch(() => ({})),
+      ]);
+      _libraryItems    = libData.items;
+      _libraryStatuses = statusData;
+      // Eliminar primero los nodos del DOM: sin esto el render diferencial
+      // crearía cards nuevos y los viejos (con .media-card-wrapper) se
+      // quedarían en el contenedor → cards duplicados.
+      for (const wrapper of _renderedCards.values()) wrapper.remove();
+      _renderedCards.clear();
+      applyLibraryView();
+      fetchUpdatesBadge();
+      renderRecentSeries(libData.recent || []);
+    } catch (_) { /* silencioso: la próxima carga lo reintentará */ }
+  }
+
+  window.addEventListener('anyone:downloads-complete', refreshLibrary);
+
   // ── Badge global de novedades ─────────────────────────────────────────
   let _lastUpdatesData = null;
 

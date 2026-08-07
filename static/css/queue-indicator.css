@@ -141,11 +141,33 @@
   border-radius: 2px;
   transition: width 0.4s ease;
 }
+.qi-progress-bar.indeterminate .qi-progress-fill {
+  width: 40%;
+  animation: qi-indeterminate 1.2s ease-in-out infinite;
+}
+@keyframes qi-indeterminate {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
 .qi-progress-text {
   font-size: 10px;
   color: var(--muted, #7a7a8a);
   display: flex;
   justify-content: space-between;
+  gap: 8px;
+}
+.qi-progress-text span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.qi-file-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 2px;
+  border-top: 1px dashed rgba(255,255,255,0.07);
+  margin-top: 2px;
 }
 .qi-error-text {
   font-size: 11px;

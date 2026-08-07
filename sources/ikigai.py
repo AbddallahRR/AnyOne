@@ -417,7 +417,8 @@ class IkigaiSource(HttpClientMixin, BaseSource):
 
         return img_urls
 
-    def download_chapter_sync(self, content_id: str, chapter_id: str, dest_folder: str, chapter_number: str | None = None) -> str:
+    def download_chapter_sync(self, content_id: str, chapter_id: str, dest_folder: str,
+                              chapter_number: str | None = None, progress_cb=None) -> str:
         img_urls = self.get_chapter_images_sync(content_id, chapter_id)
 
         if not img_urls:
@@ -429,7 +430,7 @@ class IkigaiSource(HttpClientMixin, BaseSource):
         cap_url = f"{self.BASE_URL}/capitulo/{chapter_id}/"
         dl_headers = {**self._headers, 'Referer': cap_url}
         failures = MangaDownloadHelper.download_images(
-            img_urls, cap_dir, dl_headers, self._get_with_retry,
+            img_urls, cap_dir, dl_headers, self._get_with_retry, progress_cb,
         )
 
         total = len(img_urls)

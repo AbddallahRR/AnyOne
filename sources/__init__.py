@@ -40,11 +40,16 @@ class BaseSource:
     async def get_chapters(self, content_id: str) -> list[Chapter]:
         return await self._run_in_executor(self.get_chapters_sync, content_id)
 
-    def download_chapter_sync(self, content_id: str, chapter_id: str, dest_folder: str, chapter_number: str | None = None) -> str:
+    def download_chapter_sync(self, content_id: str, chapter_id: str, dest_folder: str,
+                              chapter_number: str | None = None, progress_cb=None) -> str:
         raise NotImplementedError
 
-    async def download_chapter(self, content_id: str, chapter_id: str, dest_folder: str, chapter_number: str | None = None) -> str:
-        return await self._run_in_executor(self.download_chapter_sync, content_id, chapter_id, dest_folder, chapter_number)
+    async def download_chapter(self, content_id: str, chapter_id: str, dest_folder: str,
+                               chapter_number: str | None = None, progress_cb=None) -> str:
+        return await self._run_in_executor(
+            self.download_chapter_sync, content_id, chapter_id,
+            dest_folder, chapter_number, progress_cb,
+        )
 
     @property
     def supports_streaming(self) -> bool:

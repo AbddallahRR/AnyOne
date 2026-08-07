@@ -301,7 +301,8 @@ class NartagSource(HttpClientMixin, BaseSource):
     # -----------------------------------------------------------------------
 
     def download_chapter_sync(self, content_id: str, chapter_id: str,
-                         dest_folder: str, chapter_number: str | None = None) -> str:
+                         dest_folder: str, chapter_number: str | None = None,
+                         progress_cb=None) -> str:
         m       = re.search(r'capitulo-(\d+(?:\.\d+)?)', chapter_id)
         cap_num = m.group(1) if m else (chapter_number or chapter_id)
         cap_dir = MangaDownloadHelper.make_chapter_dir(dest_folder, cap_num)
@@ -322,7 +323,7 @@ class NartagSource(HttpClientMixin, BaseSource):
 
         dl_headers = {'User-Agent': self.UA, 'Referer': reader_url}
         failures = MangaDownloadHelper.download_images(
-            img_urls, cap_dir, dl_headers, self._get_with_retry,
+            img_urls, cap_dir, dl_headers, self._get_with_retry, progress_cb,
         )
         if failures:
             raise Exception(
