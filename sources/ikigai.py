@@ -22,7 +22,7 @@ from .common import HttpClientMixin, MangaDownloadHelper
 logger = logging.getLogger(__name__)
 
 _MAX_PAGES    = 500
-_CATALOG_TTL  = 60 * 60 * 24 * 3   # 3 días  — el catálogo cambia poco
+_CATALOG_TTL  = 60 * 60 * 24 * 7   # 3 días  — el catálogo cambia poco
 _PAGE_TTL     = 60 * 60 * 24 * 7   # 7 días  — páginas individuales, más estables
 _PAGE_WORKERS = 4                   # hilos paralelos para descargar páginas del catálogo
 
@@ -30,8 +30,8 @@ _PAGE_WORKERS = 4                   # hilos paralelos para descargar páginas de
 class IkigaiSource(HttpClientMixin, BaseSource):
     type = 'manga'
     label = 'Ikigai'
-    BASE_URL      = "https://visualikigai.treefy.online/"
-    CATALOGO_BASE = "https://visualikigai.treefy.online/series/"
+    BASE_URL      = "https://visorikigai.gettocaboca.com/"
+    CATALOGO_BASE = "https://visorikigai.gettocaboca.com/series/"
 
     # Lock y timestamp a nivel de clase: compartidos entre todas las instancias/workers
     _refresh_lock     = threading.Lock()
