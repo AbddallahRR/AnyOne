@@ -6,10 +6,12 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import threading
 from collections import OrderedDict
 from urllib.parse import quote as _url_quote
+from urllib.parse import urlsplit
 
 from bs4 import BeautifulSoup
 
@@ -25,15 +27,103 @@ logger = logging.getLogger(__name__)
 
 # Prioridad de servidores (índice menor = mayor prioridad)
 _SERVER_PRIORITY = [
-    'Mediafire', 'Mp4upload', 'Mega',
-    'Streamwish', 'VOE', 'Vidhide', 'Mixdrop', 'Streamtape', 'Doodstream',
+    'Mediafire', 'Mp4upload', 'Mixdrop',
+    'Streamwish', 'Vidhide', 'Mega',
+    'VOE', 'Streamtape', 'Doodstream',
 ]
 
 # Servidores que soportan streaming directo (iframe embebible)
 _STREAM_SERVERS = {'streamwish', 'voe', 'vidhide', 'mixdrop', 'streamtape', 'doodstream'}
 
+# Cabeceras exigidas por el CDN de Mp4upload (sin Referer/Origin responde 403)
+_MP4UPLOAD_REFERER = 'https://www.mp4upload.com/'
+_MP4UPLOAD_ORIGIN  = 'https://www.mp4upload.com'
+
 # Timeouts
 _TIMEOUT_CURL = 1800   # 30 min por intento de descarga
+
+
+def _split_packed_args(expr: str) -> list[str]:
+    """Divide los argumentos de un eval(function(...)('...',a,c,k,0,{})) respetando strings y paréntesis."""
+    parts: list[str] = []
+    depth, cur, in_str = 0, '', None
+    i = 0
+    while i < len(expr):
+        ch = expr[i]
+        if in_str is not None:
+            cur += ch
+            if ch == '\\':
+                i += 2 if i + 1 < len(expr) else 1
+                continue
+            if ch == in_str:
+                in_str = None
+            i += 1
+            continue
+        if ch in "'\"":
+            in_str, cur = ch, cur + ch
+            i += 1
+            continue
+        if ch == '(':
+            depth += 1
+        elif ch == ')':
+            depth -= 1
+        if ch == ',' and depth == 0:
+            parts.append(cur)
+            cur = ''
+        else:
+            cur += ch
+        i += 1
+    if cur.strip():
+        parts.append(cur)
+    return parts
+
+
+def _unpack_packed_js(html: str) -> list[str]:
+    """Desofusca bloques `eval(function(p,a,c,k,e,d){...return p}('...',a,c,k.split('|'),0,{}))`
+    (Dean Edwards packer). Devuelve cada bloque decodificado, no ejecuta nada."""
+    results: list[str] = []
+    pos = 0
+    while True:
+        idx = html.find("return p}('", pos)
+        if idx < 0:
+            break
+        parts = _split_packed_args(html[idx + 10: idx + 30000])
+        if len(parts) >= 4:
+            p = parts[0].strip()
+            if p.startswith("'") and p.endswith("'"):
+                p = p[1:-1].replace("\\'", "'")
+            try:
+                a = int(parts[1].strip())
+                c = int(parts[2].strip())
+            except ValueError:
+                pos = idx + 10
+                continue
+            k = parts[3].strip()
+            if k.startswith("'") and k.endswith("'"):
+                k = k[1:-1].replace("\\'", "'")
+            k_list = k.split('|')
+
+            def _packed_key(i: int) -> str:
+                s = ''
+                while True:
+                    r = i % a
+                    i //= a
+                    s = (chr(r + 29) if r > 35 else '0123456789abcdefghijklmnopqrstuvwxyz'[r]) + s
+                    if i == 0:
+                        break
+                return s
+
+            for i in range(c):
+                key = _packed_key(i)
+                val = k_list[i] if i < len(k_list) else key
+                p = re.sub(
+                    r'(?<![A-Za-z0-9_])' + re.escape(key) + r'(?![A-Za-z0-9_])',
+                    lambda m, v=val: v,
+                    p,
+                )
+            results.append(p)
+        pos = idx + 10
+    return results
 
 
 class JkanimeSource(HttpClientMixin, BaseSource):
@@ -85,9 +175,9 @@ class JkanimeSource(HttpClientMixin, BaseSource):
         ).decode('utf-8')
 
     @staticmethod
-    def _normalize_variant(lang: str | None) -> str:
+    def _normalize_variant(lang: str | int | None) -> str:
         """Normaliza el campo lang a 'SUB' o 'DUB'."""
-        token = (lang or '').lower().replace(' ', '')
+        token = str(lang or '').lower().replace(' ', '')
         if any(k in token for k in ('dub', 'lat', 'esp', 'cast')):
             return 'DUB'
         return 'SUB'
@@ -226,7 +316,11 @@ class JkanimeSource(HttpClientMixin, BaseSource):
         # Tamaño esperado (para verificar integridad)
         expected: int | None = None
         try:
-            head = self.scraper.head(url, headers=self._headers, timeout=HTTP_TIMEOUT)
+            head = self.scraper.head(
+                url,
+                headers={**self._headers, 'Referer': referer, 'Origin': origin},
+                timeout=HTTP_TIMEOUT,
+            )
             if head.status_code == 200:
                 expected = int(head.headers.get('content-length', 0)) or None
         except Exception:
@@ -287,13 +381,22 @@ class JkanimeSource(HttpClientMixin, BaseSource):
         raise Exception("No se encontró enlace de descarga en Mediafire")
 
     def _resolve_mp4upload(self, encoded: str) -> str:
-        """Obtiene la URL directa de Mp4upload via yt-dlp."""
+        """Obtiene la URL directa de Mp4upload via yt-dlp.
+
+        El CDN de Mp4upload exige cabeceras Referer/Origin; sin ellas
+        responde HTTP 403. La URL extraída (token de corta vida) se valida
+        con un GET de rango pequeño usando esas cabeceras, porque el CDN no
+        siempre responde a HEAD.
+        """
         embed_url = self._decode_remote(encoded)
         logger.debug(f"Mp4upload: embed URL {embed_url}")
         try:
             result = subprocess.run(
-                ['yt-dlp', '-g', '--no-warnings', embed_url],
-                capture_output=True, text=True, timeout=30, check=False,
+                ['yt-dlp', '-g', '--no-warnings',
+                 '--referer', _MP4UPLOAD_REFERER,
+                 '--add-header', f'Origin:{_MP4UPLOAD_ORIGIN}',
+                 embed_url],
+                capture_output=True, text=True, timeout=60, check=False,
             )
         except FileNotFoundError:
             raise Exception("yt-dlp no está instalado")
@@ -304,22 +407,56 @@ class JkanimeSource(HttpClientMixin, BaseSource):
         if not url.startswith('http'):
             raise Exception(f"yt-dlp devolvió URL inválida: {url!r}")
 
-        try:
-            head = self.scraper.head(url, headers=self._headers, timeout=HTTP_TIMEOUT)
-            if head.status_code >= 400:
-                raise Exception(f"Mp4upload: URL devolvió HTTP {head.status_code}")
-            ct = head.headers.get('content-type', '')
-            cl = int(head.headers.get('content-length', 0))
-            if 'html' in ct:
-                raise Exception("Mp4upload: URL devolvió HTML en vez de video")
-            if cl and cl < 10240:
-                raise Exception(f"Mp4upload: archivo demasiado pequeño ({cl} bytes)")
-        except Exception as exc:
-            if 'devolvió' in str(exc) or 'demasiado' in str(exc):
-                raise
-            logger.debug(f"Mp4upload: HEAD no pudo validar URL: {exc}")
+        # Si yt-dlp cayó en el extractor genérico y devolvió la página embed,
+        # no es una URL directa de video (archivo muerto o requiere login).
+        if re.search(r'\.html?($|[?#])', url) or '/embed-' in url:
+            raise Exception(f"Mp4upload: yt-dlp devolvió la página embed, no un video: {url}")
 
+        self._validate_mp4upload_url(url)
         return url
+
+    def _validate_mp4upload_url(self, url: str) -> None:
+        """Valida que la URL directa del CDN de Mp4upload sirva video.
+
+        Primero intenta un GET con Range (bytes=0-0) enviando Referer/Origin;
+        si el CDN no responde a ese GET, cae en HEAD con las mismas cabeceras.
+        """
+        headers = {
+            **self._headers,
+            'Referer': _MP4UPLOAD_REFERER,
+            'Origin':  _MP4UPLOAD_ORIGIN,
+        }
+        status, ct, cl = 0, '', 0
+        try:
+            with HttpPool.get_session().get(
+                url, headers={**headers, 'Range': 'bytes=0-0'},
+                stream=True, timeout=HTTP_TIMEOUT,
+            ) as resp:
+                status = resp.status_code
+                ct     = resp.headers.get('content-type', '')
+                cr     = resp.headers.get('content-range', '')
+                if 'bytes' in cr:
+                    total = cr.rsplit('/', 1)[-1]
+                    if total.isdigit():
+                        cl = int(total)
+        except Exception as exc:
+            logger.debug(f"Mp4upload: GET con rango no validó URL ({exc}), probando HEAD")
+
+        if status >= 400 or not ct or 'html' in ct:
+            try:
+                head  = self.scraper.head(url, headers=headers, timeout=HTTP_TIMEOUT)
+                status = head.status_code
+                ct     = head.headers.get('content-type', '')
+                cl     = int(head.headers.get('content-length', 0) or 0)
+            except Exception as exc:
+                logger.debug(f"Mp4upload: HEAD tampoco validó URL: {exc}")
+
+        if status >= 400:
+            raise Exception(f"Mp4upload: URL devolvió HTTP {status}")
+        if 'html' in ct:
+            raise Exception("Mp4upload: URL devolvió HTML en vez de video")
+        if cl and cl < 10240:
+            raise Exception(f"Mp4upload: archivo demasiado pequeño ({cl} bytes)")
 
     def _resolve_generic(self, slug: str) -> str:
         """Intenta obtener una URL directa de un servidor genérico (jkplayers)."""
@@ -342,6 +479,81 @@ class JkanimeSource(HttpClientMixin, BaseSource):
         if m:
             return m.group(1)
         raise Exception(f"No se pudo extraer enlace directo para slug {slug!r}")
+
+    def _resolve_mixdrop(self, encoded: str) -> tuple[str, str]:
+        """Resuelve el MP4 directo de Mixdrop y el referer a usar en la descarga.
+
+        El embed guarda la URL en `MDCore.wurl` dentro de un script ofuscado
+        con el packer; se desofusca y se toma el valor de `wurl`.
+        """
+        embed_url = self._decode_remote(encoded)
+        resp = self._get(embed_url)
+        referer = resp.url
+        decoded = _unpack_packed_js(resp.text)
+        for block in decoded:
+            m = re.search(r'MDCore\.wurl\s*=\s*"(//[^"]+)"', block)
+            if m:
+                return 'https:' + m.group(1), referer
+        m = re.search(r'MDCore\.wurl\s*=\s*"(//[^"]+)"', resp.text)
+        if m:
+            return 'https:' + m.group(1), referer
+        raise Exception("No se pudo extraer la URL directa de Mixdrop")
+
+    def _resolve_wish_hls(self, encoded: str) -> tuple[str, str]:
+        """Extrae la URL HLS (m3u8) de los embeds de la familia "wish" (Streamwish/Vidhide).
+
+        La URL real se obtiene desofuscando el packer; se valida con un GET
+        corto (muchos CDN responden 403 sin cabeceras adecuadas o por ASN).
+        """
+        embed_url = self._decode_remote(encoded)
+        resp = self._get(embed_url)
+        referer = resp.url
+        decoded = _unpack_packed_js(resp.text)
+        haystack = '\n'.join(decoded) + '\n' + resp.text
+        # El packer parte las URLs largas con `.split('...')`; se descartan
+        # esas piezas tomando solo URLs completas (sin comillas internas).
+        m = re.search(r'https://[^"\'\\\s]+\.m3u8[^"\'\\\s]*', haystack)
+        if not m:
+            m = re.search(r'https://[^"\'\\\s]+\.txt[^"\'\\\s]*', haystack)
+        if not m:
+            raise Exception("No se pudo extraer URL HLS del embed")
+        hls_url = m.group(0)
+        check = self.scraper.get(
+            hls_url,
+            headers={**self._headers, 'Referer': referer},
+            timeout=HTTP_TIMEOUT,
+            allow_redirects=True,
+        )
+        if check.status_code >= 400:
+            raise Exception(f"El CDN HLS rechazó la petición (HTTP {check.status_code})")
+        return hls_url, referer
+
+    def _download_hls(self, url: str, filepath: str,
+                      referer: str | None = None) -> str:
+        """Descarga un stream HLS (m3u8) a MP4 usando ffmpeg."""
+        if not shutil.which('ffmpeg'):
+            raise Exception("ffmpeg no está instalado (requerido para HLS)")
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        headers = [f'User-Agent: {self.UA}']
+        if referer:
+            headers.append(f'Referer: {referer}')
+        cmd = [
+            'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error', '-nostdin',
+            '-headers', '\r\n'.join(headers) + '\r\n',
+            '-rw_timeout', '30000000',
+            '-i', url,
+            '-c', 'copy', '-bsf:a', 'aac_adtstoasc',
+            filepath,
+        ]
+        try:
+            subprocess.run(cmd, check=True, timeout=_TIMEOUT_CURL)
+        except subprocess.TimeoutExpired as exc:
+            raise Exception("Timeout descargando HLS") from exc
+        except subprocess.CalledProcessError as exc:
+            raise Exception(f"ffmpeg no pudo descargar el HLS: {exc}") from exc
+        if not os.path.exists(filepath) or os.path.getsize(filepath) < 10240:
+            raise Exception("El archivo HLS descargado no es válido")
+        return filepath
 
     # -----------------------------------------------------------------------
     # API pública (sync — llamada por BaseSource.search vía asyncio.to_thread)
@@ -631,12 +843,35 @@ class JkanimeSource(HttpClientMixin, BaseSource):
                     return self._download_stream(direct, filepath)
 
                 elif name == 'Mp4upload' and remote:
-                    direct = self._resolve_mp4upload(remote)
-                    return self._download_curl(
-                        direct, filepath,
-                        referer='https://www.mp4upload.com/',
-                        origin='https://www.mp4upload.com',
-                    )
+                    # El token del CDN expira rápido: re-resolver con URL fresca
+                    # antes de rendirse (curl también valida magic bytes MP4).
+                    for attempt in range(2):
+                        try:
+                            direct = self._resolve_mp4upload(remote)
+                            return self._download_curl(
+                                direct, filepath,
+                                referer=_MP4UPLOAD_REFERER,
+                                origin=_MP4UPLOAD_ORIGIN,
+                            )
+                        except Exception as exc:
+                            if attempt == 1:
+                                raise
+                            logger.warning(
+                                f"Mp4upload: intento {attempt + 1} falló ({exc}), "
+                                f"reintentando con token fresco"
+                            )
+                            if os.path.exists(filepath):
+                                os.remove(filepath)
+
+                elif name == 'Mixdrop' and remote:
+                    direct, referer = self._resolve_mixdrop(remote)
+                    origin = f"{urlsplit(referer).scheme}://{urlsplit(referer).netloc}"
+                    return self._download_curl(direct, filepath,
+                                               referer=referer, origin=origin)
+
+                elif name in ('Streamwish', 'Vidhide') and remote:
+                    hls_url, referer = self._resolve_wish_hls(remote)
+                    return self._download_hls(hls_url, filepath, referer=referer)
 
                 elif slug:
                     direct = self._resolve_generic(slug)
