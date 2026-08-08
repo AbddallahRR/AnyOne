@@ -92,12 +92,18 @@ async def _warm_all_sources():
                 names.append(name)
 
     if tasks:
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for name, res in zip(names, results):
-            if isinstance(res, Exception):
-                logger.warning(f"No se pudo precargar {name}: {res}")
-            else:
-                logger.info(f"Catálogo de {name} precargado correctamente")
+        sem = asyncio.Semaphore(2)
+
+        async def _warm_one(coro, name):
+            async with sem:
+                try:
+                    await coro
+                except Exception as exc:
+                    logger.warning(f"No se pudo precargar {name}: {exc}")
+                else:
+                    logger.info(f"Catálogo de {name} precargado correctamente")
+
+        await asyncio.gather(*[_warm_one(c, n) for c, n in zip(tasks, names)])
 
 
 @asynccontextmanager

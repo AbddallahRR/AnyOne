@@ -256,7 +256,7 @@ def _get_image_dimensions_from_bytes(data: bytes) -> tuple[int, int] | None:
 def filter_manga_images(
     image_urls: list[str],
     min_dimension: int = 300,
-    max_workers: int = 16,
+    max_workers: int = 4,
 ) -> list[str]:
     """
     Filter manga image URLs by checking actual image dimensions.

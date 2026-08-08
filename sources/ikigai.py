@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 _MAX_PAGES    = 500
 _CATALOG_TTL  = 60 * 60 * 24 * 7   # 3 días  — el catálogo cambia poco
 _PAGE_TTL     = 60 * 60 * 24 * 7   # 7 días  — páginas individuales, más estables
-_PAGE_WORKERS = 4                   # hilos paralelos para descargar páginas del catálogo
+_PAGE_WORKERS = 2                   # hilos paralelos para descargar páginas del catálogo
 
 
 class IkigaiSource(HttpClientMixin, BaseSource):

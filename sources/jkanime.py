@@ -133,7 +133,7 @@ class JkanimeSource(HttpClientMixin, BaseSource):
     BASE_URL = "https://jkanime.net"
     _episode_html_cache: OrderedDict[str, str] = OrderedDict()
     _cache_lock = threading.Lock()
-    _CACHE_MAX = 128
+    _CACHE_MAX = 24
 
     # -----------------------------------------------------------------------
     # Parsing helpers

@@ -26,8 +26,8 @@ class HttpPool:
         if not hasattr(cls._local, 'session') or cls._local.session is None:
             session = requests.Session()
             adapter = HTTPAdapter(
-                pool_connections=20,
-                pool_maxsize=40,
+                pool_connections=8,
+                pool_maxsize=12,
                 max_retries=_RETRY_STRATEGY,
             )
             session.mount('https://', adapter)
@@ -40,8 +40,8 @@ class HttpPool:
         if not hasattr(cls._local, 'scraper') or cls._local.scraper is None:
             scraper = cloudscraper.create_scraper()
             adapter = HTTPAdapter(
-                pool_connections=20,
-                pool_maxsize=40,
+                pool_connections=8,
+                pool_maxsize=12,
                 max_retries=_RETRY_STRATEGY,
             )
             scraper.mount('https://', adapter)
