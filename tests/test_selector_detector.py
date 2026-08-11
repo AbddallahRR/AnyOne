@@ -1,13 +1,75 @@
-import pytest
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup
 
 from core.selector_detector import (
+    _disambiguate,
+    _find_elements_by_text,
+    _find_parent_card,
+    _find_repeating_patterns,
     _make_selector,
     _score_candidate,
-    _find_repeating_patterns,
     detect_search_selectors,
     detect_selector_by_text,
 )
+
+# Figure/grid result layout like MonosChinos: <li> cards wrapping a <figure>
+# with metadata divs (main-img + bottom) and the title in a trailing <p>.
+FIGURE_GRID_HTML = '''
+<html><body>
+<header>
+<nav><ul class="navbar-nav">
+<li class="nav-item"><a class="nav-link" href="../">Inicio</a></li>
+<li class="nav-item"><a class="nav-link" href="../catalogo">Catalogo</a></li>
+</ul></nav>
+</header>
+<ul class="grid-animes directorio">
+  <li>
+    <article>
+      <a href="/hell-mode">
+        <figure>
+          <span class="tipo">TV Anime</span>
+          <span class="estreno">2026</span>
+          <div class="bottom"><div class="figure-title"><p class="gray">En emision</p></div></div>
+          <div class="main-img">
+            <img loading="lazy" class="skeleton-loaded" src="https://cdn.example/4652.webp" alt="Hell Mode: Demo">
+          </div>
+        </figure>
+        <p>Hell Mode: Demo</p>
+      </a>
+    </article>
+  </li>
+  <li>
+    <article>
+      <a href="/naruto">
+        <figure>
+          <span class="tipo">TV Anime</span>
+          <span class="estreno">2002</span>
+          <div class="bottom"><div class="figure-title"><p class="gray">Finalizado</p></div></div>
+          <div class="main-img">
+            <img loading="lazy" class="skeleton-loaded" src="https://cdn.example/2.webp" alt="Naruto">
+          </div>
+        </figure>
+        <p>Naruto</p>
+      </a>
+    </article>
+  </li>
+  <li>
+    <article>
+      <a href="/bleach">
+        <figure>
+          <span class="tipo">TV Anime</span>
+          <span class="estreno">2004</span>
+          <div class="bottom"><div class="figure-title"><p class="gray">Finalizado</p></div></div>
+          <div class="main-img">
+            <img loading="lazy" class="skeleton-loaded" src="https://cdn.example/3.webp" alt="Bleach">
+          </div>
+        </figure>
+        <p>Bleach</p>
+      </a>
+    </article>
+  </li>
+</ul>
+</body></html>
+'''
 
 
 class TestMakeSelector:
@@ -217,3 +279,70 @@ class TestDetectByText:
         cover = result.get('cover_selector')
         assert cover is not None, f'cover_selector missing: {result}'
         assert 'lm4-poster' in cover, f'expected lm4-poster in cover_selector: {cover}'
+
+
+class TestFigureGridCards:
+    """Search result cards that wrap a <figure> with metadata and keep the
+    title in a trailing <p> (e.g. MonosChinos)."""
+
+    def test_find_elements_by_text_prefers_visible_text(self):
+        """The visible title <p> must outrank the <img alt> attribute."""
+        soup = BeautifulSoup(FIGURE_GRID_HTML, 'html.parser')
+        cand = _find_elements_by_text(soup, 'Hell Mode')
+        assert cand
+        elem = cand[0][1]
+        assert elem.name == 'p'
+        assert 'Hell Mode' in elem.get_text(strip=True)
+
+    def test_parent_card_skips_inner_structural_divs(self):
+        """Walking up from inside div.main-img must reach the <li>, not stop
+        at main-img (which shares a tag name with div.bottom inside figure)."""
+        soup = BeautifulSoup(FIGURE_GRID_HTML, 'html.parser')
+        img = soup.find('img', alt='Hell Mode: Demo')
+        card = _find_parent_card(img)
+        assert card.name == 'li'
+        assert card.find('a', href=True) is not None
+
+    def test_detect_search_by_text(self):
+        result = detect_selector_by_text(FIGURE_GRID_HTML, 'Hell Mode', 'search',
+                                         'https://monoschinos.com')
+        assert result.get('result_selector') == 'ul.grid-animes.directorio > li'
+        assert result.get('title_selector') == 'a > p'
+        assert result.get('title_attr') == 'text'
+        assert result.get('url_selector') == 'a'
+        assert result.get('cover_selector') == 'img.skeleton-loaded'
+        assert result.get('cover_attr') == 'src'
+
+    def test_detected_selectors_extract_correctly(self):
+        """End-to-end: applying the detected selectors must yield the right
+        cards and titles, excluding the header nav items."""
+        result = detect_selector_by_text(FIGURE_GRID_HTML, 'Hell Mode', 'search',
+                                         'https://monoschinos.com')
+        soup = BeautifulSoup(FIGURE_GRID_HTML, 'html.parser')
+        cards = soup.select(result['result_selector'])
+        assert len(cards) == 3
+        titles = [c.select_one(result['title_selector']).get_text(strip=True) for c in cards]
+        assert titles == ['Hell Mode: Demo', 'Naruto', 'Bleach']
+        urls = [c.select_one(result['url_selector']).get('href') for c in cards]
+        assert urls == ['/hell-mode', '/naruto', '/bleach']
+
+    def test_detect_search_selectors_figure_grid(self):
+        """Auto-detect should return the grid cards and skip linkless
+        candidates like div.main-img."""
+        suggestions = detect_search_selectors(FIGURE_GRID_HTML, 'https://monoschinos.com')
+        assert suggestions
+        best = suggestions[0]
+        assert best['result_selector'] == 'ul.grid-animes.directorio > li'
+        assert best['title_selector'] == 'a > p'
+        assert best['cover_selector'] == 'img.skeleton-loaded'
+        assert all('main-img' not in s['result_selector'] for s in suggestions)
+
+    def test_disambiguate_ambiguous_title(self):
+        """A bare 'p' matches both the status <p> and the title <p> inside the
+        card; disambiguation must resolve to the trailing title <p>."""
+        soup = BeautifulSoup(FIGURE_GRID_HTML, 'html.parser')
+        card = soup.select_one('ul.grid-animes.directorio > li')
+        title_p = [p for p in card.find_all('p') if p.get_text(strip=True) == 'Hell Mode: Demo'][0]
+        sel = _disambiguate(title_p, card)
+        assert sel == 'a > p'
+        assert len(card.select(sel)) == 1

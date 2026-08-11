@@ -30,6 +30,88 @@ def _make_selector(tag: Tag) -> str:
     return ''.join(parts)
 
 
+def _disambiguate(tag: Tag, scope: Tag) -> str:
+    """Return a CSS selector that matches *tag* inside *scope*.
+
+    Starts from the tag's own selector and, if it matches more than one
+    element within *scope*, prepends ancestor context using the child
+    combinator (``p`` → ``a > p``) until the selector is unambiguous."""
+    sel = _make_selector(tag)
+    if not sel:
+        return ''
+    try:
+        if len(scope.select(sel)) <= 1:
+            return sel
+    except Exception:
+        return sel
+
+    current = sel
+    ancestor = tag.parent
+    while ancestor is not None and ancestor is not scope and \
+            getattr(ancestor, 'name', None) not in ('[document]', 'html'):
+        ancestor_sel = ancestor.name
+        if ancestor.get('id'):
+            cid = ancestor['id'].replace(':', '\\:').replace('.', '\\.').replace('#', '\\#')
+            ancestor_sel += f'#{cid}'
+        for cls in ancestor.get('class', []):
+            if _CSS_CLASS_RE.match(cls):
+                ancestor_sel += f'.{cls}'
+        candidate = f'{ancestor_sel} > {current}'
+        try:
+            matches = scope.select(candidate)
+        except Exception:
+            return sel
+        if len(matches) == 1 and matches[0] is tag:
+            return candidate
+        current = candidate
+        ancestor = ancestor.parent
+    return sel
+
+
+def _qualify_result_selector(soup: BeautifulSoup, card: Tag) -> str:
+    """Return a CSS selector that targets exactly the repeating group of *card*.
+
+    When the card's bare selector (e.g. ``li``) also matches elements outside
+    the result group (nav items, etc.), ancestor context is prepended until the
+    selector no longer over-matches the document."""
+    sel = _make_selector(card)
+    if not sel or not isinstance(card, Tag):
+        return sel
+
+    group = 0
+    parent = card.parent
+    if parent is not None:
+        group = len([s for s in parent.children if isinstance(s, Tag) and s.name == card.name])
+    try:
+        total = len(soup.select(sel))
+    except Exception:
+        return sel
+    if group <= 1 or total <= group:
+        return sel
+
+    current = sel
+    ancestor = card.parent
+    while ancestor is not None and ancestor.name not in ('[document]', 'html', 'body'):
+        ancestor_sel = ancestor.name
+        if ancestor.get('id'):
+            cid = ancestor['id'].replace(':', '\\:').replace('.', '\\.').replace('#', '\\#')
+            ancestor_sel += f'#{cid}'
+        for cls in ancestor.get('class', []):
+            if _CSS_CLASS_RE.match(cls):
+                ancestor_sel += f'.{cls}'
+        candidate = f'{ancestor_sel} > {current}'
+        try:
+            count = len(soup.select(candidate))
+        except Exception:
+            return current
+        if 0 < count <= group:
+            current = candidate
+            if count == group:
+                break
+        ancestor = ancestor.parent
+    return current
+
+
 def _score_candidate(container: Tag, depth: int = 0) -> float:
     score = 0.0
     links = container.find_all('a', href=True)
@@ -105,7 +187,9 @@ def _find_repeating_patterns(soup: BeautifulSoup) -> list[Tag]:
 
 def _find_elements_by_text(soup: BeautifulSoup, text: str) -> list[tuple[float, Tag]]:
     """Find elements containing *text* (case-insensitive, partial), ranked by
-    relevance.  Checks both visible text and common attributes (alt, title)."""
+    relevance.  Prefers elements whose visible text matches; the ``alt`` /
+    ``title`` attributes are only checked as a fallback when the text does not
+    appear as visible content."""
     text_lower = text.lower().strip()
     if not text_lower:
         return []
@@ -118,20 +202,21 @@ def _find_elements_by_text(soup: BeautifulSoup, text: str) -> list[tuple[float, 
             continue
         seen.add(id(parent))
         full = parent.get_text(strip=True)
-        score = 3.0 if full.lower() == text_lower else 2.0
+        score = 3.0 if full.lower() == text_lower else 2.5
         if len(full) > 200:
             score -= 0.5
         candidates.append((score, parent))
 
-    # Check alt / title attributes
-    for attr in ('alt', 'title'):
-        for tag in soup.find_all(attrs={attr: True}):
-            if id(tag) in seen:
-                continue
-            val = tag.get(attr, '')
-            if text_lower in val.lower():
-                seen.add(id(tag))
-                candidates.append((2.8, tag))
+    # Check alt / title attributes — only when the text is not visible
+    if not candidates:
+        for attr in ('alt', 'title'):
+            for tag in soup.find_all(attrs={attr: True}):
+                if id(tag) in seen:
+                    continue
+                val = tag.get(attr, '')
+                if text_lower in val.lower():
+                    seen.add(id(tag))
+                    candidates.append((2.8, tag))
 
     candidates.sort(key=lambda x: -x[0])
     return candidates[:5]
@@ -140,7 +225,9 @@ def _find_elements_by_text(soup: BeautifulSoup, text: str) -> list[tuple[float, 
 def _find_parent_card(element: Tag) -> Tag:
     """Walk up from *element* until we find a container that looks like a
     repeating card / item (has at least 2 same-tag siblings under its
-    parent).  Falls back to the element itself."""
+    parent).  A candidate is only accepted if it contains a link, so inner
+    structural divs that merely share a tag name with a sibling (e.g. two
+    ``<div>`` inside a ``<figure>``) are skipped.  Falls back to the element."""
     current = element.parent
     while current is not None and getattr(current, 'name', None) not in ('[document]', 'html'):
         name = current.name
@@ -153,7 +240,7 @@ def _find_parent_card(element: Tag) -> Tag:
                     continue
                 siblings = [s for s in parent.children
                             if isinstance(s, Tag) and s.name == name]
-                if len(siblings) >= 2:
+                if len(siblings) >= 2 and current.find('a', href=True):
                     return current
                 # list / table containers always group items
                 if name in ('li', 'tr') and parent.name in ('ul', 'ol', 'tbody', 'table'):
@@ -294,8 +381,8 @@ def detect_selector_by_text(html: str, text: str,
             cover_attr = 'data-lazy'
 
         return {
-            'result_selector': _make_selector(card),
-            'title_selector': _make_selector(title_elem),
+            'result_selector': _qualify_result_selector(soup, card),
+            'title_selector': _disambiguate(title_elem, card),
             'title_attr': 'text',
             'url_selector': _make_selector(link) if link else '',
             'url_attr': 'href',
@@ -523,7 +610,11 @@ def detect_search_selectors(html: str, base_url: str) -> list[dict]:
     seen_selectors = set()
 
     for card in _find_repeating_patterns(soup):
-        sel = _make_selector(card)
+        # A search result card must link to the content
+        if not card.find('a', href=True):
+            continue
+
+        sel = _qualify_result_selector(soup, card)
         if not sel or sel in seen_selectors:
             continue
         seen_selectors.add(sel)
@@ -534,11 +625,20 @@ def detect_search_selectors(html: str, base_url: str) -> list[dict]:
         title_sel = ''
         title_attr = 'text'
         if link_el:
-            title_sel = _make_selector(link_el)
-            if not link_el.get_text(strip=True):
-                parent = link_el.find_parent(['div', 'h1', 'h2', 'h3', 'h4', 'span'])
-                if parent:
-                    title_sel = _make_selector(parent)
+            # Prefer a clean text container (p / h1-h4 / span) inside the link,
+            # so cards that wrap a <figure> with metadata don't use the whole
+            # link text as the title. The longest text is usually the title.
+            best = None
+            best_len = -1
+            for candidate in card.find_all(['p', 'h1', 'h2', 'h3', 'h4', 'span']):
+                text = candidate.get_text(strip=True)
+                if text and len(text) > best_len:
+                    best = candidate
+                    best_len = len(text)
+            if best is not None:
+                title_sel = _disambiguate(best, card)
+            if not title_sel:
+                title_sel = _disambiguate(link_el, card)
         elif img_el and img_el.get('alt'):
             title_sel = _make_selector(img_el)
             title_attr = 'alt'
@@ -546,7 +646,7 @@ def detect_search_selectors(html: str, base_url: str) -> list[dict]:
         if not title_sel:
             for candidate in card.find_all(['h1', 'h2', 'h3', 'h4', 'span', 'a']):
                 if candidate.get_text(strip=True):
-                    title_sel = _make_selector(candidate)
+                    title_sel = _disambiguate(candidate, card)
                     break
 
         url_sel = _make_selector(link_el) if link_el else ''
