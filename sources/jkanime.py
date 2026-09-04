@@ -154,6 +154,14 @@ class JkanimeSource(HttpClientMixin, BaseSource):
                 self._episode_html_cache.popitem(last=False)
         return html
 
+    def invalidate_download_cache(self, content_id: str | None = None, chapter_id: str | None = None) -> None:
+        """Invalida la caché de HTML de episodios (toda o una entrada)."""
+        with self._cache_lock:
+            if content_id and chapter_id:
+                self._episode_html_cache.pop(f"{content_id}/{chapter_id}", None)
+            else:
+                self._episode_html_cache.clear()
+
     @staticmethod
     def _get_csrf_token(html: str) -> str:
         patterns = [
@@ -855,6 +863,14 @@ class JkanimeSource(HttpClientMixin, BaseSource):
         if not servers:
             servers = self._parse_servers_from_js(html)
         if not servers:
+            # Descartar el HTML cacheado para que el reintento re-fetchee
+            with self._cache_lock:
+                self._episode_html_cache.pop(f"{content_id}/{chapter_id}", None)
+            title = soup.title.get_text(strip=True)[:60] if soup.title else '?'
+            logger.warning(
+                f"Jkanime: sin servidores en {content_id}/{chapter_id} "
+                f"(html_len={len(html)}, var_servers={'var servers' in html}, title={title!r})"
+            )
             raise Exception("No se encontraron servidores de descarga")
 
         servers.sort(key=lambda s: (

@@ -74,6 +74,9 @@ def _check_series_for_new_chapters(content_ref: str) -> dict:
         if not src:
             return {'content_ref': content_ref, 'new_chapters': [], 'error': f"Fuente '{source_name}' no disponible"}
 
+        if hasattr(src, 'invalidate_download_cache'):
+            src.invalidate_download_cache()
+
         chapters_cache.delete(f'{content_type}:{source_name}:{content_id}')
         search_cache.delete(f'{source_name}:chapters:{content_id}')
         remote_chapters = src.get_chapters_sync(content_id)
