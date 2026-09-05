@@ -41,6 +41,11 @@ def settings_page(request: Request):
     return templates.TemplateResponse(request, 'settings.html', {'bundles': _load_bundles()})
 
 
+@router.get('/schedule', response_class=HTMLResponse)
+def schedule_page(request: Request):
+    return templates.TemplateResponse(request, 'schedule.html', {'bundles': _load_bundles()})
+
+
 @router.get('/serie/{type}/{source}/{id}', response_class=HTMLResponse)
 def serie_detail(request: Request, type: str, source: str, id: str):
     can_stream = False

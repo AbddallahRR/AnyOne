@@ -11,6 +11,12 @@ _VALID_STATUSES = {'watching', 'completed', 'pending', 'none'}
 def set_series_status(content_ref: str, status: str) -> None:
     conn = get_conn()
     with conn:
+        if status != 'watching':
+            conn.execute('DELETE FROM series_schedule WHERE content_ref = ?', (content_ref,))
+            conn.execute(
+                "UPDATE series_status SET new_chapters_found = '' WHERE content_ref = ?",
+                (content_ref,)
+            )
         if status == 'none':
             conn.execute('DELETE FROM series_status WHERE content_ref = ?', (content_ref,))
         else:
@@ -44,7 +50,7 @@ def get_series_to_check(min_interval_seconds: int = 86400) -> list[dict]:
         """
         SELECT content_ref, status
         FROM series_status
-        WHERE status IN ('watching', 'completed')
+        WHERE status = 'watching'
           AND (
             last_checked_at IS NULL
             OR last_checked_at <= datetime('now', ? || ' seconds')

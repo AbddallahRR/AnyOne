@@ -25,8 +25,8 @@ def get_recent_progress(limit: int = 10) -> list[dict]:
     rows = conn.execute(
         'SELECT content_id, chapter, progress '
         'FROM user_progress '
-        'WHERE content_id LIKE ? '
+        "WHERE content_id >= 'local:' AND content_id < 'local;' "
         'ORDER BY updated_at DESC LIMIT ?',
-        ('local:%', limit)
+        (limit,)
     ).fetchall()
     return [{'content_ref': r[0], 'chapter': r[1], 'progress': r[2]} for r in rows]

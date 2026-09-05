@@ -135,6 +135,10 @@ class JkanimeSource(HttpClientMixin, BaseSource):
     _cache_lock = threading.Lock()
     _CACHE_MAX = 24
 
+    def __init__(self):
+        super().__init__()
+        self.scraper = HttpPool.get_scraper()
+
     # -----------------------------------------------------------------------
     # Parsing helpers
     # -----------------------------------------------------------------------

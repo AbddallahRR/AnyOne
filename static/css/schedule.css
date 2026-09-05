@@ -1,0 +1,382 @@
+/* ============================================================
+   Comic Web — schedule.css
+   Estilos de la página de horario de chequeos.
+   ============================================================ */
+
+/* ── Header ── */
+.sched-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.sched-title {
+  font-family: var(--ff-head);
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  color: var(--text);
+  line-height: 1.1;
+}
+.sched-subtitle {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 3px;
+  font-weight: 400;
+}
+.sched-add-btn {
+  white-space: nowrap;
+}
+
+/* ── Grid wrapper ── */
+.sched-grid-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--border);
+  border-radius: var(--card-r);
+  background: var(--surface);
+}
+
+/* ── Table ── */
+.sched-grid {
+  width: 100%;
+  min-width: 700px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.sched-grid th,
+.sched-grid td {
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+  vertical-align: top;
+  text-align: center;
+}
+.sched-grid thead th {
+  background: var(--raised);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-dim);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding: 10px 8px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.sched-grid thead th:first-child {
+  width: 68px;
+  min-width: 68px;
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: var(--raised);
+}
+.sched-time-col {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Time labels (first column) */
+.sched-grid td:first-child {
+  background: var(--raised);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+
+/* Data cells */
+.sched-grid td.sched-cell {
+  background: transparent;
+  min-height: 44px;
+  cursor: pointer;
+  transition: background 0.15s;
+  position: relative;
+}
+.sched-grid td.sched-cell:hover {
+  background: rgba(124, 92, 252, 0.06);
+}
+
+/* ── Chips (series in cells) ── */
+.sched-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(124, 92, 252, 0.15);
+  color: var(--accent-lt);
+  border: 1px solid rgba(124, 92, 252, 0.25);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+.sched-chip:hover {
+  background: rgba(124, 92, 252, 0.25);
+  border-color: rgba(124, 92, 252, 0.4);
+}
+
+.sched-chip-icon {
+  font-size: 9px;
+  flex-shrink: 0;
+}
+
+.sched-chip-cover {
+  width: 22px;
+  height: 30px;
+  object-fit: cover;
+  border-radius: 3px;
+  flex-shrink: 0;
+  margin-left: -4px;
+}
+
+/* ── Empty state ── */
+.sched-empty-msg {
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+  padding: 60px 20px;
+  line-height: 1.6;
+}
+.sched-empty-msg i {
+  font-size: 32px;
+  margin-bottom: 12px;
+  opacity: 0.4;
+}
+
+/* ── Modal overrides ── */
+.sched-modal-box {
+  max-width: 440px;
+}
+
+.sched-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.sched-form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sched-form-row label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.sched-day-select,
+.sched-hour-select {
+  width: 100%;
+}
+
+/* ── Search input with cover ── */
+.sched-search-wrap {
+  position: relative;
+}
+.sched-search-input-row {
+  position: relative;
+}
+.sched-search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: 12px;
+  pointer-events: none;
+  z-index: 1;
+}
+.sched-search-input {
+  width: 100%;
+  padding-left: 34px;
+}
+.sched-search-results {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+  background: var(--raised);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--card-r-xs);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  z-index: 100;
+}
+.sched-search-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.sched-search-item:hover {
+  background: rgba(124, 92, 252, 0.1);
+}
+.sched-search-cover {
+  width: 32px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 4px;
+  flex-shrink: 0;
+  background: var(--surface);
+}
+.sched-search-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.sched-search-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sched-search-type {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: capitalize;
+}
+.sched-search-empty {
+  padding: 16px 12px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Selected series chip */
+.sched-search-selected {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: rgba(124, 92, 252, 0.08);
+  border: 1px solid rgba(124, 92, 252, 0.2);
+  border-radius: var(--card-r-xs);
+}
+.sched-selected-cover {
+  width: 28px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 4px;
+  flex-shrink: 0;
+  background: var(--surface);
+}
+.sched-selected-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.sched-selected-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sched-selected-type {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: capitalize;
+}
+.sched-selected-clear {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: color 0.12s, background 0.12s;
+}
+.sched-selected-clear:hover {
+  color: var(--danger);
+  background: rgba(248, 113, 113, 0.12);
+}
+
+.sched-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+/* ── Context menu ── */
+.sched-ctx-menu {
+  position: fixed;
+  z-index: 10000;
+  background: rgba(10, 10, 15, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--card-r-xs);
+  padding: 4px;
+  min-width: 160px;
+  backdrop-filter: blur(16px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sched-ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--ff-body);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition: background 0.12s, color 0.12s;
+}
+.sched-ctx-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}
+.sched-ctx-danger:hover {
+  background: rgba(248, 113, 113, 0.12);
+  color: var(--danger);
+}
+
+/* ── Responsive ── */
+@media (max-width: 640px) {
+  .sched-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .sched-add-btn {
+    width: 100%;
+    justify-content: center;
+  }
+  .sched-grid {
+    min-width: 600px;
+  }
+}

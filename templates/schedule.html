@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block title %}Horario — Comic Web{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', path=bundles.get('css_schedule', 'css/schedule.css')) }}">
+{% endblock %}
+
+{% block content %}
+<div class="schedule-page">
+
+  <nav class="nav-enter app-nav">
+    <div class="nav-row nav-row--top">
+      <a href="/" class="nav-logo accent-gradient" style="text-decoration:none;">Comic Web</a>
+      <div class="nav-actions">
+        <a href="/settings" class="btn-ghost settings-link" title="Configuración">&#9881;</a>
+      </div>
+    </div>
+    <div class="nav-row nav-row--tabs">
+      <div class="tab-nav">
+        <a href="/" class="tab-btn"><i class="fas fa-layer-group"></i> Biblioteca</a>
+        <button class="tab-btn active"><i class="fas fa-calendar-alt"></i> Horario</button>
+      </div>
+    </div>
+  </nav>
+
+  <div class="page-content">
+
+    <div class="sched-header">
+      <div>
+        <h1 class="sched-title">Horario de Chequeos</h1>
+        <p class="sched-subtitle">Programa cuándo revisar cada serie en busca de actualizaciones</p>
+      </div>
+      <button id="sched-add-btn" class="btn-primary sched-add-btn">
+        <i class="fas fa-plus"></i> <span>Añadir serie</span>
+      </button>
+    </div>
+
+    <div class="sched-grid-wrap">
+      <table class="sched-grid" id="sched-grid">
+        <thead>
+          <tr>
+            <th class="sched-time-col"></th>
+            <th>Lun</th>
+            <th>Mar</th>
+            <th>Mié</th>
+            <th>Jue</th>
+            <th>Vie</th>
+            <th>Sáb</th>
+            <th>Dom</th>
+          </tr>
+        </thead>
+        <tbody id="sched-grid-body"></tbody>
+      </table>
+    </div>
+
+    <p class="sched-empty-msg hidden" id="sched-empty">
+      <i class="fas fa-calendar-plus"></i><br>
+      No hay series programadas. Pulsa <strong>Añadir serie</strong> para comenzar.
+    </p>
+
+  </div>
+</div>
+
+<!-- Add/Edit modal -->
+<div id="sched-modal" class="modal-backdrop hidden">
+  <div class="modal-box sched-modal-box">
+    <div class="modal-header">
+      <h3 id="sched-modal-title">Añadir serie al horario</h3>
+      <button class="modal-close" id="sched-modal-close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="sched-form">
+        <div class="sched-form-row">
+          <label>Serie</label>
+          <div class="sched-search-wrap" id="sched-search-wrap">
+            <div class="sched-search-input-row">
+              <i class="fas fa-search sched-search-icon"></i>
+              <input type="text" id="sched-search-input" class="input-field sched-search-input"
+                     placeholder="Buscar serie en tu biblioteca…" autocomplete="off" />
+            </div>
+            <div class="sched-search-results hidden" id="sched-search-results"></div>
+            <div class="sched-search-selected hidden" id="sched-search-selected">
+              <img class="sched-selected-cover" id="sched-selected-cover" src="" alt="" />
+              <div class="sched-selected-info">
+                <span class="sched-selected-title" id="sched-selected-title"></span>
+                <span class="sched-selected-type" id="sched-selected-type"></span>
+              </div>
+              <button class="sched-selected-clear" id="sched-selected-clear" title="Quitar selección">&times;</button>
+            </div>
+          </div>
+        </div>
+        <div class="sched-form-row">
+          <label>Día</label>
+          <select id="sched-day-select" class="input-field sched-day-select">
+            <option value="0">Lunes</option>
+            <option value="1">Martes</option>
+            <option value="2">Miércoles</option>
+            <option value="3">Jueves</option>
+            <option value="4">Viernes</option>
+            <option value="5">Sábado</option>
+            <option value="6">Domingo</option>
+          </select>
+        </div>
+        <div class="sched-form-row">
+          <label>Hora</label>
+          <select id="sched-hour-select" class="input-field sched-hour-select"></select>
+        </div>
+        <p class="sched-time-hint hidden" id="sched-time-hint"></p>
+        <div class="sched-form-actions">
+          <button id="sched-modal-cancel" class="btn-ghost">Cancelar</button>
+          <button id="sched-modal-save" class="btn-primary">
+            <i class="fas fa-check"></i> Guardar
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Context menu -->
+<div id="sched-ctx-menu" class="sched-ctx-menu hidden">
+  <button class="sched-ctx-item" data-action="edit"><i class="fas fa-pen"></i> Editar</button>
+  <button class="sched-ctx-item sched-ctx-danger" data-action="delete"><i class="fas fa-trash"></i> Eliminar</button>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', path=bundles.get('js_schedule', 'js/schedule.js')) }}"></script>
+{% endblock %}

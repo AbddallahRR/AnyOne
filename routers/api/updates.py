@@ -188,6 +188,10 @@ def _check_all_updates_core() -> dict:
     }
 
 
+def _check_all_updates_core_for_ref(content_ref: str) -> dict:
+    return _check_series_for_new_chapters(content_ref)
+
+
 @api_router.post('/library/check-all-updates')
 async def api_check_all_updates():
     return await asyncio.to_thread(_check_all_updates_core)

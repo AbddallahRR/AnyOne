@@ -12,7 +12,7 @@ class HttpClientMixin:
     UA = "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0"
 
     def __init__(self):
-        self.scraper = HttpPool.get_scraper()
+        self.scraper = HttpPool.get_session()
 
     @property
     def _headers(self) -> dict:

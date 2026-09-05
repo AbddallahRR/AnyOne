@@ -16,7 +16,7 @@ class BaseSource:
     type: str = ''
     label: str = ''
 
-    _executor = ThreadPoolExecutor(max_workers=12)
+    _executor = ThreadPoolExecutor(max_workers=6)
 
     async def _run_in_executor(self, func, *args, **kwargs):
         loop = asyncio.get_running_loop()

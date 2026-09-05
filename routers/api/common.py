@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 _series_index: dict[str, dict[str, Path]] = {}
 _series_index_lock = threading.Lock()
-_build_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="series-idx")
+_build_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="series-idx")
 
 
 def _read_series_info(cand_dir: Path) -> tuple[str | None, Path | None]:

@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -13,7 +14,8 @@ from core.settings import settings
 
 logger = logging.getLogger(__name__)
 
-_scan_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="scan")
+_scan_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="scan")
+_img_filter_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="imgfilter")
 
 
 def normalize_title(raw_title):
@@ -48,23 +50,31 @@ def _invalidate_scan_cache() -> None:
 def _scan_series_dir(serie_dir: Path, content_type: str) -> dict | None:
     """Escanea un directorio de serie y devuelve sus metadatos, o None si no es válido."""
     if content_type == 'anime':
-        mp4_files = list(serie_dir.glob("*.mp4"))
+        try:
+            entries = os.listdir(serie_dir)
+        except OSError:
+            return None
+        mp4_files = [e for e in entries if e.endswith('.mp4')]
         if not mp4_files:
             return None
         chapters = []
         for f in mp4_files:
-            match = re.search(r'^(\d+)\.mp4$', f.name)
+            match = re.search(r'^(\d+)\.mp4$', f)
             if match:
                 chapters.append(int(match.group(1)))
         first_chapter = min(chapters) if chapters else 1
         last_chapter = max(chapters) if chapters else 0
     else:
-        cap_dirs = [d for d in serie_dir.iterdir() if d.is_dir() and d.name.startswith('cap_')]
+        try:
+            entries = os.listdir(serie_dir)
+        except OSError:
+            return None
+        cap_dirs = [e for e in entries if os.path.isdir(serie_dir / e) and e.startswith('cap_')]
         if not cap_dirs:
             return None
         chapters = []
         for d in cap_dirs:
-            match = re.search(r'cap_(\d[\d._]*)', d.name)
+            match = re.search(r'cap_(\d[\d._]*)', d)
             if match:
                 chapters.append(normalize_chapter_number(match.group(1)))
         if chapters:
@@ -127,10 +137,15 @@ def scan_downloaded_series():
         base = Path(base_path)
         if not base.exists():
             continue
-        for serie_dir in base.iterdir():
-            if not serie_dir.is_dir():
+        try:
+            entries = os.listdir(base)
+        except OSError:
+            continue
+        for name in entries:
+            child = base / name
+            if not child.is_dir():
                 continue
-            futures.append(_scan_executor.submit(_scan_series_dir, serie_dir, content_type))
+            futures.append(_scan_executor.submit(_scan_series_dir, child, content_type))
 
     for future in as_completed(futures):
         try:
@@ -178,14 +193,14 @@ def scan_downloaded_series():
 
 
 def count_images_in_dir(cap_dir: str) -> int:
-    from pathlib import Path
     exts = {'.jpg', '.jpeg', '.png', '.webp'}
     try:
         return sum(
-            1 for f in Path(cap_dir).iterdir()
-            if f.is_file() and f.suffix.lower() in exts
+            1 for f in os.listdir(cap_dir)
+            if os.path.isfile(os.path.join(cap_dir, f))
+            and os.path.splitext(f)[1].lower() in exts
         )
-    except FileNotFoundError:
+    except (FileNotFoundError, OSError):
         return 0
 
 
@@ -256,15 +271,12 @@ def _get_image_dimensions_from_bytes(data: bytes) -> tuple[int, int] | None:
 def filter_manga_images(
     image_urls: list[str],
     min_dimension: int = 300,
-    max_workers: int = 4,
 ) -> list[str]:
     """
     Filter manga image URLs by checking actual image dimensions.
     Streams only the first bytes of each image to read headers.
     Returns only URLs where both width AND height >= min_dimension.
     """
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
     from core.http_pool import HttpPool
     from core.throttle import rate_limiter
 
@@ -276,7 +288,7 @@ def filter_manga_images(
     def _check_one(url: str) -> str | None:
         try:
             rate_limiter.wait(url)
-            sc = HttpPool.get_scraper()
+            sc = HttpPool.get_session()
             resp = sc.get(
                 url,
                 headers={'Range': f'bytes=0-{_HEADER_BYTES - 1}'},
@@ -304,16 +316,15 @@ def filter_manga_images(
             return None  # on error → keep the image
 
     filtered: list[str] = []
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {pool.submit(_check_one, url): url for url in image_urls}
-        for future in as_completed(futures):
-            original_url = futures[future]
-            try:
-                result = future.result()
-                if result is not None:
-                    filtered.append(result)
-            except Exception:
-                filtered.append(original_url)  # keep on error
+    futures = {_img_filter_executor.submit(_check_one, url): url for url in image_urls}
+    for future in as_completed(futures):
+        original_url = futures[future]
+        try:
+            result = future.result()
+            if result is not None:
+                filtered.append(result)
+        except Exception:
+            filtered.append(original_url)  # keep on error
 
     # Maintain original order
     url_set = set(filtered)

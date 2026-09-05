@@ -16,7 +16,7 @@ from core.database import cleanup_download_queue, init_db
 from core.download_worker import start_workers, stop_workers
 from core.settings import settings
 from core.sources import SOURCES, sync_source_settings
-from routers.api import _check_all_updates_core, api_router
+from routers.api import _check_all_updates_core_for_ref, api_router
 from routers.pages import router as pages_router
 
 logging.basicConfig(
@@ -28,16 +28,8 @@ logger = logging.getLogger(__name__)
 
 def _start_update_scheduler():
     import datetime
-    TARGET_HOUR = 10
-    TARGET_MINUTE = 0
     INITIAL_DELAY = 60
-
-    def _seconds_until_target():
-        now = datetime.datetime.now()
-        target = now.replace(hour=TARGET_HOUR, minute=TARGET_MINUTE, second=0, microsecond=0)
-        if target <= now:
-            target += datetime.timedelta(days=1)
-        return (target - now).total_seconds()
+    CHECK_INTERVAL = 300  # 5 minutes
 
     def _run():
         import time
@@ -46,26 +38,34 @@ def _start_update_scheduler():
         time.sleep(INITIAL_DELAY)
         last_cache_evict = 0.0
         while True:
-            sleep_seconds = _seconds_until_target()
-            logger.info(
-                f"[Scheduler] Próxima comprobación en {int(sleep_seconds // 3600)}h "
-                f"{int((sleep_seconds % 3600) // 60)}m (a las {TARGET_HOUR:02d}:{TARGET_MINUTE:02d})"
-            )
-            time.sleep(sleep_seconds)
+            now = datetime.datetime.now()
 
+            # Scheduled checks: every 5 minutes, check if any series are due
             try:
-                from core.database import clear_all_series_updates
-                clear_all_series_updates()
-                data = _check_all_updates_core()
-                checked = data.get('checked', 0)
-                with_updates = data.get('with_updates', 0)
-                logger.info(
-                    f"[Scheduler] Comprobación diaria: {checked} series revisadas, "
-                    f"{with_updates} con episodios nuevos"
-                )
+                from core.db.schedule import get_schedules_for_day
+                scheduled = get_schedules_for_day(now.weekday())
+                due = [s for s in scheduled if s['check_hour'] == now.hour]
+                if due:
+                    logger.info(
+                        f"[Scheduler] {len(due)} serie(s) programadas para "
+                        f"{now.strftime('%A %H:%M')}"
+                    )
+                    for s in due:
+                        try:
+                            result = _check_all_updates_core_for_ref(s['content_ref'])
+                            if result.get('new_chapters'):
+                                logger.info(
+                                    f"[Scheduler] {s['content_ref']}: "
+                                    f"{len(result['new_chapters'])} cap(s) nuevos"
+                                )
+                        except Exception as exc:
+                            logger.exception(
+                                f"[Scheduler] Error chequeando {s['content_ref']}: {exc}"
+                            )
             except Exception as exc:
-                logger.exception(f"[Scheduler] Error en comprobación diaria: {exc}")
+                logger.exception(f"[Scheduler] Error en chequeo programado: {exc}")
 
+            # Cache eviction
             if time.time() - last_cache_evict >= 24 * 60 * 60:
                 try:
                     removed = search_cache.evict_expired()
@@ -76,6 +76,11 @@ def _start_update_scheduler():
                 except Exception as exc:
                     logger.warning(f"[Scheduler] Error limpiando caché: {exc}")
                 last_cache_evict = time.time()
+
+            logger.info(
+                f"[Scheduler] Próxima comprobación programada en {CHECK_INTERVAL // 60} min"
+            )
+            time.sleep(CHECK_INTERVAL)
 
     t = threading.Thread(target=_run, daemon=True, name="update-scheduler")
     t.start()

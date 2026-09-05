@@ -31,6 +31,7 @@ CSS_BUNDLES = {
     "serie":    ["serie.css"],
     "reader":   ["reader.css"],
     "settings": ["settings.css"],
+    "schedule": ["schedule.css"],
 }
 
 # ── JS bundles ────────────────────────────────────────────────────────────
@@ -39,6 +40,7 @@ JS_BUNDLES = {
     "serie":    ["toast.js", "confirm.js", "queue-indicator.js", "scraper-health.js", "serie.js"],
     "reader":   ["reader.js"],
     "settings": ["toast.js", "confirm.js", "settings.js"],
+    "schedule": ["toast.js", "confirm.js", "queue-indicator.js", "scraper-health.js", "schedule.js"],
 }
 
 try:

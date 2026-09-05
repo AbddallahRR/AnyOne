@@ -1000,15 +1000,15 @@
         try {
           await api.post('/api/library/status', { content_ref: ref, status: opt.value });
           _libraryStatuses[ref] = opt.value;
+          if (opt.value === 'watching') {
+            openWatchingPopup(e, ref);
+            return;
+          }
           showNotification(
             opt.value === 'none' ? 'Etiqueta eliminada' : `Marcado como ${opt.label}`,
             'success', 2000
           );
-          const id = ref.replace('local:', '');
-          const oldNode = _renderedCards.get(id);
-          if (oldNode) oldNode.remove();
-          _renderedCards.delete(id);
-          applyLibraryView();
+          _rebuildCard(ref);
         } catch (err) {
           showNotification(`Error: ${err.message}`, 'error');
         }
@@ -1059,6 +1059,132 @@
     setTimeout(() => popup.remove(), 150);
     document.removeEventListener('click',   _popupCloseHandler);
     document.removeEventListener('keydown', _escCloseHandler);
+  }
+
+  function _rebuildCard(ref) {
+    const id = ref.replace('local:', '');
+    const oldNode = _renderedCards.get(id);
+    if (oldNode) oldNode.remove();
+    _renderedCards.delete(id);
+    applyLibraryView();
+  }
+
+  // ── Popup: elegir día/hora de chequeo al marcar Mirando ───────────────
+  const WATCH_DAYS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+
+  function openWatchingPopup(clickEvent, ref) {
+    closeStatusPopup();
+    _rebuildCard(ref);
+    const item = _libraryItems.find(i => `local:${i.id}` === ref) || {};
+
+    const popup = document.createElement('div');
+    popup.id = 'status-popup';
+    Object.assign(popup.style, {
+      position:       'fixed',
+      zIndex:         '10002',
+      background:     'rgba(10,10,15,0.97)',
+      border:         '1px solid rgba(255,255,255,0.12)',
+      borderRadius:   '12px',
+      padding:        '12px',
+      display:        'flex',
+      flexDirection:  'column',
+      gap:            '10px',
+      backdropFilter: 'blur(16px)',
+      boxShadow:      '0 8px 32px rgba(0,0,0,0.5)',
+      width:          '250px',
+      opacity:        '0',
+      transform:      'scale(0.95) translateY(-4px)',
+      transition:     'opacity 0.15s ease, transform 0.15s ease',
+    });
+
+    const label = document.createElement('div');
+    label.style.cssText = 'font-size:12px; color:var(--muted); line-height:1.4;';
+    const strong = document.createElement('span');
+    strong.style.color = 'var(--accent)';
+    strong.style.fontWeight = '600';
+    strong.textContent = 'Mirando';
+    label.append(strong, ` — ¿qué día se chequea ${item.title || 'esta serie'}?`);
+
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex; gap:8px;';
+    const daySel = document.createElement('select');
+    const hourSel = document.createElement('select');
+    ['-- Día --'].concat(WATCH_DAYS).forEach((d, i) => {
+      const opt = document.createElement('option');
+      opt.value = i - 1;
+      opt.textContent = d;
+      daySel.appendChild(opt);
+    });
+    for (let h = 6; h <= 23; h++) {
+      const opt = document.createElement('option');
+      opt.value = h;
+      opt.textContent = `${String(h).padStart(2, '0')}:00`;
+      hourSel.appendChild(opt);
+    }
+    daySel.style.flex = '1';
+    hourSel.style.flex = '1';
+    daySel.className = 'input-field';
+    hourSel.className = 'input-field';
+    row.append(daySel, hourSel);
+
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex; justify-content:flex-end; gap:8px;';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn-ghost';
+    cancelBtn.textContent = 'Cancelar';
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'btn-primary';
+    saveBtn.textContent = 'Guardar';
+    actions.append(cancelBtn, saveBtn);
+
+    cancelBtn.addEventListener('click', closeStatusPopup);
+
+    saveBtn.addEventListener('click', async () => {
+      const day = parseInt(daySel.value, 10);
+      const hour = parseInt(hourSel.value, 10);
+      if (isNaN(day) || isNaN(hour)) {
+        showNotification('Elige un día y una hora', 'info');
+        return;
+      }
+      try {
+        await api.post('/api/schedule', {
+          content_ref: ref, day_of_week: day, check_hour: hour,
+        });
+        closeStatusPopup();
+        showNotification(`${WATCH_DAYS[day]} ${String(hour).padStart(2, '0')}:00 — se avisará de capítulos nuevos`, 'success', 3000);
+        applyLibraryView();
+      } catch (err) {
+        showNotification(`Error al guardar horario: ${err.message}`, 'error');
+      }
+    });
+
+    popup.append(label, row, actions);
+    document.body.appendChild(popup);
+    _statusPopup = popup;
+
+    const pw   = 250;
+    const ph   = 170;
+    let top    = (clickEvent.clientY || 0) + 8;
+    let left   = clickEvent.clientX || 0;
+    left = Math.min(left, window.innerWidth  - pw - 8);
+    top  = Math.min(top,  window.innerHeight - ph - 8);
+    if (left < 8) left = 8;
+    if (top  < 8) top  = 8;
+    popup.style.top  = `${top}px`;
+    popup.style.left = `${left}px`;
+
+    _popupCloseHandler = evt => {
+      if (!popup.contains(evt.target)) closeStatusPopup();
+    };
+    setTimeout(() => {
+      document.addEventListener('click',   _popupCloseHandler);
+      document.addEventListener('keydown', _escCloseHandler);
+    }, 0);
+
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      popup.style.opacity   = '1';
+      popup.style.transform = 'scale(1) translateY(0)';
+    }));
   }
 
   // ── Poblar selectores de fuentes dinámicamente ─────────────────────────

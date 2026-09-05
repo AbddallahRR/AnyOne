@@ -10,7 +10,7 @@ from core.settings import settings
 logger = logging.getLogger(__name__)
 
 _local = threading.local()
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 
 def execute_with_retry(sql: str, params: tuple = ()) -> sqlite3.Cursor:
@@ -206,11 +206,9 @@ def _run_migrations(conn: sqlite3.Connection, current: int) -> None:
             conn.execute(
                 "ALTER TABLE user_progress ADD COLUMN updated_at TIMESTAMP"
             )
-
-    # Fix filas existentes con updated_at NULL (migracion 10 incompleta)
-    conn.execute(
-        "UPDATE user_progress SET updated_at = datetime('now') WHERE updated_at IS NULL"
-    )
+        conn.execute(
+            "UPDATE user_progress SET updated_at = datetime('now') WHERE updated_at IS NULL"
+        )
 
     if current < 11:
         logger.info("Migracion 11: indice compuesto en user_progress para get_recent_progress")
@@ -223,6 +221,20 @@ def _run_migrations(conn: sqlite3.Connection, current: int) -> None:
         logger.info("Migracion 12: eliminar fuentes obsoletas nartag y manhwaweb")
         conn.execute("DELETE FROM scraper_configs WHERE name IN ('nartag', 'manhwaweb')")
         conn.execute("DELETE FROM source_settings WHERE name IN ('nartag', 'manhwaweb')")
+
+    if current < 13:
+        logger.info("Migracion 13: tabla series_schedule para horario de chequeos")
+        conn.executescript('''
+            CREATE TABLE IF NOT EXISTS series_schedule (
+                content_ref TEXT PRIMARY KEY,
+                day_of_week INTEGER NOT NULL,
+                check_hour  INTEGER NOT NULL,
+                mode        TEXT NOT NULL DEFAULT 'auto',
+                updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_schedule_day_hour
+                ON series_schedule(day_of_week, check_hour);
+        ''')
 
 
 def init_db() -> None:
