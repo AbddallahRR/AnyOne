@@ -175,14 +175,4 @@
 
 {% block extra_scripts %}
 <script src="{{ url_for('static', path=bundles.get('js_index', 'js/app.js')) }}"></script>
-<script>
-  document.getElementById('modal').addEventListener('click', e => {
-    if (e.target === e.currentTarget) closeModal();
-  });
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') closeModal();
-  });
-
-
-</script>
 {% endblock %}

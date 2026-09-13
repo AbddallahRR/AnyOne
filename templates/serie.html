@@ -131,24 +131,4 @@
   window.serieData = { type: "{{ type }}", source: "{{ source }}", id: "{{ id }}", canStream: "{{ 'true' if can_stream else 'false' }}" };
 </script>
 <script src="{{ url_for('static', path=bundles.get('js_serie', 'js/serie.js')) }}"></script>
-<script>
-  // ── Breadcrumb sync ──────────────────────────────────────────────────
-  const titleEl = document.getElementById('serie-title');
-  const breadEl = document.getElementById('breadcrumb-title');
-  new MutationObserver(() => {
-    const t = titleEl.textContent;
-    if (t && t !== 'Cargando…') breadEl.textContent = t;
-  }).observe(titleEl, { childList: true, subtree: true, characterData: true });
-
-  // ── Cover reveal on load ─────────────────────────────────────────────
-  document.getElementById('serie-cover').addEventListener('load', function() {
-    this.classList.add('loaded');
-  });
-
-  // ── Synopsis expand on click ─────────────────────────────────────────
-  document.getElementById('serie-synopsis').addEventListener('click', function() {
-    this.classList.toggle('expanded');
-  });
-
-</script>
 {% endblock %}

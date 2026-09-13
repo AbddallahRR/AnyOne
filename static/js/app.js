@@ -1227,6 +1227,14 @@
   animeSearchInput?.addEventListener('keypress', e => { if (e.key === 'Enter') search(false); });
   mangaSearchInput?.addEventListener('keypress', e => { if (e.key === 'Enter') search(false); });
 
+  // ── Modal handlers (moved from index.html inline) ──────────────────────
+  document.getElementById('modal')?.addEventListener('click', e => {
+    if (e.target === e.currentTarget) closeModal();
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeModal();
+  });
+
   // ── Inicializar en Biblioteca por defecto ─────────────────────────────
   setActiveTab('library');
   populateSourceDropdowns();
