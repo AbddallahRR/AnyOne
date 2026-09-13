@@ -134,6 +134,10 @@ class JkanimeSource(HttpClientMixin, BaseSource):
     _episode_html_cache: OrderedDict[str, str] = OrderedDict()
     _cache_lock = threading.Lock()
     _CACHE_MAX = 24
+    _serie_page_cache: OrderedDict[str, tuple[float, str]] = OrderedDict()
+    _serie_page_lock = threading.Lock()
+    _SERIE_PAGE_TTL = 120.0
+    _SERIE_PAGE_MAX = 32
 
     def __init__(self):
         super().__init__()
@@ -165,6 +169,34 @@ class JkanimeSource(HttpClientMixin, BaseSource):
                 self._episode_html_cache.pop(f"{content_id}/{chapter_id}", None)
             else:
                 self._episode_html_cache.clear()
+
+    def invalidate_serie_page_cache(self, content_id: str | None = None) -> None:
+        """Invalida la caché corta de la página principal (toda o una entrada)."""
+        with self._serie_page_lock:
+            if content_id:
+                self._serie_page_cache.pop(content_id, None)
+            else:
+                self._serie_page_cache.clear()
+
+    def _fetch_serie_page(self, content_id: str) -> str:
+        """HTML de la página principal del anime, cacheado en memoria (TTL corto).
+
+        La página da el serie_id y el token CSRF; la piden por separado
+        get_details y get_chapters en la misma carga, así que se evita el
+        segundo fetch (y el rate limit) cacheándola unos segundos.
+        """
+        now = time.time()
+        with self._serie_page_lock:
+            cached = self._serie_page_cache.get(content_id)
+            if cached is not None and now - cached[0] < self._SERIE_PAGE_TTL:
+                self._serie_page_cache.move_to_end(content_id)
+                return cached[1]
+        html = self._get(f"{self.BASE_URL}/{content_id}/").text
+        with self._serie_page_lock:
+            self._serie_page_cache[content_id] = (now, html)
+            while len(self._serie_page_cache) > self._SERIE_PAGE_MAX:
+                self._serie_page_cache.popitem(last=False)
+        return html
 
     @staticmethod
     def _get_csrf_token(html: str) -> str:
@@ -696,7 +728,7 @@ class JkanimeSource(HttpClientMixin, BaseSource):
         """
         cover_fallback = f"https://cdn.jkdesa.com/assets/images/animes/image/{content_id}.jpg"
         try:
-            html = self._get(f"{self.BASE_URL}/{content_id}/").text
+            html = self._fetch_serie_page(content_id)
         except Exception as exc:
             logger.exception(f"Jkanime get_details error para '{content_id}': {exc}")
             return SeriesDetails(title=content_id, cover=cover_fallback)
@@ -767,12 +799,11 @@ class JkanimeSource(HttpClientMixin, BaseSource):
 
         main_url = f"{self.BASE_URL}/{content_id}/"
         try:
-            resp = self._get(main_url)
+            html = self._fetch_serie_page(content_id)
         except Exception as exc:
             logger.exception(f"Jkanime get_chapters error para '{content_id}': {exc}")
             return []
 
-        html = resp.text
         soup = BeautifulSoup(html, 'html.parser')
 
         # Obtener serie_id
@@ -798,27 +829,15 @@ class JkanimeSource(HttpClientMixin, BaseSource):
             logger.warning("Jkanime: no se pudo obtener token CSRF, continuando sin él")
         post_data = {'_token': token} if token else {}
 
-        # Intentar primero con GET (igual que el JS de referencia),
-        # luego caer en POST si falla o no devuelve datos
-        ajax_url  = f"{self.BASE_URL}/ajax/episodes/{serie_id}/1"
-        data      = None
-
+        # El endpoint AJAX solo acepta POST (GET responde 405), así que
+        # se va directamente al POST con el token CSRF de la página.
+        ajax_url = f"{self.BASE_URL}/ajax/episodes/{serie_id}/1"
         try:
-            get_resp = self._get(ajax_url, referer=main_url)
-            data     = get_resp.json()
-            if not data.get('total') and not data.get('data'):
-                data = None
+            ajax_resp = self._post(ajax_url, data=post_data, referer=main_url)
+            data      = ajax_resp.json()
         except Exception as exc:
-            logger.debug(f'Jkanime: GET AJAX falló para {content_id}: {exc}, usando POST')
-            data = None
-
-        if data is None:
-            try:
-                ajax_resp = self._post(ajax_url, data=post_data, referer=main_url)
-                data      = ajax_resp.json()
-            except Exception as exc:
-                logger.exception(f"Jkanime: error en AJAX para '{content_id}': {exc}")
-                return []
+            logger.exception(f"Jkanime: error en AJAX para '{content_id}': {exc}")
+            return []
 
         total = data.get('total', 0)
         if total > 0:

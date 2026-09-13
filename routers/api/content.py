@@ -157,4 +157,9 @@ def api_clear_content_cache(content_type: str, source: str, content_id: str):
     details_cache.delete(cache_key)
     chapters_cache.delete(cache_key)
     search_cache.delete(f'{source}:chapters:{content_id}')
+    if source == 'jkanime':
+        src = get_source(content_type, source)
+        invalidate = getattr(src, 'invalidate_serie_page_cache', None)
+        if invalidate:
+            invalidate(content_id)
     return {'cleared': True}
