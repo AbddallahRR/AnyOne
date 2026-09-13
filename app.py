@@ -37,14 +37,21 @@ def _start_update_scheduler():
         from core.disk_cache import search_cache
         time.sleep(INITIAL_DELAY)
         last_cache_evict = 0.0
+        checked_today: set = set()
         while True:
             now = datetime.datetime.now()
+            weekday = now.weekday()
+            checked_today = {(w, r) for (w, r) in checked_today if w == weekday}
 
-            # Scheduled checks: every 5 minutes, check if any series are due
+            # Scheduled checks: every 5 minutes, check series whose hour is due
             try:
                 from core.db.schedule import get_schedules_for_day
-                scheduled = get_schedules_for_day(now.weekday())
-                due = [s for s in scheduled if s['check_hour'] == now.hour]
+                scheduled = get_schedules_for_day(weekday)
+                due = [
+                    s for s in scheduled
+                    if s['check_hour'] <= now.hour
+                    and (weekday, s['content_ref']) not in checked_today
+                ]
                 if due:
                     logger.info(
                         f"[Scheduler] {len(due)} serie(s) programadas para "
@@ -53,6 +60,7 @@ def _start_update_scheduler():
                     for s in due:
                         try:
                             result = _check_all_updates_core_for_ref(s['content_ref'])
+                            checked_today.add((weekday, s['content_ref']))
                             if result.get('new_chapters'):
                                 logger.info(
                                     f"[Scheduler] {s['content_ref']}: "
