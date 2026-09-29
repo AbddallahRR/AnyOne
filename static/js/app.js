@@ -458,8 +458,8 @@
           position: 'absolute',
           top: '-5px',
           right: '-6px',
-          background: 'var(--accent2, #f59e0b)',
-          color: '#000',
+          background: 'var(--accent)',
+          color: '#fff',
           fontSize: '9px',
           fontWeight: '700',
           borderRadius: '999px',
@@ -488,8 +488,8 @@
           position: 'absolute',
           top: '-3px',
           right: '-3px',
-          background: 'var(--accent2, #f59e0b)',
-          color: '#000',
+          background: 'var(--accent)',
+          color: '#fff',
           fontSize: '8px',
           fontWeight: '700',
           borderRadius: '999px',
@@ -556,11 +556,28 @@
         </div>
         <div class="updates-popup-body">${bodyContent}</div>
         <div class="updates-popup-footer">
-          ${total > 0 ? '<button class="updates-popup-clear-all"><i class="fas fa-check-double"></i> Marcar todo leído</button>' : ''}
-          <button class="updates-popup-check"><i class="fas fa-sync-alt"></i> Buscar actualizaciones</button>
+          ${total > 0 ? '<button class="btn-secondary updates-popup-clear-all"><i class="fas fa-check"></i> Marcar todo leído</button>' : ''}
+          <button class="btn-primary updates-popup-check"><i class="fas fa-sync-alt"></i> Buscar actualizaciones</button>
         </div>
       </div>`;
     document.body.appendChild(popup);
+
+    // Anclar el panel a la izquierda de la campana (no centrado). En pantallas
+    // estrechas no cabe a su izquierda, así que cae debajo de la campana.
+    const bell = document.getElementById('nav-bell');
+    if (bell) {
+      const r = bell.getBoundingClientRect();
+      const c = popup.querySelector('.updates-popup-content');
+      const side = r.left - c.offsetWidth - 8;
+      if (side >= 8) {
+        c.style.left = `${side}px`;
+        c.style.top = `${r.top}px`;
+      } else {
+        c.style.left = '8px';
+        c.style.top = `${r.bottom + 6}px`;
+      }
+      c.style.maxHeight = `${Math.max(120, window.innerHeight - parseFloat(c.style.top) - 8)}px`;
+    }
 
     popup.addEventListener('click', (e) => {
       if (e.target === popup) {
@@ -624,8 +641,8 @@
             const footer = popup.querySelector('.updates-popup-footer');
             const checkBtn = popup.querySelector('.updates-popup-check');
             const clearBtn = document.createElement('button');
-            clearBtn.className = 'updates-popup-clear-all';
-            clearBtn.innerHTML = '<i class="fas fa-check-double"></i> Marcar todo leído';
+            clearBtn.className = 'btn-secondary updates-popup-clear-all';
+            clearBtn.innerHTML = '<i class="fas fa-check"></i> Marcar todo leído';
             footer.insertBefore(clearBtn, checkBtn);
             clearBtn.addEventListener('click', async () => {
               const allRefs = newSeries.map(s => s.content_ref);

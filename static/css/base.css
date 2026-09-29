@@ -632,75 +632,88 @@ select.input-field {
   position: fixed;
   inset: 0;
   z-index: 10002;
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  padding-top: 16px;
 }
 #updates-popup.updates-popup-visible .updates-popup-content {
-  transform: translateY(0);
+  transform: translateY(0) scale(1);
   opacity: 1;
 }
 #updates-popup.updates-popup-hiding .updates-popup-content {
-  transform: translateY(-16px);
+  transform: translateY(-8px) scale(0.97);
   opacity: 0;
 }
 .updates-popup-content {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+  position: absolute;
+  background: rgba(10,10,15,0.95);
+  border: 1px solid var(--border-hi);
+  border-radius: 14px;
+  backdrop-filter: blur(16px);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
   width: 340px;
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 32px);
   overflow: hidden;
-  transform: translateY(-16px);
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  color: var(--text);
+  transform: translateY(-8px) scale(0.97);
   opacity: 0;
-  transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1), opacity 0.25s ease;
+  transition: opacity 0.2s ease, transform 0.2s ease;
 }
 .updates-popup-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 14px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-  background: rgba(245,158,11,0.1);
+  padding: 12px 14px;
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 .updates-popup-header i {
-  color: var(--accent2, #f59e0b);
-  font-size: 14px;
+  color: var(--accent);
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.updates-popup-header > span {
+  font-family: var(--ff-head);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
 }
 .updates-popup-close {
   margin-left: auto;
-  background: none;
-  border: none;
+  width: 24px; height: 24px;
+  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
   color: var(--muted);
-  cursor: pointer;
-  font-size: 13px;
-  padding: 2px;
+  font-size: 14px;
   line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, transform 0.15s;
 }
-.updates-popup-close:hover { color: var(--text); }
+.updates-popup-close:hover { background: rgba(255,255,255,0.07); color: var(--text); transform: rotate(90deg); }
 .updates-popup-body {
-  padding: 8px 0;
-  max-height: 240px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
+  flex: 1 1 auto;
+  min-height: 0;
 }
-.updates-popup-body::-webkit-scrollbar { width: 4px; }
-.updates-popup-body::-webkit-scrollbar-track { background: transparent; }
-.updates-popup-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 .updates-popup-item {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 4px 14px;
+  gap: 4px;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 9px 11px;
+  transition: border-color 0.2s ease;
 }
-.updates-popup-item:hover { background: rgba(255,255,255,0.04); }
+.updates-popup-item:hover { border-color: var(--border-hi); }
 .updates-popup-item-top {
   display: flex;
   align-items: center;
@@ -717,82 +730,69 @@ select.input-field {
   min-width: 0;
 }
 .updates-popup-dismiss {
-  background: none;
-  border: none;
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 14px;
-  line-height: 1;
-  padding: 0 2px;
+  width: 18px; height: 18px;
   flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
   opacity: 0;
-  transition: opacity 0.15s, color 0.15s;
+  transition: opacity 0.15s, color 0.15s, background 0.15s, border-color 0.15s;
 }
 .updates-popup-item:hover .updates-popup-dismiss { opacity: 1; }
-.updates-popup-dismiss:hover { color: var(--accent2, #f59e0b); }
+.updates-popup-dismiss:hover {
+  color: var(--danger);
+  background: rgba(248,113,113,0.12);
+  border-color: rgba(248,113,113,0.25);
+}
 .updates-popup-chs {
   font-size: 11px;
-  color: var(--accent2, #f59e0b);
+  color: var(--text-dim);
 }
 .updates-popup-view {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  align-self: flex-start;
   font-size: 11px;
   font-weight: 600;
-  color: var(--accent2, #f59e0b);
+  color: var(--accent-lt);
   text-decoration: none;
-  padding: 2px 0;
   transition: opacity 0.15s;
 }
-.updates-popup-view:hover { opacity: 0.8; }
+.updates-popup-view:hover { opacity: 0.75; }
 .updates-popup-view i { font-size: 8px; }
 .updates-popup-more {
   font-size: 10px;
   color: var(--muted);
-  padding: 2px 14px;
   text-align: center;
 }
 .updates-popup-empty {
   font-size: 12px;
   color: var(--muted);
-  padding: 12px 14px;
+  padding: 16px;
   text-align: center;
 }
 .updates-popup-footer {
-  padding: 8px 14px;
+  padding: 10px;
   border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   gap: 6px;
+  flex-shrink: 0;
 }
-.updates-popup-clear-all {
+.updates-popup-footer .btn-primary,
+.updates-popup-footer .btn-secondary {
   width: 100%;
-  padding: 6px 0;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: opacity 0.2s, color 0.2s, border-color 0.2s;
-}
-.updates-popup-clear-all:hover { color: var(--text); border-color: var(--muted); }
-.updates-popup-check {
-  width: 100%;
-  padding: 7px 0;
-  border: none;
-  border-radius: 8px;
-  background: var(--accent2, #f59e0b);
-  color: #000;
+  justify-content: center;
+  padding: 8px 0;
   font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: opacity 0.2s;
 }
-.updates-popup-check:hover { opacity: 0.85; }
-.updates-popup-check:disabled { opacity: 0.5; cursor: default; }
+.updates-popup-footer .btn-primary:disabled { opacity: 0.5; cursor: default; box-shadow: none; }
 .nav-bell {
   position: relative;
   font-size: 16px;
