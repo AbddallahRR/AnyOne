@@ -10,7 +10,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY requirements.txt .
 
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+# --timeout/--retries: el link a pypi.org tarda >15s por peticion, y el default de
+# pip (15s) aborta antes de responder. Subirlo es lo que evita el ReadTimeoutError.
+RUN pip install --no-cache-dir --prefix=/install \
+    --timeout 120 --retries 10 \
+    -r requirements.txt
 
 # Stage 2: imagen final limpia
 FROM python:3.12-slim
