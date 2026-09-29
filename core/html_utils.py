@@ -176,6 +176,41 @@ def extract_images_from_noscript(soup: BeautifulSoup) -> list[dict]:
     return results
 
 
+def pick_img_src(img: Tag) -> str:
+    """First non-empty image URL from an <img>, by ATTR_PRIORITY order."""
+    for attr in ATTR_PRIORITY:
+        val = img.get(attr)
+        if val:
+            return val
+    return ''
+
+
+def collect_reader_images(
+    soup: BeautifulSoup,
+    base_url: str,
+    container_selector: str = '#chapter-content, .chapter-content, .reading-content',
+) -> list[str]:
+    """URLs of the chapter images in a reader page, deduped and normalized.
+
+    Covers direct <img> tags plus the <noscript> variants lazy-loaders use.
+    """
+    container = (soup.select_one(container_selector) if container_selector else None) or soup
+    urls: list[str] = []
+    seen: set[str] = set()
+
+    def _add(src: str) -> None:
+        url = normalize_image_url(src, base_url)
+        if url and url not in seen:
+            seen.add(url)
+            urls.append(url)
+
+    for img in container.find_all('img'):
+        _add(pick_img_src(img))
+    for entry in extract_images_from_noscript(container):
+        _add(entry['src'])
+    return urls
+
+
 _IMAGE_URL_RE = re.compile(
     r'https?://[^\s"\'\\]+\.(?:jpg|jpeg|png|webp|gif)(?:\?[^\s"\'\\]*)?',
     re.IGNORECASE,
@@ -277,7 +312,6 @@ def extract_images_from_scripts(soup: BeautifulSoup, base_url: str = '') -> list
         # __APP_STATE__, __PRELOADED_STATE__, __SERVER_DATA__, __APOLLO_STATE__,
         # __INITIAL_PROPS__, __remixContext, __APP_DATA__
         for m in _SSR_STATE_RE.finditer(text):
-            var_name = m.group(1)
             data = _try_parse_json(m.group(2))
             if data is not None:
                 _walk_json(data, urls, seen, base_url)

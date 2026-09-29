@@ -17,6 +17,8 @@ select = ["E", "F", "W", "I"]
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["E402"]
+# Fachada de re-export: toda la app importa desde `core.database`, no desde los submódulos.
+"core/database.py" = ["F401"]
 
 [tool.mypy]
 python_version = "3.11"

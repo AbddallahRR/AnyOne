@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 
 from core.disk_cache import search_cache
+from core.html_utils import extract_from_srcset
 from core.http_pool import HTTP_TIMEOUT
 from core.models import Chapter, SearchResult, SeriesDetails
 from core.throttle import rate_limiter
@@ -33,25 +34,15 @@ class NartagSource(HttpClientMixin, BaseSource):
     # Image URL helpers
     # -----------------------------------------------------------------------
 
-    @staticmethod
-    def _best_cover_url(img_tag, base_url: str = '') -> str:
+    # Nartag sirve thumbs como "pagina-768x432.jpg"; la imagen real va sin sufijo.
+    _THUMB_SUFFIX_RE = re.compile(r'-\d+x\d+(\.\w+)$')
+
+    @classmethod
+    def _best_cover_url(cls, img_tag) -> str:
         if not img_tag:
             return ''
-        srcset = img_tag.get('srcset', '') or img_tag.get('data-srcset', '')
-        if srcset:
-            candidates = []
-            for part in srcset.split(','):
-                tokens = part.strip().split()
-                if not tokens:
-                    continue
-                w = (int(tokens[1].rstrip('w'))
-                     if len(tokens) > 1 and tokens[1].endswith('w') else 0)
-                candidates.append((w, tokens[0]))
-            if candidates:
-                best = max(candidates, key=lambda x: x[0])[1]
-                return re.sub(r'-\d+x\d+(\.\w+)$', r'\1', best)
-        src = img_tag.get('data-src') or img_tag.get('src', '')
-        return re.sub(r'-\d+x\d+(\.\w+)$', r'\1', src) if src else ''
+        src = extract_from_srcset(img_tag) or (img_tag.get('data-src') or '')
+        return cls._THUMB_SUFFIX_RE.sub(r'\1', src) if src else ''
 
     # -----------------------------------------------------------------------
     # Lector: hacer POST al authorize y extraer imágenes del manga
@@ -187,7 +178,7 @@ class NartagSource(HttpClientMixin, BaseSource):
                 continue
             seen.add(slug)
             title = a.get('title', '') or slug.replace('-', ' ').title()
-            cover = self._best_cover_url(thumb.find('img'), self.BASE_URL)
+            cover = self._best_cover_url(thumb.find('img'))
             results.append(SearchResult(id=slug, title=title, cover=cover))
 
         if results:
@@ -230,7 +221,7 @@ class NartagSource(HttpClientMixin, BaseSource):
         ]:
             img = soup.select_one(selector)
             if img:
-                cover = self._best_cover_url(img, self.BASE_URL)
+                cover = self._best_cover_url(img)
                 if cover:
                     break
 

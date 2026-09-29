@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 import subprocess
@@ -8,7 +7,6 @@ from pathlib import Path
 from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
-from core.database import save_content_to_db
 from core.disk_cache import img_filter_cache
 from core.settings import settings
 from core.models import chapter_to_filename
@@ -19,8 +17,6 @@ from . import api_router
 from .common import (
     _base_folder,
     _find_local_serie_dir,
-    _local_chapters_anime,
-    _local_chapters_manga,
     _safe_path,
 )
 
@@ -78,14 +74,6 @@ def _serve_video(filepath: str, request: Request) -> Response:
                 'ETag': etag,
             },
         )
-
-    def full_gen():
-        with open(filepath, 'rb') as f:
-            while True:
-                chunk = f.read(_CHUNK_SIZE)
-                if not chunk:
-                    break
-                yield chunk
 
     return FileResponse(
         filepath,
@@ -266,10 +254,6 @@ def _probe_duration(filepath: str) -> float | None:
     return None
 
 
-def _get_cached_duration(filepath: str) -> float | None:
-    return _probe_duration(filepath)
-
-
 @api_router.get('/video-duration/anime/{content_id}/{chapter}')
 def video_duration(content_id: str, chapter: str, request: Request):
     serie_dir = Path(str(settings.anime_download_dir)) / normalize_title(content_id)
@@ -293,7 +277,7 @@ def video_duration(content_id: str, chapter: str, request: Request):
     if not files:
         raise HTTPException(status_code=404)
 
-    duration = _get_cached_duration(str(files[0]))
+    duration = _probe_duration(str(files[0]))
     if duration is not None:
         return JSONResponse(
             content={'duration': duration},

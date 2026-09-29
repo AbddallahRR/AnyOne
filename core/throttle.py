@@ -1,4 +1,3 @@
-import asyncio
 import threading
 import time
 from urllib.parse import urlparse
@@ -8,7 +7,6 @@ class RateLimiter:
     """Per-domain rate limiter with token bucket algorithm.
 
     Uses threading.Event for precise wake-up instead of busy-wait loops.
-    A single lock protects shared state for both sync and async paths.
     """
 
     def __init__(self, min_interval: float = 2.0):
@@ -39,22 +37,6 @@ class RateLimiter:
         with self._lock:
             self._last_calls[domain] = time.time()
             event.clear()
-
-    async def async_wait(self, url: str) -> None:
-        domain = urlparse(url).netloc
-        if not domain:
-            return
-
-        with self._lock:
-            remaining = self._get_remaining(domain)
-            if remaining <= 0:
-                self._last_calls[domain] = time.time()
-                return
-
-        await asyncio.sleep(remaining)
-
-        with self._lock:
-            self._last_calls[domain] = time.time()
 
 
 rate_limiter = RateLimiter(min_interval=1.0)

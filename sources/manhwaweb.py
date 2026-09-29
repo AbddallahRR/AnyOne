@@ -3,17 +3,14 @@
 # --- IGNORE ---
 
 import logging
-import os
 import re
-from pathlib import Path
 from urllib.parse import quote as _url_quote
-from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
 from core.disk_cache import search_cache
-from core.html_utils import url_ext
-from core.models import Chapter, SearchResult, SeriesDetails, chapter_to_filename
+from core.html_utils import collect_reader_images, normalize_url
+from core.models import Chapter, SearchResult, SeriesDetails
 from core.utils import count_images_in_dir
 
 from . import BaseSource
@@ -32,19 +29,6 @@ class ManhwawebSource(HttpClientMixin, BaseSource):
     # -----------------------------------------------------------------------
     # URL helpers
     # -----------------------------------------------------------------------
-
-    @staticmethod
-    def _normalize_url(src: str, base_url: str) -> str | None:
-        if not src or src.startswith('data:'):
-            return None
-        if src.startswith('//'):
-            src = 'https:' + src
-        elif src.startswith('/'):
-            src = urljoin(base_url, src)
-        lower = src.lower()
-        if any(x in lower for x in ('loading', 'placeholder', 'blank.', 'spinner')):
-            return None
-        return src
 
     @staticmethod
     def _chapter_num_from_id(chapter_id: str) -> str:
@@ -132,9 +116,7 @@ class ManhwawebSource(HttpClientMixin, BaseSource):
             cover = ''
             img = item.find('img')
             if img and img.get('src'):
-                cover = img['src']
-                if cover.startswith('//'):
-                    cover = 'https:' + cover
+                cover = normalize_url(img['src'], self.BASE_URL)
             results.append(SearchResult(id=content_id, title=title, cover=cover))
         return results
 
@@ -153,9 +135,7 @@ class ManhwawebSource(HttpClientMixin, BaseSource):
             data     = self._get_json(f"{self.API_BASE}/manhwa/see/{content_id}")
             title    = (data.get('the_real_name') or data.get('name_esp')
                         or data.get('_name') or content_id)
-            cover    = data.get('_imagen', '')
-            if cover and cover.startswith('//'):
-                cover = 'https:' + cover
+            cover    = normalize_url(data.get('_imagen', ''), self.BASE_URL)
             result = SeriesDetails(title=title, cover=cover,
                       synopsis=data.get('_sinopsis', ''))
         except Exception as exc:
@@ -164,7 +144,7 @@ class ManhwawebSource(HttpClientMixin, BaseSource):
             result = self._get_details_scrape(content_id)
 
         if result:
-            search_cache.set(cache_key, result.model_dump() if isinstance(result, SeriesDetails) else result)
+            search_cache.set(cache_key, result.model_dump())
         return result or SeriesDetails(title=content_id)
 
     def _get_details_scrape(self, content_id: str) -> SeriesDetails:
@@ -184,9 +164,7 @@ class ManhwawebSource(HttpClientMixin, BaseSource):
         img   = (soup.select_one('img.w-full.object-cover.aspect-defect')
                  or soup.select_one('.summary_image img'))
         if img and img.get('src'):
-            cover = img['src']
-            if cover.startswith('//'):
-                cover = 'https:' + cover
+            cover = normalize_url(img['src'], self.BASE_URL)
 
         synopsis = ''
         desc     = soup.select_one('.summary__content, .description-summary, .entry-content')
@@ -291,23 +269,7 @@ class ManhwawebSource(HttpClientMixin, BaseSource):
             return []
 
         soup = BeautifulSoup(resp.text, 'html.parser')
-        container = (soup.select_one('#chapter-content, .chapter-content, .reading-content')
-                     or soup)
-        seen: set[str] = set()
-        img_urls: list[str] = []
-        all_imgs = list(container.find_all('img'))
-        for noscript in container.find_all('noscript'):
-            inner = BeautifulSoup(noscript.decode_contents(), 'html.parser')
-            all_imgs.extend(inner.find_all('img'))
-        for img in all_imgs:
-            src = (img.get('data-src') or img.get('data-lazy') or
-                   img.get('data-original') or img.get('data-url') or
-                   img.get('src'))
-            url = self._normalize_url(src, self.BASE_URL)
-            if url and url not in seen:
-                seen.add(url)
-                img_urls.append(url)
-        return img_urls
+        return collect_reader_images(soup, self.BASE_URL)
 
     # -----------------------------------------------------------------------
     # Descarga de capítulo
@@ -320,11 +282,10 @@ class ManhwawebSource(HttpClientMixin, BaseSource):
         cap_dir = MangaDownloadHelper.make_chapter_dir(dest_folder, num)
 
         img_urls = self.get_chapter_images_sync(content_id, chapter_id)
-
         if not img_urls:
-            logger.warning(f"ManhwaWeb: get_chapter_images_sync devolvió vacío para "
-                           f"'{chapter_id}', usando fallback scrape+descarga")
-            return self._download_chapter_scrape(content_id, chapter_id, cap_dir, progress_cb)
+            raise Exception(
+                f"ManhwaWeb: no se encontraron imágenes para '{content_id}/{chapter_id}'"
+            )
 
         existing = count_images_in_dir(cap_dir)
         if existing >= len(img_urls):
@@ -339,50 +300,5 @@ class ManhwawebSource(HttpClientMixin, BaseSource):
             raise Exception(
                 f"ManhwaWeb: {failures}/{len(img_urls)} imágenes fallaron "
                 f"en el capítulo '{chapter_id}'"
-            )
-        return cap_dir
-
-    def _download_chapter_scrape(self, content_id: str, chapter_id: str,
-                                  cap_dir: str, progress_cb=None) -> str:
-        num     = self._chapter_num_from_id(chapter_id)
-        web_url = f"{self.BASE_URL}/leer/{content_id}-{num}"
-        try:
-            resp = self._get(web_url,
-                             headers={'Referer': self.BASE_URL})
-        except Exception as exc:
-            raise Exception(f"ManhwaWeb: error al obtener página del capítulo: {exc}") from exc
-
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        container = (soup.select_one('#chapter-content, .chapter-content, .reading-content')
-                     or soup)
-
-        seen: set[str]      = set()
-        img_urls: list[str] = []
-
-        all_imgs = list(container.find_all('img'))
-        for noscript in container.find_all('noscript'):
-            inner = BeautifulSoup(noscript.decode_contents(), 'html.parser')
-            all_imgs.extend(inner.find_all('img'))
-
-        for img in all_imgs:
-            src = (img.get('data-src') or img.get('data-lazy') or
-                   img.get('data-original') or img.get('data-url') or
-                   img.get('src'))
-            url = self._normalize_url(src, self.BASE_URL)
-            if url and url not in seen:
-                seen.add(url)
-                img_urls.append(url)
-
-        if not img_urls:
-            raise Exception(f"ManhwaWeb: no se encontraron imágenes en '{chapter_id}'")
-
-        dl_headers = {'User-Agent': self.UA, 'Referer': self.BASE_URL}
-        failures = MangaDownloadHelper.download_images(
-            img_urls, cap_dir, dl_headers, self._get_with_retry, progress_cb,
-        )
-        if failures:
-            raise Exception(
-                f"ManhwaWeb: {failures}/{len(img_urls)} imágenes fallaron "
-                f"en el capítulo '{chapter_id}' (scraping)"
             )
         return cap_dir

@@ -103,27 +103,50 @@ class MangaDownloadHelper:
         headers: dict | None = None,
         retry_get=None,
         progress_cb=None,
+        max_workers: int = 1,
     ) -> int:
+        """Download chapter images into *cap_dir* as 0001.ext, 0002.ext, ...
+
+        Returns the number of failures. *retry_get* must take (url, **kwargs)
+        and return a response usable as a context manager. Set *max_workers* > 1
+        to download concurrently, passing a retry_get that resolves its own
+        per-thread session.
+        """
         from core.html_utils import url_ext
-        failures = 0
+
         dl_headers = dict(headers or {})
         get_fn = retry_get or (lambda url, **kw: __import__('requests').get(url, **kw))
         total = len(img_urls)
+        tasks = list(enumerate(img_urls, start=1))
 
-        for i, img_url in enumerate(img_urls, start=1):
+        def _fetch(task) -> bool:
+            i, img_url = task
             ext = url_ext(img_url)
             filepath = os.path.join(cap_dir, f"{i:04d}.{ext}")
             if os.path.exists(filepath):
-                continue
+                return True
             try:
                 with get_fn(img_url, headers=dl_headers, stream=True) as resp:
+                    resp.raise_for_status()
                     with open(filepath, 'wb') as f:
                         for chunk in resp.iter_content(8192):
                             f.write(chunk)
+                return True
             except Exception as exc:
                 logger.exception(f"Error descargando imagen {i} ({img_url[:60]}): {exc}")
+                return False
+
+        if max_workers > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                results = list(pool.map(_fetch, tasks))
+        else:
+            results = [_fetch(t) for t in tasks]
+
+        failures = 0
+        for i, ok in enumerate(results, start=1):
+            if not ok:
                 failures += 1
             if progress_cb:
                 progress_cb(i, total, f'Imagen {i}/{total}')
-
         return failures

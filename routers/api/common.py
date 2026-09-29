@@ -10,7 +10,7 @@ from fastapi import HTTPException
 
 from core.database import get_conn
 from core.settings import settings
-from core.chapter_utils import chapter_float_key, normalize_chapter_number
+from core.chapter_utils import normalize_chapter_number
 from core.models import chapter_to_filename, parse_chapter_from_filename
 from core.utils import _normalize_path_name
 
@@ -91,12 +91,6 @@ def _base_folder(content_type: str) -> str:
 def _require_local(content_ref: str):
     if not content_ref.startswith('local:'):
         raise HTTPException(status_code=400, detail='Solo funciona con contenido local')
-
-
-def _content_title_by_ref(ref: str) -> str | None:
-    conn = get_conn()
-    row = conn.execute('SELECT title FROM content WHERE id = ?', (ref,)).fetchone()
-    return row[0] if row else None
 
 
 def _find_local_serie_dir(base_dir: Path, content_id: str) -> Path | None:

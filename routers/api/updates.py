@@ -1,6 +1,5 @@
 import asyncio
 import concurrent.futures
-import json
 import logging
 from pathlib import Path
 from queue import Full

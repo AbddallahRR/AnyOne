@@ -11,7 +11,7 @@ from bs4 import BeautifulSoup
 
 from core.chapter_utils import chapter_float_key
 from core.disk_cache import search_cache
-from core.html_utils import normalize_image_url
+from core.html_utils import collect_reader_images, normalize_image_url
 from core.http_pool import HTTP_TIMEOUT, HttpPool
 from core.models import Chapter, SearchResult, SeriesDetails
 from core.throttle import rate_limiter
@@ -91,37 +91,6 @@ class IkigaiSource(HttpClientMixin, BaseSource):
             items.append({'id': slug, 'title': title, 'cover': cover})
         return items
 
-    def _fetch_page(self, page: int) -> tuple[int, list[dict], bool]:
-        """
-        Descarga UNA página del catálogo. Devuelve (page, items, has_next).
-        Intenta caché primero; si no hay, hace la petición HTTP.
-        Diseñada para llamarse desde un ThreadPoolExecutor.
-        """
-        page_key   = f"ikigai:catalog_page:{page}"
-        page_items = search_cache.get(page_key)
-
-        if page_items is not None:
-            # En caché — no sabemos has_next sin parsear HTML, así que asumimos True
-            # (el llamador detiene cuando ya no llegan items nuevos)
-            return page, page_items, True
-
-        url = (self.CATALOGO_BASE if page == 1
-               else f"{self.CATALOGO_BASE}?pagina={page}")
-        try:
-            html = self._fetch_url(url)
-        except Exception as exc:
-            logger.exception(f"Ikigai: error al cargar catálogo página {page}: {exc}")
-            return page, [], False
-
-        soup       = BeautifulSoup(html, 'html.parser')
-        page_items = self._parse_page_links(soup)
-        has_next   = self._has_next_page(soup, page + 1)
-
-        if page_items:
-            search_cache.set(page_key, page_items, ttl=_PAGE_TTL)
-
-        return page, page_items, has_next
-
     def _fetch_full_catalog(self) -> list[dict]:
         """
         Descarga el catálogo completo en paralelo.
@@ -143,9 +112,8 @@ class IkigaiSource(HttpClientMixin, BaseSource):
             # Lote de hasta _PAGE_WORKERS páginas en paralelo
             batch_pages = list(range(page, min(page + _PAGE_WORKERS, _MAX_PAGES + 1)))
 
-            # ThreadPoolExecutor local — cloudscraper no es thread-safe entre instancias,
-            # pero cada worker llama a self._fetch_url que usa self.scraper (una instancia).
-            # Para paralelismo real sin conflictos creamos un scraper temporal por hilo.
+            # Cada worker usa su propio scraper (HttpPool es thread-local),
+            # por eso el fetch no pasa por self._fetch_url.
             page_results: dict[int, tuple[list[dict], bool]] = {}
 
             def _fetch_with_own_scraper(pg: int) -> tuple[int, list[dict], bool]:
@@ -386,27 +354,13 @@ class IkigaiSource(HttpClientMixin, BaseSource):
         html    = self._fetch_url(cap_url)
         soup    = BeautifulSoup(html, 'html.parser')
 
-        seen:     set[str]  = set()
-        img_urls: list[str] = []
-
-        all_imgs = list(soup.find_all('img'))
-        for noscript in soup.find_all('noscript'):
-            inner = BeautifulSoup(noscript.decode_contents(), 'html.parser')
-            all_imgs.extend(inner.find_all('img'))
-
-        for img in all_imgs:
-            src = (img.get('data-src') or img.get('data-lazy') or
-                   img.get('data-original') or img.get('data-url') or
-                   img.get('src'))
-            url = normalize_image_url(src, self.BASE_URL)
-            if url and url not in seen:
-                seen.add(url)
-                img_urls.append(url)
+        img_urls = collect_reader_images(soup, self.BASE_URL, container_selector='')
 
         # Fallback: extract from Qwik JSON (<script type="qwik/json">)
         if not img_urls:
             for script in soup.find_all('script', type='qwik/json'):
                 urls = re.findall(r'https://image3\.ikigaimangas\.cloud[^"\'\\\s]+\.webp', script.string or '')
+                seen = set()
                 for u in urls:
                     norm = normalize_image_url(u, self.BASE_URL)
                     if norm and norm not in seen:

@@ -1,7 +1,5 @@
-import html as _html
 import json
 import logging
-import os
 import re
 import threading
 import time
@@ -19,15 +17,14 @@ from core.html_utils import (
     extract_images_from_scripts,
     extract_items_with_templates,
     normalize_image_url,
-    url_ext,
 )
 from core.http_pool import HTTP_TIMEOUT, HttpPool
 from core.chapter_utils import chapter_float_key, normalize_chapter_number
-from core.models import Chapter, SearchResult, SeriesDetails, chapter_to_filename
+from core.models import Chapter, SearchResult, SeriesDetails
 from core.throttle import rate_limiter
 
 from . import BaseSource
-from .common import HttpClientMixin
+from .common import HttpClientMixin, MangaDownloadHelper
 
 logger = logging.getLogger(__name__)
 
@@ -102,11 +99,6 @@ class DynamicSource(HttpClientMixin, BaseSource):
         return self._cfg.get('base_url', '') if self._cfg else ''
 
     @property
-    def UA(self) -> str:
-        return ("Mozilla/5.0 (X11; Linux x86_64; rv:120.0) "
-                "Gecko/20100101 Firefox/120.0")
-
-    @property
     def _headers(self) -> dict:
         self._load_config()
         headers = {'User-Agent': self.UA}
@@ -145,19 +137,6 @@ class DynamicSource(HttpClientMixin, BaseSource):
                 text = text.strip()
             return text
         return elem.get(attr, '')
-
-    def _extract_attrs(self, soup, selector: str, attr: str = 'text') -> list[str]:
-        if not selector:
-            return []
-        result = []
-        for elem in soup.select(selector):
-            if attr == 'text':
-                result.append(elem.get_text(strip=True))
-            else:
-                val = elem.get(attr, '')
-                if val:
-                    result.append(val)
-        return result
 
     def _build_url(self, template: str, **kwargs) -> str:
         base = self.BASE_URL.rstrip('/')
@@ -232,11 +211,11 @@ class DynamicSource(HttpClientMixin, BaseSource):
                 if not title:
                     continue
                 content_id = href.rstrip('/').split('/')[-1] if href else title
-                if cover and cover.startswith('//'):
-                    cover = 'https:' + cover
-                elif cover and cover.startswith('/'):
-                    cover = urljoin(self.BASE_URL, cover)
-                all_items.append({'id': content_id, 'title': title, 'cover': cover})
+                all_items.append({
+                    'id': content_id,
+                    'title': title,
+                    'cover': self._normalize_cover(cover),
+                })
                 page_items += 1
 
             if page_items == 0:
@@ -627,60 +606,38 @@ class DynamicSource(HttpClientMixin, BaseSource):
             f"{self.CONFIG_NAME}: download not supported for content_type={cfg.get('content_type')}"
         )
 
+    def _get_thread_local(self, url: str, **kwargs):
+        """GET using this thread's own session, for concurrent image downloads."""
+        rate_limiter.wait(url)
+        resp = HttpPool.get_session().get(
+            url,
+            headers={**self._headers, 'Referer': self.BASE_URL},
+            cookies=self._cookies or None,
+            timeout=HTTP_TIMEOUT,
+            **kwargs,
+        )
+        resp.raise_for_status()
+        return resp
+
     def _download_images(self, content_id: str, chapter_id: str, dest_folder: str,
                          chapter_number: str | None = None, progress_cb=None) -> str:
-        import concurrent.futures
-
         img_urls = self.get_chapter_images_sync(content_id, chapter_id)
         if not img_urls:
             raise Exception(f"{self.CONFIG_NAME}: no images found for chapter {chapter_id}")
 
-        cap_num = chapter_number or chapter_id
-        if cap_num.replace('.', '', 1).isdigit():
-            dir_name = f"cap_{chapter_to_filename(cap_num)}"
-        else:
-            dir_name = f"cap_{cap_num}"
-        cap_dir = os.path.join(dest_folder, dir_name)
-        os.makedirs(cap_dir, exist_ok=True)
+        cap_dir = MangaDownloadHelper.make_chapter_dir(dest_folder, chapter_number or chapter_id)
 
         cfg = self._load_config().get('config', {})
-        max_workers = min(cfg.get('download_concurrency', 4), 10)
-
-        def _download_one(args):
-            i, img_url = args
-            ext = url_ext(img_url)
-            filepath = os.path.join(cap_dir, f"{i:04d}.{ext}")
-            if os.path.exists(filepath):
-                return True
-            try:
-                rate_limiter.wait(img_url)
-                cookies = self._cookies or None
-                with HttpPool.get_session().get(
-                    img_url,
-                    headers={**self._headers, 'Referer': self.BASE_URL},
-                    cookies=cookies,
-                    timeout=HTTP_TIMEOUT,
-                    stream=True,
-                ) as resp:
-                    resp.raise_for_status()
-                    with open(filepath, 'wb') as f:
-                        for chunk in resp.iter_content(8192):
-                            f.write(chunk)
-                return True
-            except Exception as exc:
-                logger.warning(f"{self.CONFIG_NAME}: error downloading image {i}: {exc}")
-                return False
-
-        tasks = list(enumerate(img_urls, start=1))
-        failures = 0
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
-            for i, success in enumerate(pool.imap(_download_one, tasks), start=1):
-                if not success:
-                    failures += 1
-                if progress_cb:
-                    progress_cb(i, len(tasks), f'Imagen {i}/{len(tasks)}')
-
+        failures = MangaDownloadHelper.download_images(
+            img_urls,
+            cap_dir,
+            headers={**self._headers, 'Referer': self.BASE_URL},
+            retry_get=self._get_thread_local,
+            progress_cb=progress_cb,
+            max_workers=min(cfg.get('download_concurrency', 4), 10),
+        )
         if failures:
-            logger.warning(f"{self.CONFIG_NAME}: {failures}/{len(img_urls)} images failed to download")
-
+            logger.warning(
+                f"{self.CONFIG_NAME}: {failures}/{len(img_urls)} images failed to download"
+            )
         return cap_dir

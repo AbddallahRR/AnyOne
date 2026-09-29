@@ -286,8 +286,3 @@ def start_workers(n: int | None = None) -> None:
 
 def stop_workers():
     _stop_event.set()
-
-
-def get_active_jobs() -> list[dict]:
-    with _active_jobs_lock:
-        return [j.model_dump() for j in _active_jobs.values()]

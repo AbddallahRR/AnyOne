@@ -200,10 +200,6 @@ class ScraperConfigSchema(BaseModel):
 # Fase 4: Modelos de job de descarga
 # ---------------------------------------------------------------------------
 
-class SourceSettingsRequest(BaseModel):
-    model_config = {'extra': 'forbid'}
-
-
 class ReEnableRequest(BaseModel):
     name: str
 

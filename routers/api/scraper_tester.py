@@ -1,6 +1,5 @@
-import html as _html
 import logging
-from urllib.parse import urljoin, urlparse, urlunparse, unquote
+from urllib.parse import urlparse, urlunparse, unquote
 
 from bs4 import BeautifulSoup
 from fastapi import HTTPException, Request
@@ -11,12 +10,10 @@ from core.html_utils import (
     extract_images_from_noscript,
     extract_images_from_scripts,
     extract_items_with_templates,
-    normalize_image_url,
     normalize_url,
 )
 from core.http_pool import HTTP_TIMEOUT, HttpPool
-from core.models import ReEnableRequest, ScraperConfigSchema
-from core.scraper_config import get_config
+from core.models import ReEnableRequest
 from core.scraper_health import get_all_status
 from core.scraper_health import re_enable as health_re_enable
 from core.throttle import rate_limiter
@@ -505,9 +502,7 @@ async def api_auto_configure(request: Request):
             try:
                 html = _fetch_url(stage_url)
                 if stage == 'details':
-                    result = detect_search_selectors(html, base_url)
                     # Just detect title and cover on the page
-                    soup = BeautifulSoup(html, 'html.parser')
                     for field, text_hint in [('title', body.get('sample_title', '')), ('cover', '')]:
                         if text_hint:
                             detected = detect_selector_by_text(html, text_hint, 'details', base_url)

@@ -1,6 +1,6 @@
 """Build script: bundles & minifies CSS and JS for production."""
 
-import hashlib, json, os, shutil, subprocess, sys
+import hashlib, json, sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))

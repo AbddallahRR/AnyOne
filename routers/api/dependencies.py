@@ -1,8 +1,7 @@
-from fastapi import Depends, HTTPException
-from fastapi.requests import Request
+from fastapi import HTTPException
 
 from core.sources import get_source as _get_source
-from core.sources import get_enabled_source_names, SOURCES
+from core.sources import get_enabled_source_names
 
 
 async def get_source(content_type: str, source: str):

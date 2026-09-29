@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import os
-import stat
 import sys
 
 TARGET_UID = 1000

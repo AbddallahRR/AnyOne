@@ -26,7 +26,6 @@ from core.models import (
     parse_chapter_from_filename,
 )
 from core.download_worker import is_downloading
-from core.settings import settings
 from core.utils import _invalidate_scan_cache
 
 from . import api_router
@@ -111,7 +110,7 @@ def api_delete_chapter(data: DeleteChapterRequest):
 
     try:
         _delete_chapter_files(serie_path, data.type, data.chapter)
-    except Exception as exc:
+    except Exception:
         raise HTTPException(status_code=500, detail='Error al eliminar archivo')
 
     last_chapter_str, _ = get_progress(data.content_ref)
