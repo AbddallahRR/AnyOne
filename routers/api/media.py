@@ -10,19 +10,47 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from core.disk_cache import img_filter_cache
 from core.settings import settings
 from core.models import chapter_to_filename
-from core.sources import get_source
 from core.utils import filter_manga_images, normalize_title
 
 from . import api_router
 from .common import (
     _base_folder,
     _find_local_serie_dir,
+    _require_source,
     _safe_path,
 )
 
 logger = logging.getLogger(__name__)
 
 _CHUNK_SIZE = 65536
+_CACHE_HEADERS = {'Cache-Control': 'public, max-age=86400'}
+
+
+def _file_with_etag(path: Path, request: Request) -> Response:
+    """Serve a static file, answering 304 when the client's ETag still matches."""
+    stat = path.stat()
+    etag = f'"{stat.st_mtime:.0f}-{stat.st_size}"'
+    if request.headers.get('if-none-match') == etag:
+        return Response(status_code=304)
+    return FileResponse(path, headers={**_CACHE_HEADERS, 'ETag': etag})
+
+
+def _chapter_video(serie_dir: Path, chapter: str) -> Path | None:
+    """Locate a chapter's .mp4, trying the padded numbering the downloader uses."""
+    try:
+        chap_int = int(float(chapter))
+        numbered = f'{chap_int:03d}'
+    except (ValueError, TypeError):
+        numbered = None
+
+    candidates = [f'[!.]*_{chapter}.mp4', f'{chapter}.mp4']
+    if numbered:
+        candidates += [f'[!.]*_{numbered}.mp4', f'{numbered}.mp4']
+    for pattern in candidates:
+        files = list(serie_dir.glob(pattern))
+        if files:
+            return files[0]
+    return None
 
 
 def _serve_video(filepath: str, request: Request) -> Response:
@@ -90,17 +118,9 @@ def _serve_video(filepath: str, request: Request) -> Response:
 def local_cover(type: str, filename: str, request: Request, thumb: bool = False):
     base = _base_folder(type)
     if thumb:
-        serie_dir = Path(base) / Path(filename).parent
-        thumb_path = serie_dir / 'thumb.webp'
+        thumb_path = Path(base) / Path(filename).parent / 'thumb.webp'
         if thumb_path.exists():
-            stat = thumb_path.stat()
-            etag = f'"{stat.st_mtime:.0f}-{stat.st_size}"'
-            if etag and request.headers.get('if-none-match') == etag:
-                return Response(status_code=304)
-            return FileResponse(thumb_path, headers={
-                'Cache-Control': 'public, max-age=86400',
-                'ETag': etag,
-            })
+            return _file_with_etag(thumb_path, request)
 
     safe = _safe_path(base, filename)
     if not safe:
@@ -108,15 +128,7 @@ def local_cover(type: str, filename: str, request: Request, thumb: bool = False)
     if not safe.exists():
         raise HTTPException(status_code=404)
 
-    stat = safe.stat()
-    etag = f'"{stat.st_mtime:.0f}-{stat.st_size}"'
-    if etag and request.headers.get('if-none-match') == etag:
-        return Response(status_code=304)
-
-    return FileResponse(safe, headers={
-        'Cache-Control': 'public, max-age=86400',
-        'ETag': etag,
-    })
+    return _file_with_etag(safe, request)
 
 
 @api_router.get('/play/local/{type}/{id}/{chapter}')
@@ -128,24 +140,10 @@ def api_play_local(type: str, id: str, chapter: str, request: Request):
     if not safe.exists():
         raise HTTPException(status_code=404)
     if type == 'anime':
-        files = list(safe.glob(f"[!.]*_{chapter}.mp4"))
-        if not files:
-            try:
-                chap_int = int(float(chapter))
-                files = list(safe.glob(f"[!.]*_{chap_int:03d}.mp4"))
-            except (ValueError, TypeError):
-                pass
-        if not files:
-            files = list(safe.glob(f"{chapter}.mp4"))
-        if not files:
-            try:
-                chap_int = int(float(chapter))
-                files = list(safe.glob(f"{chap_int:03d}.mp4"))
-            except (ValueError, TypeError):
-                pass
-        if not files:
+        video = _chapter_video(safe, chapter)
+        if not video:
             raise HTTPException(status_code=404)
-        return _serve_video(str(files[0]), request)
+        return _serve_video(str(video), request)
     else:
         cap_dir = safe / f"cap_{chapter}"
         if not cap_dir.exists():
@@ -189,9 +187,7 @@ def api_play(content_type: str, source: str, content_id: str, chapter: str, requ
 
 @api_router.get('/play/remote/{content_type}/{source}/{content_id}/{chapter}')
 async def api_play_remote(content_type: str, source: str, content_id: str, chapter: str):
-    src = get_source(content_type, source)
-    if not src:
-        raise HTTPException(status_code=404, detail='Fuente no encontrada')
+    src = _require_source(content_type, source)
 
     if content_type == 'anime':
         try:
@@ -228,15 +224,7 @@ def api_manga_images(subpath: str, request: Request):
     if not safe.exists():
         raise HTTPException(status_code=404)
 
-    stat = safe.stat()
-    etag = f'"{stat.st_mtime:.0f}-{stat.st_size}"'
-    if etag and request.headers.get('if-none-match') == etag:
-        return Response(status_code=304)
-
-    return FileResponse(safe, headers={
-        'Cache-Control': 'public, max-age=86400',
-        'ETag': etag,
-    })
+    return _file_with_etag(safe, request)
 
 
 @lru_cache(maxsize=256)
@@ -259,25 +247,11 @@ def video_duration(content_id: str, chapter: str, request: Request):
     serie_dir = Path(str(settings.anime_download_dir)) / normalize_title(content_id)
     if not serie_dir.exists():
         raise HTTPException(status_code=404)
-    files = list(serie_dir.glob(f"[!.]*_{chapter}.mp4"))
-    if not files:
-        try:
-            chap_int = int(chapter)
-            files = list(serie_dir.glob(f"[!.]*_{chap_int:03d}.mp4"))
-        except (ValueError, TypeError):
-            pass
-    if not files:
-        files = list(serie_dir.glob(f"{chapter}.mp4"))
-    if not files:
-        try:
-            chap_int = int(chapter)
-            files = list(serie_dir.glob(f"{chap_int:03d}.mp4"))
-        except (ValueError, TypeError):
-            pass
-    if not files:
+    video = _chapter_video(serie_dir, chapter)
+    if not video:
         raise HTTPException(status_code=404)
 
-    duration = _probe_duration(str(files[0]))
+    duration = _probe_duration(str(video))
     if duration is not None:
         return JSONResponse(
             content={'duration': duration},

@@ -19,12 +19,50 @@ from core.models import (
     DownloadJob,
     DownloadRequest,
 )
-from core.sources import get_source
 from core.utils import normalize_title
 
 from . import api_router
+from .common import _require_source
 
 logger = logging.getLogger(__name__)
+
+
+def _persist_content(data) -> str:
+    """Register the content row and return its content_ref. Never fatal."""
+    try:
+        save_content_to_db(data.type, data.source, data.content_id, data.title, '')
+    except Exception as exc:
+        logger.warning(f"No se pudo guardar content en BD para {data.content_id}: {exc}")
+    return get_content_ref(data.source, data.content_id)
+
+
+def _enqueue(ref: str, data, chapter_id: str | None = None,
+            skip_existing: bool = False, **extra) -> int | None:
+    """Insert a queue row and hand the job to the workers.
+
+    Returns the job id, or None when it was already queued and
+    *skip_existing* is set.
+    """
+    existing = queue_find_active(ref, chapter_id)
+    if existing:
+        if skip_existing:
+            return None
+        raise HTTPException(
+            status_code=409, detail=f"Ya está en cola (estado: {existing['status']})"
+        )
+    job_id = queue_insert(ref, data.type, data.title, chapter_id)
+    try:
+        download_queue.put(DownloadJob(
+            id=job_id,
+            content_ref=ref,
+            type=data.type,
+            title=data.title,
+            chapter_id=chapter_id,
+            **extra,
+        ), timeout=5)
+    except Full:
+        raise HTTPException(status_code=503, detail='Cola de descarga llena, intente más tarde')
+    return job_id
 
 
 @api_router.get('/queue/status')
@@ -39,104 +77,39 @@ def api_queue_status():
 
 @api_router.post('/download')
 def api_download(data: DownloadRequest):
-    src = get_source(data.type, data.source)
-    if not src:
-        raise HTTPException(status_code=404, detail='Fuente no encontrada')
-
-    try:
-        save_content_to_db(data.type, data.source, data.content_id, data.title, '')
-    except Exception as exc:
-        logger.warning(f"No se pudo guardar content en BD para {data.content_id}: {exc}")
-
-    ref = get_content_ref(data.source, data.content_id)
+    _require_source(data.type, data.source)
+    ref = _persist_content(data)
 
     excluded_chapters: list[str] = []
     if data.exclude_watched:
         safe_title = normalize_title(data.title)
-        watched = get_watched_chapters(f"local:{safe_title}")
-        excluded_chapters = list(watched)
+        excluded_chapters = list(get_watched_chapters(f"local:{safe_title}"))
         if excluded_chapters:
             logger.debug(f"Excluyendo {len(excluded_chapters)} capítulos vistos para '{data.title}'")
 
-    existing = queue_find_active(ref)
-    if existing:
-        raise HTTPException(status_code=409, detail=f"Ya está en cola (estado: {existing['status']})")
-
-    job_id = queue_insert(ref, data.type, data.title)
-    try:
-        download_queue.put(DownloadJob(
-            id=job_id,
-            content_ref=ref,
-            type=data.type,
-            title=data.title,
-            excluded_chapters=excluded_chapters,
-        ), timeout=5)
-    except Full:
-        raise HTTPException(status_code=503, detail='Cola de descarga llena, intente más tarde')
+    job_id = _enqueue(ref, data, excluded_chapters=excluded_chapters)
     return {'job_id': job_id, 'message': 'Descarga encolada'}
 
 
 @api_router.post('/download/chapter')
 def api_download_chapter(data: DownloadChapterRequest):
-    src = get_source(data.type, data.source)
-    if not src:
-        raise HTTPException(status_code=404, detail='Fuente no encontrada')
+    _require_source(data.type, data.source)
+    ref = _persist_content(data)
 
-    try:
-        save_content_to_db(data.type, data.source, data.content_id, data.title, '')
-    except Exception as exc:
-        logger.warning(f"No se pudo guardar content en BD para {data.content_id}: {exc}")
-
-    ref = get_content_ref(data.source, data.content_id)
-
-    existing = queue_find_active(ref, data.chapter_id)
-    if existing:
-        raise HTTPException(status_code=409, detail=f"Ya está en cola (estado: {existing['status']})")
-
-    job_id = queue_insert(ref, data.type, data.title, data.chapter_id)
-    try:
-        download_queue.put(DownloadJob(
-            id=job_id,
-            content_ref=ref,
-            type=data.type,
-            title=data.title,
-            chapter_id=data.chapter_id,
-        ), timeout=5)
-    except Full:
-        raise HTTPException(status_code=503, detail='Cola de descarga llena, intente más tarde')
+    job_id = _enqueue(ref, data, data.chapter_id)
     return {'job_id': job_id, 'message': 'Capítulo encolado para descarga'}
 
 
 @api_router.post('/download/chapters')
 def api_download_chapters(data: DownloadChaptersRequest):
-    src = get_source(data.type, data.source)
-    if not src:
-        raise HTTPException(status_code=404, detail='Fuente no encontrada')
+    _require_source(data.type, data.source)
+    ref = _persist_content(data)
 
-    try:
-        save_content_to_db(data.type, data.source, data.content_id, data.title, '')
-    except Exception as exc:
-        logger.warning(f"No se pudo guardar content en BD para {data.content_id}: {exc}")
-
-    ref = get_content_ref(data.source, data.content_id)
-
-    job_ids = []
-    for ch_id in data.chapter_ids:
-        existing = queue_find_active(ref, ch_id)
-        if existing:
-            continue
-        job_id = queue_insert(ref, data.type, data.title, ch_id)
-        try:
-            download_queue.put(DownloadJob(
-                id=job_id,
-                content_ref=ref,
-                type=data.type,
-                title=data.title,
-                chapter_id=ch_id,
-            ), timeout=5)
-        except Full:
-            raise HTTPException(status_code=503, detail='Cola de descarga llena, intente más tarde')
-        job_ids.append(job_id)
+    job_ids = [
+        job_id for job_id in (
+            _enqueue(ref, data, ch_id, skip_existing=True) for ch_id in data.chapter_ids
+        ) if job_id is not None
+    ]
 
     return {
         'job_ids': job_ids,

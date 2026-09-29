@@ -11,12 +11,8 @@ from bs4 import BeautifulSoup
 from core.database import get_conn
 from core.disk_cache import search_cache
 from core.html_utils import (
-    ATTR_PRIORITY,
-    extract_background_images,
-    extract_images_from_noscript,
-    extract_images_from_scripts,
+    collect_chapter_images,
     extract_items_with_templates,
-    normalize_image_url,
 )
 from core.http_pool import HTTP_TIMEOUT, HttpPool
 from core.chapter_utils import chapter_float_key, normalize_chapter_number
@@ -490,83 +486,16 @@ class DynamicSource(HttpClientMixin, BaseSource):
             return []
 
         soup = BeautifulSoup(resp.text, 'html.parser')
-        img_sel = cfg.get('content_image_selector', '')
-        img_attr = cfg.get('content_image_attr', 'src')
-        base_url = self.BASE_URL
 
-        seen: set[str] = set()
-        urls: list[str] = []
-
-        def _add(norm_url):
-            if norm_url and norm_url not in seen:
-                seen.add(norm_url)
-                urls.append(norm_url)
-
-        # Strategy 1: CSS selector + configured attribute
-        if img_sel:
-            for img in soup.select(img_sel):
-                src = img.get(img_attr) or img.get('src')
-                if src:
-                    _add(normalize_image_url(src, base_url))
-            if urls:
-                return urls
-
-        # Strategy 2: CSS selector + try all priority attrs
-        if img_sel:
-            for attr_name in ATTR_PRIORITY:
-                if attr_name == img_attr:
-                    continue
-                batch = []
-                for img in soup.select(img_sel):
-                    src = img.get(attr_name) or img.get('src')
-                    if src:
-                        norm = normalize_image_url(src, base_url)
-                        if norm:
-                            batch.append(norm)
-                if batch:
-                    for n in batch:
-                        _add(n)
-                    if urls:
-                        logger.info(f'{self.CONFIG_NAME}: images found via {attr_name} (fallback attr)')
-                        return urls
-
-        # Strategy 3: <noscript> extraction
-        noscript_imgs = extract_images_from_noscript(soup)
-        for entry in noscript_imgs:
-            _add(normalize_image_url(entry['src'], base_url))
-        if urls:
-            logger.info(f'{self.CONFIG_NAME}: images found via <noscript>')
-            return urls
-
-        # Strategy 4: JS script extraction
-        script_urls = extract_images_from_scripts(soup, base_url)
-        for u in script_urls:
-            _add(normalize_image_url(u, base_url))
-        if urls:
-            logger.info(f'{self.CONFIG_NAME}: images found via JS scripts')
-            return urls
-
-        # Strategy 5: CSS background-image
-        bg_urls = extract_background_images(soup, img_sel or '')
-        for u in bg_urls:
-            _add(normalize_image_url(u, base_url))
-        if urls:
-            logger.info(f'{self.CONFIG_NAME}: images found via CSS background-image')
-            return urls
-
-        # Strategy 6: Any <img> with any src-like attribute (last resort)
-        for img in soup.find_all('img'):
-            for attr_name in ATTR_PRIORITY:
-                src = img.get(attr_name)
-                if src:
-                    norm = normalize_image_url(src, base_url)
-                    if norm:
-                        _add(norm)
-                        break
-            if urls:
-                break
-
-        return urls
+        result = collect_chapter_images(
+            soup,
+            cfg.get('content_image_selector', ''),
+            cfg.get('content_image_attr', 'src'),
+            self.BASE_URL,
+        )
+        if result.urls and result.pattern != 'any_img':
+            logger.info(f'{self.CONFIG_NAME}: images found via {result.pattern}')
+        return result.urls
 
     @property
     def supports_streaming(self) -> bool:

@@ -15,6 +15,7 @@ from core.database import update_queue_status
 from core.download_progress import clear as clear_progress
 from core.download_progress import report as report_progress
 from core.http_pool import HttpPool
+from core.library_scan import _invalidate_series_index
 from core.models import DownloadJob
 from core.settings import settings
 from core.sources import get_source
@@ -256,7 +257,6 @@ def _download_worker(worker_id: int) -> None:
                 update_queue_status(job_id, status='completed', current_progress=100)
 
             try:
-                from routers.api.common import _invalidate_series_index
                 base = Path(str(settings.anime_download_dir) if content_type == 'anime' else str(settings.manga_download_dir))
                 _invalidate_series_index(base)
             except Exception as exc:

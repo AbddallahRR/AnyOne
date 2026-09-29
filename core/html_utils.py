@@ -4,6 +4,7 @@ import json as _json
 import logging
 import os
 import re
+from typing import NamedTuple
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup, Tag
@@ -185,6 +186,79 @@ def pick_img_src(img: Tag) -> str:
     return ''
 
 
+class ChapterImages(NamedTuple):
+    """Result of collect_chapter_images: the URLs plus how they were found."""
+    urls: list[str]
+    pattern: str
+    suggested_attr: str
+
+
+def collect_chapter_images(
+    soup: BeautifulSoup,
+    selector: str,
+    attr: str,
+    base_url: str,
+) -> ChapterImages:
+    """Find the chapter images on a reader page, loosest strategy last.
+
+    Tries, in order: the configured selector with the configured attribute, the
+    same selector with every ATTR_PRIORITY attribute, <noscript>, JS variables,
+    CSS background-image, and finally any <img> at all. Returns the first
+    strategy that yields URLs. Single source of truth for both the dynamic
+    scrapers and the scraper tester, so the tester predicts real behaviour.
+    """
+    urls: list[str] = []
+    seen: set[str] = set()
+
+    def _add(raw) -> None:
+        norm = normalize_image_url(raw, base_url)
+        if norm and norm not in seen:
+            seen.add(norm)
+            urls.append(norm)
+
+    def _select(sel: str):
+        try:
+            return soup.select(sel)
+        except Exception:
+            return []
+
+    if selector:
+        for img in _select(selector):
+            _add(img.get(attr) or img.get('src'))
+        if urls:
+            return ChapterImages(urls, 'regular', attr)
+
+        for other in ATTR_PRIORITY:
+            if other == attr:
+                continue
+            for img in _select(selector):
+                _add(img.get(other) or img.get('src'))
+            if urls:
+                return ChapterImages(
+                    urls, 'data-src' if other.startswith('data-') else other, other,
+                )
+
+    for entry in extract_images_from_noscript(soup):
+        _add(entry['src'])
+    if urls:
+        found = entry['attrs'] if entry['attrs'] else {}
+        return ChapterImages(urls, 'noscript', next(iter(found), 'src'))
+
+    for u in extract_images_from_scripts(soup, base_url):
+        _add(u)
+    if urls:
+        return ChapterImages(urls, 'js_var', attr)
+
+    for u in extract_background_images(soup, selector or ''):
+        _add(u)
+    if urls:
+        return ChapterImages(urls, 'background', attr)
+
+    for img in soup.find_all('img'):
+        _add(pick_img_src(img))
+    return ChapterImages(urls, 'any_img' if urls else 'none', attr)
+
+
 def collect_reader_images(
     soup: BeautifulSoup,
     base_url: str,
@@ -358,7 +432,12 @@ def extract_background_images(soup: BeautifulSoup, selector: str) -> list[str]:
     """Extract image URLs from CSS background-image on elements matching selector."""
     urls: list[str] = []
     seen: set[str] = set()
-    elements = soup.select(selector) if selector else soup.find_all(True)
+    try:
+        elements = soup.select(selector) if selector else soup.find_all(True)
+    except Exception:
+        # A malformed selector must not take the whole scrape down.
+        logger.debug('extract_background_images: invalid selector %r', selector)
+        return urls
     pattern = re.compile(r"url\(['\"]?(.+?)['\"]?\)")
     for el in elements:
         style = el.get('style', '') or ''

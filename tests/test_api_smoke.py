@@ -65,3 +65,38 @@ class TestNotFoundHandling:
 
     def test_unknown_route_is_404(self, client):
         assert client.get('/api/definitely-not-a-route').status_code == 404
+
+
+class TestChapterVideoLookup:
+    def _dir_with(self, tmp_path, name):
+        (tmp_path / name).write_bytes(b'x')
+        return tmp_path
+
+    def test_finds_exact_name(self, tmp_path):
+        from routers.api.media import _chapter_video
+        d = self._dir_with(tmp_path, 'One Piece_005.mp4')
+        assert _chapter_video(d, '005').name == 'One Piece_005.mp4'
+
+    def test_pads_numeric_chapter(self, tmp_path):
+        from routers.api.media import _chapter_video
+        d = self._dir_with(tmp_path, 'One Piece_005.mp4')
+        assert _chapter_video(d, '5').name == 'One Piece_005.mp4'
+
+    def test_falls_back_to_bare_number(self, tmp_path):
+        from routers.api.media import _chapter_video
+        d = self._dir_with(tmp_path, '005.mp4')
+        assert _chapter_video(d, '5').name == '005.mp4'
+
+    def test_returns_none_when_absent(self, tmp_path):
+        from routers.api.media import _chapter_video
+        assert _chapter_video(tmp_path, '5') is None
+
+    def test_non_numeric_chapter_is_used_verbatim(self, tmp_path):
+        from routers.api.media import _chapter_video
+        d = self._dir_with(tmp_path, 'Serie_extra.mp4')
+        assert _chapter_video(d, 'extra').name == 'Serie_extra.mp4'
+
+    def test_skips_dotfiles(self, tmp_path):
+        from routers.api.media import _chapter_video
+        (tmp_path / '.hidden_005.mp4').write_bytes(b'x')
+        assert _chapter_video(tmp_path, '5') is None

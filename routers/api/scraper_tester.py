@@ -5,10 +5,7 @@ from bs4 import BeautifulSoup
 from fastapi import HTTPException, Request
 
 from core.html_utils import (
-    ATTR_PRIORITY,
-    extract_background_images,
-    extract_images_from_noscript,
-    extract_images_from_scripts,
+    collect_chapter_images,
     extract_items_with_templates,
     normalize_url,
 )
@@ -21,10 +18,6 @@ from core.throttle import rate_limiter
 from . import api_router
 
 logger = logging.getLogger(__name__)
-
-
-def _normalize_url(url: str, base_url: str) -> str:
-    return normalize_url(url, base_url)
 
 
 def _fetch_url(url: str, timeout: int = HTTP_TIMEOUT) -> str:
@@ -113,7 +106,7 @@ async def api_test_config(request: Request):
                     elem = None
                 if elem:
                     val = elem.get(cover_attr, '')
-                    item['cover'] = _normalize_url(val, base_url)
+                    item['cover'] = normalize_url(val, base_url)
             if item:
                 extracted.append(item)
 
@@ -166,7 +159,7 @@ async def api_test_config(request: Request):
                     if elem:
                         val = elem.get_text(strip=True) if attr == 'text' else elem.get(attr, '')
                         if field == 'cover':
-                            val = _normalize_url(val, base_url)
+                            val = normalize_url(val, base_url)
                         extracted[field] = val
         else:
             item_sel = config.get('chapters_item_selector', '')
@@ -235,107 +228,12 @@ async def api_test_config(request: Request):
         if content_type == 'image':
             img_sel = config.get('content_image_selector', '')
             img_attr = config.get('content_image_attr', 'src')
-            images = []
-            methods_tried = []
-            detected_pattern = None
-            suggested_attr = img_attr
+            found = collect_chapter_images(soup, img_sel, img_attr, base_url)
 
-            # Strategy 1: CSS selector + configured attribute
-            if img_sel:
-                try:
-                    imgs = soup.select(img_sel)
-                except Exception:
-                    imgs = []
-                for img in imgs:
-                    src = img.get(img_attr) or img.get('src')
-                    if src:
-                        norm = _normalize_url(src, base_url)
-                        if norm:
-                            images.append(norm)
-                methods_tried.append({
-                    'method': 'css_selector',
-                    'attr': img_attr,
-                    'count': len(images),
-                })
-                if images:
-                    detected_pattern = 'regular'
-
-            # Strategy 2: CSS selector + try all priority attrs
-            if not images and img_sel:
-                for attr_name in ATTR_PRIORITY:
-                    if attr_name == img_attr:
-                        continue
-                    batch = []
-                    try:
-                        imgs = soup.select(img_sel)
-                    except Exception:
-                        imgs = []
-                    for img in imgs:
-                        src = img.get(attr_name) or img.get('src')
-                        if src:
-                            norm = _normalize_url(src, base_url)
-                            if norm and norm not in images:
-                                batch.append(norm)
-                    if batch:
-                        images = batch
-                        suggested_attr = attr_name
-                        detected_pattern = 'data-src' if attr_name.startswith('data-') else attr_name
-                        methods_tried.append({
-                            'method': 'css_selector_all_attrs',
-                            'attr': attr_name,
-                            'count': len(images),
-                        })
-                        break
-
-            # Strategy 3: <noscript> extraction
-            if not images:
-                noscript_imgs = extract_images_from_noscript(soup)
-                for entry in noscript_imgs:
-                    src = entry['src']
-                    norm = _normalize_url(src, base_url)
-                    if norm:
-                        images.append(norm)
-                if images:
-                    detected_pattern = 'noscript'
-                    suggested_attr = list(entry['attrs'].keys())[0] if noscript_imgs and entry['attrs'] else 'src'
-                methods_tried.append({
-                    'method': 'noscript',
-                    'count': len(images),
-                })
-
-            # Strategy 4: JS script extraction
-            if not images:
-                script_urls = extract_images_from_scripts(soup, base_url)
-                for u in script_urls:
-                    norm = _normalize_url(u, base_url)
-                    if norm:
-                        images.append(norm)
-                if images:
-                    detected_pattern = 'js_var'
-                methods_tried.append({
-                    'method': 'js_scripts',
-                    'count': len(images),
-                })
-
-            # Strategy 5: CSS background-image
-            if not images:
-                bg_urls = extract_background_images(soup, img_sel)
-                for u in bg_urls:
-                    norm = _normalize_url(u, base_url)
-                    if norm:
-                        images.append(norm)
-                if images:
-                    detected_pattern = 'background'
-                methods_tried.append({
-                    'method': 'background_image',
-                    'count': len(images),
-                })
-
-            extracted['images'] = images[:50]
-            extracted['methods_tried'] = methods_tried
-            extracted['detected_pattern'] = detected_pattern or 'none'
-            if suggested_attr != img_attr:
-                extracted['suggested_attr'] = suggested_attr
+            extracted['images'] = found.urls[:50]
+            extracted['detected_pattern'] = found.pattern
+            if found.suggested_attr != img_attr:
+                extracted['suggested_attr'] = found.suggested_attr
         else:
             vid_sel = config.get('content_video_selector', '')
             vid_attr = config.get('content_video_attr', 'src')

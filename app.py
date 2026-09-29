@@ -16,7 +16,8 @@ from core.database import cleanup_download_queue, init_db
 from core.download_worker import start_workers, stop_workers
 from core.settings import settings
 from core.sources import SOURCES, sync_source_settings
-from routers.api import _check_all_updates_core_for_ref, api_router
+from core.updates import check_series
+from routers.api import api_router
 from routers.pages import router as pages_router
 
 logging.basicConfig(
@@ -59,7 +60,7 @@ def _start_update_scheduler():
                     )
                     for s in due:
                         try:
-                            result = _check_all_updates_core_for_ref(s['content_ref'])
+                            result = check_series(s["content_ref"])
                             checked_today.add((weekday, s['content_ref']))
                             if result.get('new_chapters'):
                                 logger.info(

@@ -15,6 +15,7 @@ from .common import (
     _find_local_serie_dir,
     _local_chapters_anime,
     _local_chapters_manga,
+    _require_source,
     _safe_path,
 )
 
@@ -78,9 +79,7 @@ def api_local_chapters(type: str, id: str):
 
 @api_router.get('/chapters/with-local/{type}/{source}/{id}')
 async def api_chapters_with_local(type: str, source: str, id: str):
-    src = get_source(type, source)
-    if not src:
-        raise HTTPException(status_code=404, detail='Fuente no encontrada')
+    src = _require_source(type, source)
     try:
         remote_chapters = await src.get_chapters(id)
         base_dir = Path(_base_folder(type))
@@ -107,9 +106,7 @@ async def api_chapters_with_local(type: str, source: str, id: str):
 
 @api_router.get('/content/{content_type}/{source}/{content_id}')
 async def api_content_details(content_type: str, source: str, content_id: str, refresh: bool = False):
-    src = get_source(content_type, source)
-    if not src:
-        raise HTTPException(status_code=404, detail='Fuente no encontrada')
+    src = _require_source(content_type, source)
 
     cache_key = f'{content_type}:{source}:{content_id}'
     if not refresh:
@@ -131,9 +128,7 @@ async def api_content_details(content_type: str, source: str, content_id: str, r
 
 @api_router.get('/chapters/{content_type}/{source}/{content_id}')
 async def api_chapters(content_type: str, source: str, content_id: str, refresh: bool = False):
-    src = get_source(content_type, source)
-    if not src:
-        raise HTTPException(status_code=404, detail='Fuente no encontrada')
+    src = _require_source(content_type, source)
 
     cache_key = f'{content_type}:{source}:{content_id}'
     if not refresh:

@@ -23,6 +23,7 @@ from core.settings import settings
 
 from . import api_router
 from .common import _resolve_series_title
+from .media import _chapter_video, _probe_duration
 
 logger = logging.getLogger(__name__)
 
@@ -49,27 +50,11 @@ def _get_chapter_total(folder: str, content_type: str, chapter: str) -> int:
                 break
     elif content_type == 'anime':
         base = Path(str(settings.anime_download_dir)) / normalize_title(folder)
-        try:
-            chap_int = int(float(chapter))
-        except (ValueError, TypeError):
-            chap_int = None
-        matched_file = None
-        for pattern in (f'*_{chapter}.mp4', f'{chapter}.mp4',
-                        f'{chap_int:03d}.mp4') if chap_int else ():
-            for f in base.glob(pattern):
-                if f.is_file():
-                    matched_file = f
-                    break
-            if matched_file:
-                break
+        matched_file = _chapter_video(base, chapter)
         if matched_file:
-            try:
-                from .media import _get_cached_duration
-                dur = _get_cached_duration(str(matched_file))
-                if dur is not None:
-                    total = int(dur)
-            except Exception:
-                pass
+            dur = _probe_duration(str(matched_file))
+            if dur is not None:
+                total = int(dur)
 
     with _chapter_total_lock:
         _chapter_total_cache[cache_key] = (now, total)

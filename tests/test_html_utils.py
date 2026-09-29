@@ -1,6 +1,7 @@
 from bs4 import BeautifulSoup
 
 from core.html_utils import (
+    collect_chapter_images,
     collect_reader_images,
     extract_items_with_templates,
     normalize_url,
@@ -195,3 +196,79 @@ class TestCollectReaderImages:
             '</div>'
         )
         assert collect_reader_images(soup, self.BASE) == ['https://base.com/keep.jpg']
+
+
+class TestCollectChapterImages:
+    BASE = 'https://base.com'
+
+    def _soup(self, html):
+        return BeautifulSoup(html, 'html.parser')
+
+    def test_uses_configured_selector_and_attr(self):
+        soup = self._soup('<img class="page" data-src="/1.jpg">')
+        res = collect_chapter_images(soup, '.page', 'data-src', self.BASE)
+        assert res.urls == ['https://base.com/1.jpg']
+        assert res.pattern == 'regular'
+        assert res.suggested_attr == 'data-src'
+
+    def test_falls_back_to_other_priority_attrs(self):
+        soup = self._soup('<img class="page" data-lazy-src="/1.jpg">')
+        res = collect_chapter_images(soup, '.page', 'src', self.BASE)
+        assert res.urls == ['https://base.com/1.jpg']
+        assert res.pattern == 'data-src'
+        assert res.suggested_attr == 'data-lazy-src'
+
+    def test_falls_back_to_noscript_when_selector_empty(self):
+        soup = self._soup('<noscript><img src="/n.jpg"></noscript>')
+        res = collect_chapter_images(soup, '', 'src', self.BASE)
+        assert res.urls == ['https://base.com/n.jpg']
+        assert res.pattern == 'noscript'
+
+    def test_falls_back_to_js_variables(self):
+        soup = self._soup(
+            '<script>var chapterImages = ["https://cdn.com/x.jpg"];</script>'
+        )
+        res = collect_chapter_images(soup, '', 'src', self.BASE)
+        assert res.urls == ['https://cdn.com/x.jpg']
+        assert res.pattern == 'js_var'
+
+    def test_falls_back_to_background_image(self):
+        soup = self._soup(
+            '<img class="page" style="background-image:url(https://cdn.com/bg.jpg)">'
+        )
+        res = collect_chapter_images(soup, '.page', 'src', self.BASE)
+        assert res.urls == ['https://cdn.com/bg.jpg']
+        assert res.pattern == 'background'
+
+    def test_last_resort_collects_every_img(self):
+        soup = self._soup(
+            '<img src="https://cdn.com/1.jpg">'
+            '<img src="https://cdn.com/2.jpg">'
+            '<img src="https://cdn.com/3.jpg">'
+        )
+        res = collect_chapter_images(soup, '', 'src', self.BASE)
+        assert res.urls == [
+            'https://cdn.com/1.jpg',
+            'https://cdn.com/2.jpg',
+            'https://cdn.com/3.jpg',
+        ]
+        assert res.pattern == 'any_img'
+
+    def test_reports_none_when_nothing_found(self):
+        soup = self._soup('<p>sin imagenes</p>')
+        res = collect_chapter_images(soup, '.page', 'src', self.BASE)
+        assert res.urls == []
+        assert res.pattern == 'none'
+
+    def test_invalid_selector_does_not_raise(self):
+        soup = self._soup('<img src="https://cdn.com/1.jpg">')
+        res = collect_chapter_images(soup, '>>>bad', 'src', self.BASE)
+        assert res.urls == ['https://cdn.com/1.jpg']
+
+    def test_filters_placeholders_even_in_last_resort(self):
+        soup = self._soup(
+            '<img src="https://cdn.com/loading.gif">'
+            '<img src="https://cdn.com/real.jpg">'
+        )
+        res = collect_chapter_images(soup, '', 'src', self.BASE)
+        assert res.urls == ['https://cdn.com/real.jpg']

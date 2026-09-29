@@ -9,9 +9,10 @@ from core.database import get_conn, get_content_ref, get_enabled_source_names
 from core.disk_cache import search_cache
 from core.models import SearchQuery
 from core.scraper_health import get_status, record_failure, record_success
-from core.sources import get_enabled_sources, get_source
+from core.sources import get_enabled_sources
 
 from . import api_router
+from .common import _require_source
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +33,7 @@ async def api_search(qs: SearchQuery = Depends()):
         if cached is not None:
             return cached
 
-    source = get_source(qs.type, qs.source)
-    if not source:
-        raise HTTPException(status_code=404, detail='Fuente no encontrada')
+    source = _require_source(qs.type, qs.source)
 
     enabled_names = await asyncio.to_thread(get_enabled_source_names)
     if qs.source not in enabled_names:
