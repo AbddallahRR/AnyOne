@@ -98,7 +98,14 @@ def _save_series_metadata(series_folder: str, title: str, source_name: str,
             cover_path     = os.path.join(series_folder, cover_filename)
 
             if not os.path.exists(cover_path):
+                # ponytail: el CDN (Cloudflare) devuelve 403 a toda petición
+                # sin cabeceras Sec-Fetch-* (ver sources/ikigai.py).
                 headers = {'User-Agent': source.UA} if hasattr(source, 'UA') else {}
+                headers.update({
+                    'Sec-Fetch-Site': 'cross-site',
+                    'Sec-Fetch-Mode': 'no-cors',
+                    'Sec-Fetch-Dest': 'image',
+                })
                 if hasattr(source, 'scraper'):
                     img_data = source.scraper.get(cover_url, headers=headers).content
                 else:
