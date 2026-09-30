@@ -131,6 +131,10 @@
       clearTimeout(hideTimer);
       const video = document.getElementById('anime-video');
       hideTimer = setTimeout(() => {
+        // En remoto el overlay es click-through, así que el puntero cae dentro
+        // del <iframe> y sus mousemove nunca llegan a este documento: si la UI se
+        // oculta aquí no hay forma de volver a mostrarla. Se deja fija.
+        if (po.classList.contains('po-clickthrough')) return;
         if (!video || !video.paused) {
           po.classList.add('po-hidden');
           readerRoot?.classList.add('cursor-hidden');
@@ -172,6 +176,18 @@
   const poVolSlider  = document.getElementById('po-vol-slider');
   const poChapterNum = document.getElementById('po-chapter-num');
   const poOverlay    = document.getElementById('player-overlay');
+
+  // El overlay cubre toda la pantalla (inset:0, z-index:200). Con un <video>
+  // propio el clic debe alternar play/pause; con un <iframe> cross-origin no
+  // podemos llamar a play()/pause(), así que hay que dejarle el clic al player
+  // embebido en vez de quedárselo el overlay.
+  function setOverlayClickthrough(on) {
+    poOverlay?.classList.toggle('po-clickthrough', !!on);
+    // Al activar el modo remoto puede que la UI ya esté oculta (el temporizador de
+    // auto-hide corre antes de que exista el iframe). Sin esto la barra superior
+    // se quedaría invisible para siempre, porque en remoto no llegan mousemove.
+    if (on) poOverlay?.classList.remove('po-hidden');
+  }
 
   // ── Label del capítulo ─────────────────────────────────────────────────
   function updateChapterLabel() {
@@ -316,6 +332,8 @@
       </video>`;
     }
 
+    setOverlayClickthrough(false);
+
     const video = document.getElementById('anime-video');
     if (!video) return;
 
@@ -376,13 +394,26 @@
       <iframe id="anime-iframe" src="${embedUrl}"
               style="width:100%; height:100%; border:none; background:#000;"
               allowfullscreen
+              allow="autoplay; fullscreen; picture-in-picture"
               referrerpolicy="no-referrer"
-              sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals">
+              sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals allow-autoplay">
       </iframe>`;
     }
 
     const iframe = document.getElementById('anime-iframe');
     if (!iframe) return;
+
+    // Dejar el clic pasar al player embebido: el overlay no puede pausarlo.
+    setOverlayClickthrough(true);
+
+    // Guardar el capítulo en curso. El player remoto es un <iframe> cross-origin,
+    // así que no podemos leer currentTime del vídeo (same-origin policy); solo hay
+    // progreso a nivel de capítulo. Los milisegundos exactos requieren el
+    // reproductor propio (integración directa del stream).
+    api.post(`/api/progress/${type}/${source}/${content_id}`, {
+      chapter: currentChapterNum,
+      progress: '0',
+    }).catch(console.error);
 
     // Keep overlay visible for navigation (top bar), but hide playback controls
     const centerPlay = document.getElementById('po-center-play');

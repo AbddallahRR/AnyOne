@@ -30,3 +30,31 @@ def get_recent_progress(limit: int = 10) -> list[dict]:
         (limit,)
     ).fetchall()
     return [{'content_ref': r[0], 'chapter': r[1], 'progress': r[2]} for r in rows]
+
+
+def get_recent_remote_progress(content_type: str) -> list[dict]:
+    """Últimas series REMOTAS con progreso (NO local), para la fila
+    'Continuar viendo' del panel de búsqueda. Sin límite a propósito: a
+    diferencia de la bomba de la biblioteca (10 items), aquí la serie
+    completa de lo visto remoto. Los datos de título/portada salen de la
+    tabla content (se rellena al abrir los detalles de la serie)."""
+    conn = get_conn()
+    rows = conn.execute(
+        'SELECT c.source, c.content_id, up.chapter, up.progress, c.title, c.cover '
+        'FROM user_progress up '
+        'JOIN content c ON c.id = up.content_id '
+        "WHERE c.type = ? AND up.content_id NOT LIKE 'local:%' "
+        'ORDER BY up.updated_at DESC',
+        (content_type,)
+    ).fetchall()
+    return [
+        {
+            'source': r[0],
+            'content_id': r[1],
+            'chapter': r[2],
+            'progress': r[3],
+            'title': r[4],
+            'cover': r[5],
+        }
+        for r in rows
+    ]

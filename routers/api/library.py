@@ -10,6 +10,7 @@ from core.database import (
     get_all_series_statuses,
     get_conn,
     get_recent_progress,
+    get_recent_remote_progress,
     get_series_status,
     get_series_with_updates,
     set_series_status,
@@ -185,6 +186,12 @@ def api_library_recent():
     items = scan_downloaded_series()
     library = {item['id']: item for item in items}
     return _build_recent(library)
+
+
+@api_router.get('/recent/remote/{content_type}')
+def api_recent_remote(content_type: str):
+    """Últimas series remotas vistas, sin límite (para el panel de búsqueda)."""
+    return get_recent_remote_progress(content_type)
 
 
 @api_router.post('/library/acknowledge-updates')

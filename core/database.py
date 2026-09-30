@@ -13,7 +13,12 @@ from core.db.library import (
     set_series_status,
     set_series_updates,
 )
-from core.db.progress import get_progress, get_recent_progress, save_progress
+from core.db.progress import (
+    get_progress,
+    get_recent_progress,
+    get_recent_remote_progress,
+    save_progress,
+)
 from core.db.schedule import (
     delete_series_schedule,
     get_all_schedules,

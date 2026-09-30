@@ -204,6 +204,13 @@ video,
 }
 .player-overlay.po-hidden { opacity: 0; pointer-events: none; }
 
+/* Anime remoto: el player va en un <iframe> cross-origin (jkanime.net), así que
+   el overlay no puede llamar a play()/pause() sobre él. Si el overlay captura el
+   clic, el play/pause del player embebido no llega a dispararse nunca. Con esta
+   clase el overlay deja pasar el clic y los botones de la barra superior siguen
+   ser clicables vía la regla existente .po-top > *. */
+.player-overlay.po-clickthrough { pointer-events: none; }
+
 /* ── Top bar ── */
 .po-top {
   position: absolute;

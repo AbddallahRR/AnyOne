@@ -61,12 +61,16 @@
           </div>
         </div>
       </div>
-      <div id="anime-results" class="media-grid">
-        <div class="empty-state">
-          <i class="fas fa-search"></i>
-          <p>Busca un anime para comenzar</p>
-        </div>
+
+      <!-- Remotos vistos recientemente (sin límite) -->
+      <div id="anime-recent-section" class="recent-section hidden">
+        <h2 class="recent-title">
+          <i class="fas fa-clock"></i> Continuar viendo
+        </h2>
+        <div id="anime-recent-list" class="recent-grid"></div>
       </div>
+
+      <div id="anime-results" class="media-grid"></div>
     </div>
 
     <!-- ── Manga panel ──────────────────────────────────────────────── -->
@@ -82,12 +86,16 @@
           </div>
         </div>
       </div>
-      <div id="manga-results" class="media-grid">
-        <div class="empty-state">
-          <i class="fas fa-book-open"></i>
-          <p>Busca un manga para comenzar</p>
-        </div>
+
+      <!-- Remotos vistos recientemente (sin límite) -->
+      <div id="manga-recent-section" class="recent-section hidden">
+        <h2 class="recent-title">
+          <i class="fas fa-clock"></i> Continuar viendo
+        </h2>
+        <div id="manga-recent-list" class="recent-grid"></div>
       </div>
+
+      <div id="manga-results" class="media-grid"></div>
     </div>
 
     <!-- ── Library panel ────────────────────────────────────────────── -->

@@ -42,8 +42,33 @@ class TestReadOnlyEndpoints:
         body = client.get('/api/queue/status').json()
         assert set(body) == {'active', 'queue'}
 
-    def test_library(self, client):
-        assert isinstance(client.get('/api/library').json(), dict)
+    def test_api_library_recent(self, client):
+        body = client.get('/api/library/recent').json()
+        assert isinstance(body, list)
+
+    def test_recent_remote_endpoint_lists_series(self, client):
+        from core.database import save_content_to_db, save_progress
+        save_content_to_db('anime', 'jkanime', 'zz-test-remoto', 'ZZ Test Remoto', 'http://cover/1.jpg')
+        save_progress('jkanime:zz-test-remoto', '3', '0')
+        try:
+            body = client.get('/api/recent/remote/anime').json()
+            assert any(i['content_id'] == 'zz-test-remoto' and i['chapter'] == '3' for i in body)
+        finally:
+            conn = __import__('core.database', fromlist=['get_conn']).get_conn()
+            with conn:
+                conn.execute("DELETE FROM user_progress WHERE content_id = ?", ('jkanime:zz-test-remoto',))
+                conn.execute("DELETE FROM content WHERE id = ?", ('jkanime:zz-test-remoto',))
+
+    def test_recent_remote_excludes_local(self, client):
+        from core.database import get_conn, save_progress
+        save_progress('local:zz-test-local', '1', '0')
+        try:
+            body = client.get('/api/recent/remote/anime').json()
+            assert not any(i['content_id'] == 'zz-test-local' for i in body)
+        finally:
+            conn = get_conn()
+            with conn:
+                conn.execute("DELETE FROM user_progress WHERE content_id = ?", ('local:zz-test-local',))
 
     def test_sources_are_listed(self, client):
         body = client.get('/api/settings/sources').json()

@@ -502,6 +502,16 @@
             }
           }
         } catch (e) { console.warn(e); }
+      } else if (chapters.length) {
+        // Remoto (iframe): el tiempo exacto no es accesible cross-origin.
+        // El progreso real es el capítulo en curso sobre el total de la serie.
+        const idx = chapters.findIndex(c => String(c.number) === String(prog.chapter));
+        if (idx >= 0) {
+          const pct = Math.round(((idx + 1) / chapters.length) * 100);
+          if (progressPercentSpan) progressPercentSpan.textContent = `${pct}%`;
+          if (progressBarFill)     progressBarFill.style.width     = `${pct}%`;
+          return;
+        }
       }
       const mins = Math.floor(savedTime / 60);
       const secs = savedTime % 60;

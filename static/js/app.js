@@ -62,6 +62,8 @@
       _libraryLoaded = true;
       loadLibrary();
     }
+    if (type === 'anime') loadRemoteRecent('anime');
+    if (type === 'manga') loadRemoteRecent('manga');
   }
 
   TAB_MAP.forEach(({ btn, type }) => {
@@ -741,6 +743,61 @@
 
     // Lazy load covers
     observeCovers(list);
+  }
+
+  // ── Remotos vistos recientemente (paneles Anime / Manga) ──────────────
+  // Sin límite a propósito: 'Continuar viendo' de biblioteca está capado a
+  // 10 porque hay espacio para una bomba; aquí es el historial completo de
+  // lo que se vio por streaming.
+  async function loadRemoteRecent(type) {
+    const section = document.getElementById(`${type}-recent-section`);
+    const list    = document.getElementById(`${type}-recent-list`);
+    if (!section || !list) return;
+    try {
+      const recent = await api.get(`/api/recent/remote/${type}`);
+      if (!recent || recent.length === 0) {
+        section.classList.add('hidden');
+        list.innerHTML = '';
+        return;
+      }
+      section.classList.remove('hidden');
+      list.innerHTML = recent.map(item => {
+        const chapter = item.chapter || '1';
+        const prev = `data-id="${item.content_id}" data-type="${type}" data-source="${item.source}" data-chapter="${chapter}"`;
+        const cover = item.cover || '';
+        const metaText = `Cap. ${chapter} · visto`;
+        return `
+        <div class="recent-card" ${prev}>
+          <div class="recent-cover-wrap">
+            <img class="recent-cover cover-lazy" data-src="${cover}"
+              src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='180'%3E%3Crect fill='%2313131e' width='120' height='180'/%3E%3C/svg%3E"
+              alt="${item.title}" loading="lazy"
+              onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22120%22 height=%22180%22%3E%3Crect fill=%22%2313131e%22 width=%22120%22 height=%22180%22/%3E%3Ctext x=%2260%22 y=%2290%22 text-anchor=%22middle%22 fill=%22%236e6e88%22 font-size=%2210%22%3ESin portada%3C/text%3E%3C/svg%3E'">
+            <span class="chip chip-sm chip-${type} type-chip">${type === 'anime' ? 'Anime' : 'Manga'}</span>
+            <span class="recent-badge"></span>
+          </div>
+          <div class="recent-info">
+            <div class="recent-card-title" title="${item.title}">${item.title}</div>
+            <div class="recent-meta">${metaText}</div>
+          </div>
+        </div>`;
+      }).join('');
+
+      if (!list.dataset.bound) {
+        list.dataset.bound = '1';
+        list.addEventListener('click', e => {
+          const card = e.target.closest('.recent-card');
+          if (!card) return;
+          const { id, type, source, chapter } = card.dataset;
+          if (type && id && source) window.location.href = `/reader/${type}/${source}/${id}/${chapter || '1'}`;
+        });
+      }
+
+      observeCovers(list);
+    } catch (err) {
+      console.warn('loadRemoteRecent:', err);
+      section.classList.add('hidden');
+    }
   }
 
   // [OPT-5] _initLibraryControls se llama una sola vez (desde loadLibrary)
