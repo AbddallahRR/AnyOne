@@ -38,6 +38,21 @@
     setTimeout(() => lbl.classList.remove('changed'), 400);
   };
 
+  // Un <video> desconectado del DOM sigue sonando. Además el src vive en un
+  // hijo <source>, así que removeAttribute('src') no hace nada y load() lo
+  // vuelve a seleccionar y reproducir. Hay que cortar el medio antes de tirar
+  // el elemento.
+  function _disposeMedia(el) {
+    if (!el) return;
+    if (el.tagName === 'VIDEO') {
+      el.pause();
+      el.removeAttribute('src');
+      el.textContent = '';
+      el.load();
+    }
+    el.remove();
+  }
+
   // ── Chapter transition helpers ────────────────────────────────────────
   window.chapterTransition = function(loadFn) {
     const wrapper = document.getElementById('chapter-wrapper');
@@ -210,11 +225,7 @@
     if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
 
     const doLoad = () => {
-      const stale = chapterWrapper?.querySelector('video, iframe');
-      if (stale) {
-        if (stale.tagName === 'VIDEO') { stale.pause(); stale.removeAttribute('src'); stale.load(); }
-        stale.remove();
-      }
+      _disposeMedia(chapterWrapper?.querySelector('video, iframe'));
 
       if (chapterWrapper) chapterWrapper.innerHTML = `
         <div style="display:flex; align-items:center; justify-content:center;
@@ -297,11 +308,7 @@
     if (durData?.duration > 0) duration = durData.duration;
 
     if (chapterWrapper) {
-      const oldMedia = chapterWrapper.querySelector('video, iframe');
-      if (oldMedia) {
-        if (oldMedia.tagName === 'VIDEO') { oldMedia.pause(); oldMedia.removeAttribute('src'); oldMedia.load(); }
-        oldMedia.remove();
-      }
+      _disposeMedia(chapterWrapper.querySelector('video, iframe'));
       chapterWrapper.innerHTML = `
       <video id="anime-video" autoplay playsinline
              style="width:100%; height:100%; object-fit:contain;">
@@ -364,11 +371,7 @@
     let hasMarked = false;
 
     if (chapterWrapper) {
-      const oldMedia = chapterWrapper.querySelector('video, iframe');
-      if (oldMedia) {
-        if (oldMedia.tagName === 'VIDEO') { oldMedia.pause(); oldMedia.removeAttribute('src'); oldMedia.load(); }
-        oldMedia.remove();
-      }
+      _disposeMedia(chapterWrapper.querySelector('video, iframe'));
       chapterWrapper.innerHTML = `
       <iframe id="anime-iframe" src="${embedUrl}"
               style="width:100%; height:100%; border:none; background:#000;"
