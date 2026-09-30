@@ -6,6 +6,24 @@ document.addEventListener('DOMContentLoaded', () => {
   requestAnimationFrame(() => document.body.classList.add('ready'));
 });
 
+/* ── Transición al navegar entre páginas del menú (View Transitions, nativo) ──
+   Las tabs del menú principal son en-page salvo "Horario"/"Volver", que son
+   enlaces: sin esto el salto entre secciones se ve como un corte seco.
+   El cross-fade por defecto del navegador se afina en base.css. Si el
+   navegador no soporta la API, el enlace navega normal (no hay fallback que
+   mantener). */
+if (document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest('a[href]');
+    if (!a || e.defaultPrevented || e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;
+    if (a.target || a.hasAttribute('download')) return;
+    const href = a.getAttribute('href');
+    if (!href || href.startsWith('#') || new URL(a.href).origin !== location.origin) return;
+    e.preventDefault();
+    document.startViewTransition(() => { location.href = a.href; });
+  });
+}
+
 /* ── Modal helpers (globales) ── */
 window.openModal = function() {
   const m = document.getElementById('modal');

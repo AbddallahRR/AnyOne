@@ -39,14 +39,22 @@
 
   function setActiveTab(type) {
     if (currentType === type && type !== 'library') return; // evitar re-render innecesario
+    const from = TAB_MAP.find(t => t.type === currentType);
     currentType = type;
+    // La animación del panel se reinicia sola: display:none cancela las
+    // animaciones del subárbol y al mostrarse de nuevo arrancan de cero.
+    // La dirección sale de la posición real de cada tab en la nav, así que
+    // reordenar las tabs en el HTML reordena también hacia dónde entra el panel.
+    const order = [...document.querySelectorAll('.tab-nav .tab-btn')];
     TAB_MAP.forEach(({ btn, panel, type: t }) => {
       const active = t === type;
       btn.classList.toggle('active', active);
       panel.classList.toggle('hidden', !active);
-      if (active) {
-        panel.style.animation = 'none';
-        requestAnimationFrame(() => { panel.style.animation = ''; });
+      // Ir hacia una tab posterior entra desde la derecha; hacia una anterior,
+      // desde la izquierda. Se propaga a los hijos por herencia.
+      if (active && from) {
+        panel.style.setProperty('--enter-x',
+          order.indexOf(btn) >= order.indexOf(from.btn) ? '32px' : '-32px');
       }
     });
     // [OPT-3] Solo cargar biblioteca la primera vez que se abre esa tab
