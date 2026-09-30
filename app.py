@@ -3,6 +3,7 @@
 
 import asyncio
 import logging
+import random
 import threading
 from contextlib import asynccontextmanager
 
@@ -51,6 +52,9 @@ def _start_update_scheduler():
                 due = [
                     s for s in scheduled
                     if s['check_hour'] <= now.hour
+                    # ponytail: jitter por tick reparte la ráfaga dentro de la hora
+                    # (0-55: el tick va de 5 en 5, un sorteo mayor nunca se cumpliría).
+                    and now.minute >= random.randrange(56)
                     and (weekday, s['content_ref']) not in checked_today
                 ]
                 if due:

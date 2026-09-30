@@ -289,9 +289,17 @@ def filter_manga_images(
         try:
             rate_limiter.wait(url)
             sc = HttpPool.get_session()
+            # ponytail: el CDN (Cloudflare) devuelve 403 a toda petición sin
+            # cabeceras Sec-Fetch-* (igual que en sources/ikigai.py). El
+            # navegador las envía solas, pero esta petición sale del servidor.
             resp = sc.get(
                 url,
-                headers={'Range': f'bytes=0-{_HEADER_BYTES - 1}'},
+                headers={
+                    'Range': f'bytes=0-{_HEADER_BYTES - 1}',
+                    'Sec-Fetch-Site': 'cross-site',
+                    'Sec-Fetch-Mode': 'no-cors',
+                    'Sec-Fetch-Dest': 'image',
+                },
                 timeout=10,
                 stream=True,
             )

@@ -382,7 +382,15 @@ class IkigaiSource(HttpClientMixin, BaseSource):
         cap_dir = MangaDownloadHelper.make_chapter_dir(dest_folder, cap_num)
 
         cap_url = f"{self.BASE_URL}/capitulo/{chapter_id}/"
-        dl_headers = {**self._headers, 'Referer': cap_url}
+        # ponytail: el CDN (Cloudflare) devuelve 403 a toda petición sin
+        # cabeceras Sec-Fetch-*. Si algún día deja de funcionar, se quitan.
+        dl_headers = {
+            **self._headers,
+            'Referer': cap_url,
+            'Sec-Fetch-Site': 'cross-site',
+            'Sec-Fetch-Mode': 'no-cors',
+            'Sec-Fetch-Dest': 'image',
+        }
         failures = MangaDownloadHelper.download_images(
             img_urls, cap_dir, dl_headers, self._get_with_retry, progress_cb,
         )

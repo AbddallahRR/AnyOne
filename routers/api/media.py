@@ -206,7 +206,7 @@ async def api_play_remote(content_type: str, source: str, content_id: str, chapt
             raise HTTPException(status_code=502, detail='Error al obtener imagenes del capitulo')
         if not images:
             raise HTTPException(status_code=404, detail='No se encontraron imagenes para este capitulo')
-        cache_key = f'{content_type}:{source}:{content_id}:{chapter}'
+        cache_key = f'{content_type}:{source}:{content_id}:{chapter}:v2'
         cached = await img_filter_cache.aget(cache_key)
         if cached is not None:
             return JSONResponse(content=cached)
