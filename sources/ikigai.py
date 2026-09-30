@@ -30,8 +30,8 @@ _PAGE_WORKERS = 2                   # hilos paralelos para descargar páginas de
 class IkigaiSource(HttpClientMixin, BaseSource):
     type = 'manga'
     label = 'Ikigai'
-    BASE_URL      = "https://visorikigai.gettocaboca.com/"
-    CATALOGO_BASE = "https://visorikigai.gettocaboca.com/series/"
+    BASE_URL      = "https://visualikigai.cmpunjabrashancard.pk/"
+    CATALOGO_BASE = "https://visualikigai.cmpunjabrashancard.pk/series/"
 
     # Lock y timestamp a nivel de clase: compartidos entre todas las instancias/workers
     _refresh_lock     = threading.Lock()
