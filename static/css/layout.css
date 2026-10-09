@@ -138,7 +138,7 @@
     transition: width 0.28s cubic-bezier(0.4,0,0.2,1);
   }
   .tab-nav:hover,
-  .tab-nav:focus-within { width: 208px; }
+  .tab-nav:has(:focus-visible) { width: 208px; }
 
   .tab-btn {
     display: flex;
@@ -151,7 +151,7 @@
   }
   .tab-btn i { font-size: 15px; }   /* el icono sí conserva tamaño */
   .tab-nav:hover .tab-btn,
-  .tab-nav:focus-within .tab-btn { font-size: 13px; }
+  .tab-nav:has(:focus-visible) .tab-btn { font-size: 13px; }
 
   /* El engranaje es un glifo de texto: se ve menor que los iconos FA, así que
      se agranda y se tiñe para destacarlo. */

@@ -41,11 +41,31 @@
     popup.id = 'qi-popup';
     popup.innerHTML = `
       <div class="qi-popup-header">
-        <span class="qi-popup-title">Cola de descarga</span>
+        <span class="qi-popup-title">Descargas recientes</span>
         <button class="qi-close" id="qi-close-btn">×</button>
       </div>
       <div id="qi-list"></div>`;
     document.body.appendChild(popup);
+  }
+
+  // En Inicio hay un botón en la nav que abre la barra; en el resto de páginas
+  // se usa el pill flotante de siempre.
+  const downloadBtn = document.getElementById('nav-downloads');
+  const useButton   = !!downloadBtn;
+
+  function updateButtonBadge(n) {
+    if (!downloadBtn) return;
+    let b = downloadBtn.querySelector('.dl-badge');
+    if (n > 0) {
+      if (!b) {
+        b = document.createElement('span');
+        b.className = 'dl-badge';
+        downloadBtn.appendChild(b);
+      }
+      b.textContent = n > 99 ? '99+' : n;
+    } else if (b) {
+      b.remove();
+    }
   }
 
   // ── BroadcastChannel (compartir polling entre pestañas) ────────────────
@@ -72,10 +92,12 @@
 
   // ── Helpers ────────────────────────────────────────────────────────────
   function showIndicator() {
+    if (useButton) return;   // en Inicio el indicador es el badge del botón
     indicator.style.display = 'flex';
     requestAnimationFrame(() => requestAnimationFrame(() => indicator.classList.add('visible')));
   }
   function hideIndicator() {
+    if (useButton) return;
     indicator.classList.remove('visible');
     setTimeout(() => { indicator.style.display = 'none'; }, 250);
   }
@@ -180,6 +202,8 @@
     const label       = document.getElementById('qi-label');
     const countBadge  = document.getElementById('qi-count');
 
+    updateButtonBadge(active.length + pending.length);
+
     if (active.length > 0) {
       const best = active.reduce((a, b) => (a.progress > b.progress ? a : b), active[0]);
       if (label) label.textContent = truncate(best.title);
@@ -202,23 +226,11 @@
 
     const listDiv = document.getElementById('qi-list');
     if (listDiv) {
-      let html = '';
-      if (active.length) {
-        html += `<div class="qi-section-title">Descargando ahora</div>`;
-        html += active.map(buildJobHtml).join('');
-      }
-      if (pending.length) {
-        html += `<div class="qi-section-title" style="margin-top:${active.length ? 10 : 0}px;">En cola</div>`;
-        html += pending.map(buildJobHtml).join('');
-      }
-      if (failed.length) {
-        html += `<div class="qi-section-title" style="margin-top:${active.length || pending.length ? 10 : 0}px; color:#f87171;">Errores recientes</div>`;
-        html += failed.map(buildJobHtml).join('');
-      }
-      if (!active.length && !pending.length && !failed.length) {
-        html = `<div class="qi-empty"><i class="fas fa-check-circle" style="margin-right:6px; color:#4ade80;"></i>Sin actividad</div>`;
-      }
-      listDiv.innerHTML = html;
+      // Solo las últimas descargas (activas primero, luego en cola), cap a 5.
+      const latest = [...active, ...pending, ...failed].slice(0, 5);
+      listDiv.innerHTML = latest.length
+        ? latest.map(buildJobHtml).join('')
+        : `<div class="qi-empty"><i class="fas fa-check-circle" style="margin-right:6px; color:#4ade80;"></i>Sin actividad</div>`;
     }
 
     return hasActivity;
@@ -270,16 +282,20 @@
   }
 
   // ── Eventos ────────────────────────────────────────────────────────────
-  indicator.addEventListener('click', e => {
-    e.stopPropagation();
+  function togglePopup(e) {
+    if (e) e.stopPropagation();
     if (popupOpen) closePopup();
     else { fetchQueueStatus().then(openPopup); }
-  });
+  }
+
+  indicator.addEventListener('click', togglePopup);
+  downloadBtn?.addEventListener('click', togglePopup);
 
   document.getElementById('qi-close-btn')?.addEventListener('click', closePopup);
 
   document.addEventListener('click', e => {
-    if (popupOpen && !indicator.contains(e.target) && !popup.contains(e.target))
+    if (popupOpen && !indicator.contains(e.target) && !popup.contains(e.target)
+        && !(downloadBtn && downloadBtn.contains(e.target)))
       closePopup();
   });
 

@@ -48,22 +48,22 @@
   flex-shrink: 0;
 }
 
-/* ── Popup ── */
+/* ── Barra vertical de descargas (borde derecho) ── */
 #qi-popup {
   position: fixed;
-  top: var(--qi-popup-top, 58px);
-  right: 14px;
-  background: rgba(10,10,15,0.95);
-  border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 14px;
-  padding: 14px;
-  min-width: 280px;
-  max-width: 360px;
-  max-height: 420px;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 320px;
+  max-width: 100vw;
+  background: rgba(10,10,15,0.96);
+  border-left: 1px solid rgba(255,255,255,0.12);
+  border-radius: 14px 0 0 14px;
+  padding: 16px;
   overflow-y: auto;
-  z-index: 9999;
+  z-index: 10001;
   backdrop-filter: blur(16px);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  box-shadow: -8px 0 32px rgba(0,0,0,0.5);
   font-size: 12px;
   font-family: var(--ff-body, sans-serif);
   color: var(--text, #e8e8f0);
@@ -71,20 +71,12 @@
   flex-direction: column;
   gap: 10px;
   opacity: 0;
-  transform: translateY(-8px) scale(0.97);
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transform: translateX(100%);
+  transition: transform 0.28s cubic-bezier(0.4,0,0.2,1), opacity 0.28s ease;
 }
 #qi-popup.open {
   opacity: 1;
-  transform: translateY(0) scale(1);
-}
-.qi-section-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--muted, #7a7a8a);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  margin-bottom: 6px;
+  transform: translateX(0);
 }
 .qi-job {
   background: var(--raised, #18181f);
@@ -212,7 +204,25 @@
 }
 .qi-close:hover { background: rgba(255,255,255,0.07); color: var(--text); transform: rotate(90deg); }
 
+/* Badge del botón de descargas de la nav (solo Inicio) */
+.dl-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  background: var(--accent, #c46bff);
+  color: #fff;
+  font-size: 8px;
+  font-weight: 700;
+  border-radius: 999px;
+  min-width: 14px;
+  height: 14px;
+  line-height: 14px;
+  text-align: center;
+  padding: 0 3px;
+  pointer-events: none;
+}
+
 @media (max-width: 640px) {
   #qi-indicator { right: 10px; }
-  #qi-popup { right: 10px; left: 10px; max-width: none; }
+  #qi-popup { width: 100%; border-radius: 0; }
 }
