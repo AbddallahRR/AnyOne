@@ -386,7 +386,7 @@
     none:      { label: '',          color: '',               border: '',                      bg: '',                      icon: '' },
   };
 
-  const STATUS_ORDER = { watching: 0, completed: 1, pending: 2, none: 3 };
+  const STATUS_ORDER = { watching: 0, pending: 1, completed: 2, none: 3 };
 
   async function loadLibrary() {
     const container = document.getElementById('library-results');
