@@ -12,6 +12,7 @@ services:
       - BASE_DOWNLOAD_DIR=/data/descargas
       - DB_DIR=/data/config
       - DEBUG=false
+      - TZ=${TZ:-America/Mexico_City}
     restart: unless-stopped
     ulimits:
       nofile:
