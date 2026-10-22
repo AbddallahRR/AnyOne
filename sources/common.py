@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class HttpClientMixin:
-    UA = "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0"
+    UA = "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"
 
     def __init__(self):
         self.scraper = HttpPool.get_session()
@@ -21,6 +21,20 @@ class HttpClientMixin:
     def _get(self, url: str, referer: str | None = None, **kwargs):
         rate_limiter.wait(url)
         kwargs.setdefault('timeout', HTTP_TIMEOUT)
+        # Para cloudscraper, dejar que gestione headers para resolver challenges de Cloudflare
+        import cloudscraper
+        if isinstance(self.scraper, cloudscraper.CloudScraper):
+            headers = kwargs.pop('headers', {})
+            if referer and 'Referer' not in headers:
+                headers['Referer'] = referer
+            cookies = getattr(self, '_cookies', None)
+            if cookies:
+                kwargs.setdefault('cookies', cookies)
+            if headers:
+                kwargs['headers'] = headers
+            resp = self.scraper.get(url, **kwargs)
+            resp.raise_for_status()
+            return resp
         headers = self._headers.copy()
         if referer:
             headers['Referer'] = referer

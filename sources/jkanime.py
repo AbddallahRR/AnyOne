@@ -652,7 +652,12 @@ class JkanimeSource(HttpClientMixin, BaseSource):
         encoded = _url_quote(query)
         url     = f"{self.BASE_URL}/buscar/{encoded}"
         try:
-            html = self._get(url).text
+            # Warm up: obtener cookies de Cloudflare visitando la home
+            try:
+                self._get(self.BASE_URL + "/", referer=None)
+            except Exception:
+                pass
+            html = self._get(url, referer=f"{self.BASE_URL}/").text
         except Exception as exc:
             logger.exception(f"Jkanime search error: {exc}")
             return []

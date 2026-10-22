@@ -38,7 +38,13 @@ class HttpPool:
     @classmethod
     def get_scraper(cls) -> cloudscraper.CloudScraper:
         if not hasattr(cls._local, 'scraper') or cls._local.scraper is None:
-            scraper = cloudscraper.create_scraper()
+            scraper = cloudscraper.create_scraper(
+                browser={
+                    'browser': 'firefox',
+                    'platform': 'linux',
+                    'mobile': False
+                }
+            )
             adapter = HTTPAdapter(
                 pool_connections=8,
                 pool_maxsize=12,
