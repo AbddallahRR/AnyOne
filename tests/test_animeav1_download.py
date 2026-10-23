@@ -21,7 +21,7 @@ def test_download_uses_only_sub_mp4upload(monkeypatch, tmp_path):
         return 'https://cdn.example/video.mp4'
 
     monkeypatch.setattr(src, '_mp4upload_direct', fake_direct)
-    monkeypatch.setattr(src, '_remote_size', lambda url: None)
+    monkeypatch.setattr(src, '_remote_size', lambda *a: None)
     monkeypatch.setattr(
         JkanimeSource, '_download_curl',
         lambda self, url, path, **kw: path,
@@ -44,3 +44,52 @@ def test_details_cover_falls_back_to_cdn(monkeypatch):
 
     assert details.cover == 'https://cdn.animeav1.com/covers/3933.jpg'
     assert details.total_episodes == 2
+
+
+def test_download_falls_back_to_pixeldrain(monkeypatch, tmp_path):
+    src = AnimeAV1Source()
+    src.get_episode_links = lambda *a, **k: EpisodeLinks(
+        stream={'SUB': [], 'DUB': []},
+        download={'SUB': [EpisodeLink(server='PDrain', url='https://pixeldrain.com/u/JvqHSxgE')]},
+    )
+    used = {}
+
+    def fake_direct(server, url):
+        used['server'] = server
+        return 'https://cdn.example/video.mp4', 'https://pixeldrain.com/', 'https://pixeldrain.com'
+
+    monkeypatch.setattr(src, '_download_direct', fake_direct)
+    monkeypatch.setattr(src, '_remote_size', lambda *a: None)
+    monkeypatch.setattr(JkanimeSource, '_download_curl', lambda self, url, path, **kw: path)
+
+    out = src.download_chapter_sync('yomi-no-tsugai', '1', str(tmp_path), '1')
+
+    assert used['server'] == 'pixeldrain'
+    assert out.endswith('001.mp4')
+
+
+def test_download_prioritizes_mp4upload_over_pixeldrain(monkeypatch, tmp_path):
+    src = AnimeAV1Source()
+    src.get_episode_links = lambda *a, **k: EpisodeLinks(
+        stream={'SUB': [], 'DUB': []},
+        download={'SUB': [
+            EpisodeLink(server='PDrain', url='https://pixeldrain.com/u/JvqHSxgE'),
+            EpisodeLink(server='MP4Upload', url='https://www.mp4upload.com/subid'),
+        ]},
+    )
+    order = []
+
+    def fake_direct(server, url):
+        order.append(server)
+        if server == 'mp4upload':
+            raise Exception('token muerto')
+        return 'https://cdn.example/video.mp4', 'https://pixeldrain.com/', 'https://pixeldrain.com'
+
+    monkeypatch.setattr(src, '_download_direct', fake_direct)
+    monkeypatch.setattr(src, '_remote_size', lambda *a: None)
+    monkeypatch.setattr(JkanimeSource, '_download_curl', lambda self, url, path, **kw: path)
+
+    out = src.download_chapter_sync('yomi-no-tsugai', '1', str(tmp_path), '1')
+
+    assert order == ['mp4upload', 'mp4upload', 'pixeldrain']
+    assert out.endswith('001.mp4')

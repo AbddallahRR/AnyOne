@@ -477,12 +477,22 @@ class AnimeAV1Source(HttpClientMixin, BaseSource):
         JkanimeSource._validate_mp4upload_url(self, direct)
         return direct
 
-    def _remote_size(self, url: str) -> int | None:
+    def _download_direct(self, server: str, page_url: str) -> tuple[str, str, str]:
+        """Devuelve (url directa, referer, origin) para un servidor de descarga."""
+        if server == 'mp4upload':
+            return self._mp4upload_direct(page_url), _MP4UPLOAD_REFERER, _MP4UPLOAD_ORIGIN
+        m = re.search(r'pixeldrain\.com/u/([\w-]+)', page_url)
+        if not m:
+            raise Exception(f"Pixeldrain: URL no reconocida: {page_url}")
+        return (f"https://pixeldrain.com/api/file/{m.group(1)}?download",
+                'https://pixeldrain.com/', 'https://pixeldrain.com')
+
+    def _remote_size(self, url: str, referer: str, origin: str) -> int | None:
         try:
             head = self.scraper.head(url, headers={
                 **self._headers,
-                'Referer': _MP4UPLOAD_REFERER,
-                'Origin': _MP4UPLOAD_ORIGIN,
+                'Referer': referer,
+                'Origin': origin,
             }, timeout=HTTP_TIMEOUT)
             return int(head.headers.get('content-length') or 0) or None
         except Exception:
@@ -499,26 +509,36 @@ class AnimeAV1Source(HttpClientMixin, BaseSource):
         filepath = os.path.join(dest_folder, f"{cap}.mp4")
         os.makedirs(dest_folder, exist_ok=True)
 
-        mp4upload = next((l for l in subs if 'mp4upload' in (l.server or '').lower()), None)
-        if not mp4upload:
+        # MP4Upload primero; PDrain como alternativa
+        candidates = []
+        for server in ('mp4upload', 'pixeldrain'):
+            match = next((l for l in subs if server in (l.url or '').lower()), None)
+            if match:
+                candidates.append((server, match.url))
+        if not candidates:
             disponible = ', '.join(f"{l.server}: {l.url}" for l in subs)
-            raise Exception(f"AnimeAV1: no hay servidor MP4Upload. Otros enlaces: {disponible}")
+            raise Exception(f"AnimeAV1: sin servidores soportados (MP4Upload/PDrain). Enlaces: {disponible}")
 
-        # Token del CDN de corta vida: re-resolver una vez si falla
-        for attempt in range(2):
-            try:
-                direct = self._mp4upload_direct(mp4upload.url)
-                size = self._remote_size(direct)
-                if size and os.path.exists(filepath) and os.path.getsize(filepath) == size:
-                    logger.info(f"AnimeAV1: archivo ya completo, reutilizando: {filepath}")
-                    return filepath
-                return JkanimeSource._download_curl(
-                    self, direct, filepath,
-                    referer=_MP4UPLOAD_REFERER,
-                    origin=_MP4UPLOAD_ORIGIN,
-                    progress_cb=progress_cb,
-                )
-            except Exception as exc:
-                if attempt == 1:
-                    raise
-                logger.warning(f"AnimeAV1: intento {attempt + 1} de MP4Upload falló ({exc}), reintentando")
+        last_error = None
+        for idx, (server, page_url) in enumerate(candidates):
+            if idx and os.path.exists(filepath):
+                # No reanudar un parcial con datos de otro servidor
+                os.remove(filepath)
+            # Token del CDN de corta vida: re-resolver una vez si falla
+            for attempt in range(2):
+                try:
+                    direct, referer, origin = self._download_direct(server, page_url)
+                    size = self._remote_size(direct, referer, origin)
+                    if size and os.path.exists(filepath) and os.path.getsize(filepath) == size:
+                        logger.info(f"AnimeAV1: archivo ya completo, reutilizando: {filepath}")
+                        return filepath
+                    return JkanimeSource._download_curl(
+                        self, direct, filepath,
+                        referer=referer,
+                        origin=origin,
+                        progress_cb=progress_cb,
+                    )
+                except Exception as exc:
+                    last_error = exc
+                    logger.warning(f"AnimeAV1: {server} intento {attempt + 1} falló ({exc}), reintentando")
+        raise Exception(f"AnimeAV1: no se pudo descargar el capítulo: {last_error}")
