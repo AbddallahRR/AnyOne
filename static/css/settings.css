@@ -13,22 +13,7 @@
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 16px 24px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-}
-
-.settings-back-btn {
-  font-size: 14px;
-  color: var(--muted);
-  text-decoration: none;
-  padding: 6px 12px;
-  border-radius: 8px;
-  transition: background 0.15s, color 0.15s;
-}
-.settings-back-btn:hover {
-  background: var(--raised);
-  color: var(--text);
+  margin-bottom: 20px;
 }
 
 .settings-title {
@@ -41,50 +26,7 @@
 
 .settings-layout {
   display: flex;
-  min-height: calc(100vh - 60px);
-}
-
-/* ── Sidebar ── */
-.settings-sidebar {
-  width: 220px;
-  flex-shrink: 0;
-  border-right: 1px solid var(--border);
-  padding: 16px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  background: var(--surface);
-}
-
-.settings-tab {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border-radius: 10px;
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 500;
-  font-family: var(--ff-body);
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-  text-align: left;
-  width: 100%;
-}
-.settings-tab:hover {
-  background: var(--raised);
-  color: var(--text-dim);
-}
-.settings-tab.active {
-  background: rgba(124,92,252,0.12);
-  color: var(--accent-lt);
-}
-.settings-tab i {
-  font-size: 14px;
-  width: 18px;
-  text-align: center;
+  min-height: calc(100vh - 140px);
 }
 
 /* ── Main content ── */
@@ -867,21 +809,6 @@
 /* ── Loading spinner for buttons ── */
 
 @media (max-width: 700px) {
-  .settings-layout {
-    flex-direction: column;
-  }
-  .settings-sidebar {
-    width: 100%;
-    flex-direction: row;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-    padding: 8px 12px;
-    overflow-x: auto;
-  }
-  .settings-tab {
-    flex-shrink: 0;
-    width: auto;
-  }
   .settings-main {
     padding: 16px;
   }

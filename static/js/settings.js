@@ -22,13 +22,14 @@
   const dynamicList = $('dynamic-sources-list');
   const wizard = $('scraper-wizard');
 
-  document.querySelectorAll('.settings-tab').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.settings-tab').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.settings-tab-content').forEach(p => p.classList.remove('active'));
-      btn.classList.add('active');
-      $(`tab-${btn.dataset.tab}`).classList.add('active');
-    });
+  // ── Cambio entre Fuentes y Generador ─────────────────────────────────
+  $('open-generator-btn')?.addEventListener('click', () => {
+    $('tab-sources').classList.remove('active');
+    $('tab-generator').classList.add('active');
+  });
+  $('back-to-sources-btn')?.addEventListener('click', () => {
+    $('tab-generator').classList.remove('active');
+    $('tab-sources').classList.add('active');
   });
 
   async function loadSources() {

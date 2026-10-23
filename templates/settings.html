@@ -8,25 +8,18 @@
 {% endblock %}
 
 {% block content %}
-<div class="settings-page">
+<div class="settings-page has-sidebar">
+
+  {% with active = 'settings' %}{% include "_sidebar.html" %}{% endwith %}
+
+  <div class="page-content">
 
   <!-- Header -->
   <header class="settings-header">
-    <a href="/" class="settings-back-btn">&larr; Volver</a>
     <h1 class="settings-title">Configuración</h1>
   </header>
 
   <div class="settings-layout">
-    <!-- Sidebar -->
-    <nav class="settings-sidebar">
-      <button class="settings-tab active" data-tab="sources">
-        <i class="fas fa-layer-group"></i> Fuentes
-      </button>
-      <button class="settings-tab" data-tab="generator">
-        <i class="fas fa-sync-alt"></i> Generador
-      </button>
-    </nav>
-
     <!-- Main content -->
     <main class="settings-main">
 
@@ -46,13 +39,23 @@
           </label>
           <small>Las fuentes con error seguirán registrándose internamente, pero no se mostrarán notificaciones visuales ni el indicador de error persistente.</small>
         </div>
+        <div style="margin-top:24px;">
+          <button id="open-generator-btn" class="btn-secondary">
+            <i class="fas fa-sync-alt"></i> Generador de fuentes
+          </button>
+        </div>
       </section>
 
       <!-- ── Generator Tab ── -->
       <section id="tab-generator" class="settings-tab-content">
-        <div class="tab-header">
-          <h2>Generador de fuentes</h2>
-          <p class="tab-desc">Crea o edita fuentes de contenido dinámicas.</p>
+        <div class="tab-header" style="display:flex; align-items:flex-start; justify-content:space-between; gap:16px;">
+          <div>
+            <h2>Generador de fuentes</h2>
+            <p class="tab-desc">Crea o edita fuentes de contenido dinámicas.</p>
+          </div>
+          <button id="back-to-sources-btn" class="btn-ghost">
+            <i class="fas fa-arrow-left"></i> Fuentes
+          </button>
         </div>
 
         <!-- Toolbar -->
@@ -607,6 +610,7 @@
       </section>
 
     </main>
+  </div>
   </div>
 </div>
 {% endblock %}

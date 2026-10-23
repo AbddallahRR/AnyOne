@@ -39,7 +39,7 @@ JS_BUNDLES = {
     "index":    ["base.js", "toast.js", "confirm.js", "queue-indicator.js", "scraper-health.js", "notifications.js", "app.js"],
     "serie":    ["base.js", "toast.js", "confirm.js", "queue-indicator.js", "scraper-health.js", "notifications.js", "serie.js"],
     "reader":   ["base.js", "reader.js"],
-    "settings": ["base.js", "toast.js", "confirm.js", "settings.js"],
+    "settings": ["base.js", "toast.js", "confirm.js", "queue-indicator.js", "notifications.js", "settings.js"],
     "schedule": ["base.js", "toast.js", "confirm.js", "queue-indicator.js", "scraper-health.js", "notifications.js", "schedule.js"],
 }
 
