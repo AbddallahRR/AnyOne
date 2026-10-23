@@ -205,10 +205,11 @@
 .qi-close:hover { background: rgba(255,255,255,0.07); color: var(--text); transform: rotate(90deg); }
 
 /* Badge del botón de descargas de la nav (solo Inicio) */
+#nav-downloads { position: relative; }
 .dl-badge {
   position: absolute;
   top: -3px;
-  right: -3px;
+  left: 26px;
   background: var(--accent, #c46bff);
   color: #fff;
   font-size: 8px;

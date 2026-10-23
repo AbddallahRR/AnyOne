@@ -467,7 +467,7 @@
         Object.assign(badge.style, {
           position: 'absolute',
           top: '-5px',
-          right: '-6px',
+          left: '26px',
           background: 'var(--accent)',
           color: '#fff',
           fontSize: '9px',
@@ -497,7 +497,7 @@
         Object.assign(b.style, {
           position: 'absolute',
           top: '-3px',
-          right: '-3px',
+          left: '26px',
           background: 'var(--accent)',
           color: '#fff',
           fontSize: '8px',
