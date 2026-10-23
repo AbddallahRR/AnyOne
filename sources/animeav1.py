@@ -477,15 +477,53 @@ class AnimeAV1Source(HttpClientMixin, BaseSource):
         JkanimeSource._validate_mp4upload_url(self, direct)
         return direct
 
-    def _download_direct(self, server: str, page_url: str) -> tuple[str, str, str]:
-        """Devuelve (url directa, referer, origin) para un servidor de descarga."""
+    _TRANSFERIT_API = 'https://bt7.api.mega.co.nz/cs'
+
+    def _transferit_call(self, xh: str, payload: dict) -> dict:
+        resp = self.scraper.post(
+            f"{self._TRANSFERIT_API}?id=1&x={xh}",
+            json=[payload],
+            headers={'Origin': 'https://transfer.it', 'Referer': 'https://transfer.it/'},
+            timeout=HTTP_TIMEOUT,
+        )
+        data = resp.json()
+        if not isinstance(data, list) or not data or not isinstance(data[0], dict):
+            raise Exception(f"TransferIt: respuesta inválida: {data}")
+        return data[0]
+
+    def _transferit_direct(self, page_url: str) -> tuple[str, int | None]:
+        """Resuelve un enlace transfer.it con la misma API MEGA del sitio."""
+        m = re.search(r'transfer\.it/t/([\w-]+)', page_url)
+        if not m:
+            raise Exception(f"TransferIt: URL no reconocida: {page_url}")
+        xh = m.group(1)
+        info = self._transferit_call(xh, {'a': 'xi', 'xh': xh})
+        if info.get('pw'):
+            raise Exception("TransferIt: el enlace está protegido con contraseña")
+
+        nodes = self._transferit_call(xh, {'a': 'f', 'c': 1, 'r': 1}).get('f') or []
+        files = [n for n in nodes if n.get('t') == 0]
+        if len(files) == 1:
+            handle, size = files[0]['h'], files[0].get('s')
+        elif files and info.get('z'):
+            # Carpeta con varios archivos: el servidor solo ofrece el zip
+            handle, size = info['z'], (info.get('size') or [None])[0]
+        else:
+            raise Exception("TransferIt: no se encontró el archivo")
+        return f"{self._TRANSFERIT_API}/g?x={xh}&n={handle}&fn=video.mp4", size
+
+    def _download_direct(self, server: str, page_url: str) -> tuple[str, str, str, int | None]:
+        """Devuelve (url directa, referer, origin, tamaño) de un servidor."""
         if server == 'mp4upload':
-            return self._mp4upload_direct(page_url), _MP4UPLOAD_REFERER, _MP4UPLOAD_ORIGIN
+            return self._mp4upload_direct(page_url), _MP4UPLOAD_REFERER, _MP4UPLOAD_ORIGIN, None
+        if server == 'transfer.it':
+            url, size = self._transferit_direct(page_url)
+            return url, 'https://transfer.it/', 'https://transfer.it', size
         m = re.search(r'pixeldrain\.com/u/([\w-]+)', page_url)
         if not m:
             raise Exception(f"Pixeldrain: URL no reconocida: {page_url}")
         return (f"https://pixeldrain.com/api/file/{m.group(1)}?download",
-                'https://pixeldrain.com/', 'https://pixeldrain.com')
+                'https://pixeldrain.com/', 'https://pixeldrain.com', None)
 
     def _remote_size(self, url: str, referer: str, origin: str) -> int | None:
         try:
@@ -509,15 +547,15 @@ class AnimeAV1Source(HttpClientMixin, BaseSource):
         filepath = os.path.join(dest_folder, f"{cap}.mp4")
         os.makedirs(dest_folder, exist_ok=True)
 
-        # MP4Upload primero; PDrain como alternativa
+        # MP4Upload primero; PDrain y TransferIt como alternativas
         candidates = []
-        for server in ('mp4upload', 'pixeldrain'):
+        for server in ('mp4upload', 'pixeldrain', 'transfer.it'):
             match = next((l for l in subs if server in (l.url or '').lower()), None)
             if match:
                 candidates.append((server, match.url))
         if not candidates:
             disponible = ', '.join(f"{l.server}: {l.url}" for l in subs)
-            raise Exception(f"AnimeAV1: sin servidores soportados (MP4Upload/PDrain). Enlaces: {disponible}")
+            raise Exception(f"AnimeAV1: sin servidores soportados (MP4Upload/PDrain/TransferIt). Enlaces: {disponible}")
 
         last_error = None
         for idx, (server, page_url) in enumerate(candidates):
@@ -527,8 +565,9 @@ class AnimeAV1Source(HttpClientMixin, BaseSource):
             # Token del CDN de corta vida: re-resolver una vez si falla
             for attempt in range(2):
                 try:
-                    direct, referer, origin = self._download_direct(server, page_url)
-                    size = self._remote_size(direct, referer, origin)
+                    direct, referer, origin, expected = self._download_direct(server, page_url)
+                    # TransferIt ya informa el tamaño; evitar un HEAD que no responde
+                    size = expected or self._remote_size(direct, referer, origin)
                     if size and os.path.exists(filepath) and os.path.getsize(filepath) == size:
                         logger.info(f"AnimeAV1: archivo ya completo, reutilizando: {filepath}")
                         return filepath
@@ -537,6 +576,7 @@ class AnimeAV1Source(HttpClientMixin, BaseSource):
                         referer=referer,
                         origin=origin,
                         progress_cb=progress_cb,
+                        expected=expected,
                     )
                 except Exception as exc:
                     last_error = exc

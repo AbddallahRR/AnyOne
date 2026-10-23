@@ -375,7 +375,7 @@ class JkanimeSource(HttpClientMixin, BaseSource):
     def _download_curl(self, url: str, filepath: str,
                        referer: str = 'https://www.mp4upload.com/',
                        origin: str  = 'https://www.mp4upload.com',
-                       progress_cb=None) -> str:
+                       progress_cb=None, expected: int | None = None) -> str:
         """
         Descarga con curl. Soporta reanudación (-C -).
         Reintenta una vez si el archivo queda incompleto.
@@ -396,17 +396,17 @@ class JkanimeSource(HttpClientMixin, BaseSource):
         ]
 
         # Tamaño esperado (para verificar integridad)
-        expected: int | None = None
-        try:
-            head = self.scraper.head(
-                url,
-                headers={**self._headers, 'Referer': referer, 'Origin': origin},
-                timeout=HTTP_TIMEOUT,
-            )
-            if head.status_code == 200:
-                expected = int(head.headers.get('content-length', 0)) or None
-        except Exception:
-            pass
+        if expected is None:
+            try:
+                head = self.scraper.head(
+                    url,
+                    headers={**self._headers, 'Referer': referer, 'Origin': origin},
+                    timeout=HTTP_TIMEOUT,
+                )
+                if head.status_code == 200:
+                    expected = int(head.headers.get('content-length', 0)) or None
+            except Exception:
+                pass
 
         for attempt in range(2):
             try:
