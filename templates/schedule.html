@@ -7,23 +7,9 @@
 {% endblock %}
 
 {% block content %}
-<div class="schedule-page">
+<div class="schedule-page has-sidebar">
 
-  <nav class="app-nav">
-    <div class="nav-enter nav-row nav-row--top">
-      <a href="/" class="nav-logo accent-gradient" style="text-decoration:none;">Comic Web</a>
-      <div class="nav-actions">
-        <a href="/settings" class="btn-ghost settings-link" title="Configuración">&#9881;</a>
-      </div>
-    </div>
-    <div class="nav-row nav-row--tabs">
-      <div class="tab-nav">
-        <a href="/" class="tab-btn"><i class="fas fa-layer-group"></i> Biblioteca</a>
-        <button class="tab-btn active"><i class="fas fa-clock"></i> Horario</button>
-        <a href="/settings" class="tab-btn rail-settings" title="Configuración"><i>&#9881;</i> Configuración</a>
-      </div>
-    </div>
-  </nav>
+  {% with active = 'schedule' %}{% include "_sidebar.html" %}{% endwith %}
 
   <div class="page-content">
 
