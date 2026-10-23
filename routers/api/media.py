@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import subprocess
 from functools import lru_cache
 from pathlib import Path
@@ -185,6 +186,66 @@ def api_play(content_type: str, source: str, content_id: str, chapter: str, requ
     return _serve_video(str(filepath), request)
 
 
+_ZILLA_HEADERS = {
+    'User-Agent': ('Mozilla/5.0 (X11; Linux x86_64; rv:131.0) '
+                   'Gecko/20100101 Firefox/131.0'),
+    'Referer': 'https://player.zilla-networks.com/',
+    'Origin': 'https://player.zilla-networks.com',
+    'Sec-Fetch-Dest': 'empty',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Site': 'same-origin',
+}
+
+
+def _rewrite_zilla_playlist(text: str) -> str:
+    """Reapunta segmentos al proxy y cambia .html -> .m4s (ffmpeg rechaza .html)."""
+    return re.sub(
+        r'https://player\.zilla-networks\.com/segs/([^"\s]+)\.html',
+        r'/api/stream/zilla/segs/\1.m4s',
+        text,
+    )
+
+
+@api_router.get('/stream/zilla/{path:path}')
+async def api_stream_zilla(path: str):
+    """Proxy del player zilla-networks: su WAF exige Sec-Fetch-Site de su
+    propio origen para servir los segmentos, cosa que un navegador externo
+    no puede falsificar."""
+    if not path.startswith(('m3u8/', 'segs/')):
+        raise HTTPException(status_code=404)
+
+    import httpx
+
+    upstream_path = path[:-4] + '.html' if path.endswith('.m4s') else path
+    client = httpx.AsyncClient(timeout=30, follow_redirects=True)
+    upstream = await client.get(
+        f'https://player.zilla-networks.com/{upstream_path}',
+        headers=_ZILLA_HEADERS,
+    )
+    if upstream.status_code != 200:
+        await client.aclose()
+        raise HTTPException(status_code=upstream.status_code)
+
+    if path.startswith('m3u8/'):
+        await client.aclose()
+        return Response(content=_rewrite_zilla_playlist(upstream.text),
+                        media_type='application/vnd.apple.mpegurl',
+                        headers={'Access-Control-Allow-Origin': '*'})
+
+    async def _body():
+        try:
+            yield upstream.content
+        finally:
+            await client.aclose()
+
+    headers = {
+        'Access-Control-Allow-Origin': '*',
+        'Content-Type': 'video/mp4' if 'init' in path else 'video/mp2t',
+        'Cache-Control': 'public, max-age=3600',
+    }
+    return StreamingResponse(_body(), headers=headers)
+
+
 @api_router.get('/play/remote/{content_type}/{source}/{content_id}/{chapter}')
 async def api_play_remote(content_type: str, source: str, content_id: str, chapter: str):
     src = _require_source(content_type, source)
@@ -197,7 +258,18 @@ async def api_play_remote(content_type: str, source: str, content_id: str, chapt
             raise HTTPException(status_code=502, detail='Error al obtener enlace de reproducción')
         if not stream_url:
             raise HTTPException(status_code=404, detail='Esta fuente no soporta streaming remoto')
-        return JSONResponse(content={'url': stream_url, 'type': 'embed'})
+        # Detectar si es un stream directo o un embed
+        stream_type = 'embed'
+        sl = stream_url.lower()
+        # player.zilla-networks.com requiere proxy (WAF + X-Frame-Options)
+        if 'zilla-networks.com/m3u8/' in stream_url or 'zilla-networks.com/play/' in stream_url:
+            m = re.search(r'/(?:m3u8|play)/([a-f0-9]+)', stream_url)
+            if m:
+                stream_url = f'/api/stream/zilla/m3u8/{m.group(1)}'
+                stream_type = 'direct'
+        elif sl.endswith('.m3u8') or '.m3u8?' in sl or sl.endswith('.mp4') or '.mp4?' in sl:
+            stream_type = 'direct'
+        return JSONResponse(content={'url': stream_url, 'type': stream_type})
     else:
         try:
             images = await src.get_chapter_images(content_id, chapter)

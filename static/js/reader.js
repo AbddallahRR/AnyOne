@@ -383,15 +383,71 @@
     const apiUrl = `/api/play/remote/anime/${source}/${content_id}/${chapterArg}`;
     const data = await api.get(apiUrl);
 
-    const embedUrl = data && data.url ? data.url : null;
-    if (!embedUrl) throw new Error('No se encontró enlace de reproducción');
+    const streamUrl = data && data.url ? data.url : null;
+    const streamType = data && data.type ? data.type : 'embed';
+    if (!streamUrl) throw new Error('No se encontró enlace de reproducción');
 
     let hasMarked = false;
 
+    // Stream directo (m3u8/mp4)
+    if (streamType === 'direct' || streamUrl.includes('.m3u8') || streamUrl.includes('zilla-networks.com/m3u8')) {
+      if (chapterWrapper) {
+        _disposeMedia(chapterWrapper.querySelector('video, iframe'));
+        chapterWrapper.innerHTML = `
+        <video id="anime-video" autoplay playsinline
+               style="width:100%; height:100%; object-fit:contain;">
+        </video>`;
+      }
+      const video = document.getElementById('anime-video');
+      if (!video) return;
+
+      setOverlayClickthrough(false);
+
+      api.post(`/api/progress/${type}/${source}/${content_id}`, {
+        chapter: currentChapterNum,
+        progress: '0',
+      }).catch(console.error);
+
+      const centerPlay = document.getElementById('po-center-play');
+      const bottomBar  = document.querySelector('.po-bottom');
+      if (centerPlay) centerPlay.classList.remove('hidden');
+      if (bottomBar)  bottomBar.style.display = '';
+
+      const attachHls = () => {
+        if (video.canPlayType('application/vnd.apple.mpegurl')) {
+          video.src = streamUrl;
+          return;
+        }
+        if (window.Hls && Hls.isSupported()) {
+          const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+          hls.loadSource(streamUrl);
+          hls.attachMedia(video);
+          hls.on(Hls.Events.ERROR, (event, data) => {
+            if (data.fatal) {
+              hls.destroy();
+            }
+          });
+          return;
+        }
+        video.src = streamUrl;
+      };
+
+      attachHls();
+      wirePlayerControls(video, 0);
+
+      video.addEventListener('ended', () => {
+        if (!hasMarked) { hasMarked = true; markCurrentAsWatched(); }
+        if (currentChapterIndex < chaptersList.length - 1) nextChapter();
+      });
+
+      return;
+    }
+
+    // Embed (iframe)
     if (chapterWrapper) {
       _disposeMedia(chapterWrapper.querySelector('video, iframe'));
       chapterWrapper.innerHTML = `
-      <iframe id="anime-iframe" src="${embedUrl}"
+      <iframe id="anime-iframe" src="${streamUrl}"
               style="width:100%; height:100%; border:none; background:#000;"
               allowfullscreen
               allow="autoplay; fullscreen; picture-in-picture"
@@ -403,25 +459,18 @@
     const iframe = document.getElementById('anime-iframe');
     if (!iframe) return;
 
-    // Dejar el clic pasar al player embebido: el overlay no puede pausarlo.
     setOverlayClickthrough(true);
 
-    // Guardar el capítulo en curso. El player remoto es un <iframe> cross-origin,
-    // así que no podemos leer currentTime del vídeo (same-origin policy); solo hay
-    // progreso a nivel de capítulo. Los milisegundos exactos requieren el
-    // reproductor propio (integración directa del stream).
     api.post(`/api/progress/${type}/${source}/${content_id}`, {
       chapter: currentChapterNum,
       progress: '0',
     }).catch(console.error);
 
-    // Keep overlay visible for navigation (top bar), but hide playback controls
     const centerPlay = document.getElementById('po-center-play');
     const bottomBar  = document.querySelector('.po-bottom');
     if (centerPlay) centerPlay.classList.add('hidden');
     if (bottomBar)  bottomBar.style.display = 'none';
 
-    // Auto-mark as watched after estimated duration (fallback since we can't track embed progress)
     const timer = setTimeout(() => {
       if (!hasMarked) { hasMarked = true; markCurrentAsWatched(); }
     }, 15 * 60 * 1000);
@@ -434,7 +483,7 @@
       if (chapterWrapper) chapterWrapper.innerHTML =
         `<div style="color:var(--accent2); text-align:center; padding:20px;">
            Error al cargar el reproductor remoto.
-           <br><a href="${embedUrl}" target="_blank" rel="noopener"
+           <br><a href="${streamUrl}" target="_blank" rel="noopener"
                   style="color:var(--accent); text-decoration:underline; margin-top:10px; display:inline-block;">
              Abrir enlace directo
            </a>
