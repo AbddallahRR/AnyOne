@@ -1,0 +1,46 @@
+from core.models import EpisodeLink, EpisodeLinks
+from sources.animeav1 import AnimeAV1Source
+from sources.jkanime import JkanimeSource
+
+
+def test_download_uses_only_sub_mp4upload(monkeypatch, tmp_path):
+    src = AnimeAV1Source()
+    src.get_episode_links = lambda *a, **k: EpisodeLinks(
+        stream={'SUB': [], 'DUB': []},
+        download={
+            'SUB': [EpisodeLink(server='1Fichier', url='https://1fichier.com/?sub'),
+                    EpisodeLink(server='MP4Upload', url='https://www.mp4upload.com/subid')],
+            'DUB': [EpisodeLink(server='MP4Upload', url='https://www.mp4upload.com/dubid')],
+        },
+    )
+
+    used = {}
+
+    def fake_direct(url):
+        used['url'] = url
+        return 'https://cdn.example/video.mp4'
+
+    monkeypatch.setattr(src, '_mp4upload_direct', fake_direct)
+    monkeypatch.setattr(src, '_remote_size', lambda url: None)
+    monkeypatch.setattr(
+        JkanimeSource, '_download_curl',
+        lambda self, url, path, **kw: path,
+    )
+
+    out = src.download_chapter_sync('yomi-no-tsugai', '1', str(tmp_path), '1')
+
+    assert used['url'] == 'https://www.mp4upload.com/subid'
+    assert out.endswith('001.mp4')
+
+
+def test_details_cover_falls_back_to_cdn(monkeypatch):
+    src = AnimeAV1Source()
+    monkeypatch.setattr(src, '_fetch_serie_page', lambda slug: (
+        'kit.start(app, element, {node_ids: [0], data: [{type: "data", data: '
+        '{media: {id: 3933, title: "Yomi no Tsugai", poster: null, episodesCount: 2}}}]})'
+    ))
+
+    details = src.get_details_sync('yomi-no-tsugai')
+
+    assert details.cover == 'https://cdn.animeav1.com/covers/3933.jpg'
+    assert details.total_episodes == 2
