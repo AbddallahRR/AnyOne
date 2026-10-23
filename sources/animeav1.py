@@ -38,6 +38,11 @@ class AnimeAV1Source(HttpClientMixin, BaseSource):
         super().__init__()
         self.scraper = HttpPool.get_scraper()
 
+    def _get(self, url: str, referer: str | None = None, **kwargs):
+        resp = super()._get(url, referer=referer, **kwargs)
+        resp.encoding = 'utf-8'
+        return resp
+
     # -----------------------------------------------------------------------
     # Helpers
     # -----------------------------------------------------------------------
