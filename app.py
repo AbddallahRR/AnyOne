@@ -90,9 +90,6 @@ def _start_update_scheduler():
                     logger.warning(f"[Scheduler] Error limpiando caché: {exc}")
                 last_cache_evict = time.time()
 
-            logger.info(
-                f"[Scheduler] Próxima comprobación programada en {CHECK_INTERVAL // 60} min"
-            )
             time.sleep(CHECK_INTERVAL)
 
     t = threading.Thread(target=_run, daemon=True, name="update-scheduler")
