@@ -667,15 +667,6 @@
     setInterval(pollSerieDownloadProgress, 3000);
   }
 
-  // ── Breadcrumb sync (moved from serie.html inline) ────────────────────
-  const breadEl = document.getElementById('breadcrumb-title');
-  if (titleEl && breadEl) {
-    new MutationObserver(() => {
-      const t = titleEl.textContent;
-      if (t && t !== 'Cargando…') breadEl.textContent = t;
-    }).observe(titleEl, { childList: true, subtree: true, characterData: true });
-  }
-
   // ── Cover reveal on load ─────────────────────────────────────────────
   if (coverImg) {
     coverImg.addEventListener('load', function() {

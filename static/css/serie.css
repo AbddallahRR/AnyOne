@@ -10,23 +10,6 @@
   min-height: 100vh;
 }
 
-/* ── Serie nav ── */
-.serie-nav {
-  padding: 14px 24px;
-  border-bottom: 1px solid var(--border);
-  position: sticky;
-  top: 0;
-  background: rgba(10, 10, 15, 0.85);
-  backdrop-filter: blur(14px);
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-.serie-nav-sep {
-  color: var(--border-hi);
-}
-
 /* ── Serie container ── */
 .serie-container {
   max-width: 1100px;
@@ -34,7 +17,7 @@
   padding: 36px 24px;
 }
 @media (max-width: 480px) {
-  .serie-container { padding-left: 14px; padding-right: 14px; }
+  .serie-container { padding: 20px 0; }
 }
 
 /* ── Hero card layout ── */
@@ -128,16 +111,6 @@
   color: var(--muted);
 }
 
-/* ── Breadcrumb ── */
-#breadcrumb-title {
-  color: var(--muted);
-  font-size: 13px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 300px;
-}
-
 /* ── Synopsis ── */
 #serie-synopsis {
   color: var(--muted);
@@ -161,21 +134,6 @@
 .btn-ghost-danger {
   color: #f87171;
   border-color: rgba(248, 113, 113, 0.25);
-}
-
-/* ── Back link ── */
-.back-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 13px;
-  text-decoration: none;
-  transition: color 0.15s ease, transform 0.15s ease;
-}
-.back-link:hover {
-  color: var(--text);
-  transform: translateX(-2px);
 }
 
 /* ── Cover hover parallax ── */

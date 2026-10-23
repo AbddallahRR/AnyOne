@@ -1,0 +1,42 @@
+<!-- templates/_sidebar.html — compartido por index.html y serie.html -->
+<aside class="app-sidebar">
+  <div class="sidebar-section sidebar-top">
+    <a href="/" class="sidebar-logo" title="Inicio">
+      <img src="/static/favicon.ico" alt="Comic Web" class="sidebar-favicon">
+    </a>
+  </div>
+
+  <nav class="sidebar-section sidebar-nav">
+    <a id="tab-anime" href="/?tab=anime" class="sidebar-item{% if active == 'anime' %} active{% endif %}">
+      <i class="fas fa-film"></i>
+      <span class="sidebar-label">Anime</span>
+    </a>
+    <a id="tab-manga" href="/?tab=manga" class="sidebar-item{% if active == 'manga' %} active{% endif %}">
+      <i class="fas fa-book"></i>
+      <span class="sidebar-label">Manga</span>
+    </a>
+    <a id="tab-library" href="/?tab=library" class="sidebar-item{% if active == 'library' %} active{% endif %}">
+      <i class="fas fa-layer-group"></i>
+      <span class="sidebar-label">Biblioteca</span>
+    </a>
+    <a href="/schedule" class="sidebar-item">
+      <i class="fas fa-clock"></i>
+      <span class="sidebar-label">Horario</span>
+    </a>
+  </nav>
+
+  <div class="sidebar-section sidebar-bottom">
+    <button id="nav-downloads" class="sidebar-item" title="Descargas">
+      <i class="fas fa-download"></i>
+      <span class="sidebar-label">Descargas</span>
+    </button>
+    <button id="nav-bell" class="sidebar-item" title="Notificaciones">
+      <i class="fas fa-inbox"></i>
+      <span class="sidebar-label">Notificaciones</span>
+    </button>
+    <a href="/settings" class="sidebar-item" title="Configuración">
+      <i>&#9881;</i>
+      <span class="sidebar-label">Configuración</span>
+    </a>
+  </div>
+</aside>
