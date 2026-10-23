@@ -3,80 +3,166 @@
    Nav, contenedor principal, search bars y breakpoints globales.
    ============================================================ */
 
-/* ── App nav ── */
+/* ── App nav (legacy, ya no se usa en index) ── */
 .app-nav {
-  padding: 0 16px;
-  border-bottom: 1px solid var(--border);
-  position: sticky;
+  display: none;
+}
+
+/* ── Sidebar lateral estilo Instagram ── */
+.serie-page.has-sidebar {
+  display: flex;
+  min-height: 100vh;
+}
+
+.app-sidebar {
+  position: fixed;
+  left: 0;
   top: 0;
-  background: rgba(13,13,20,0.88);
-  z-index: 10;
+  height: 100dvh;
+  width: 72px;
   display: flex;
   flex-direction: column;
-}
-/* El blur va en un pseudo: backdrop-filter en .app-nav creaba containing
-   block para hijos fixed (el rail izquierdo) y lo anclaba a la barra. */
-.app-nav::before {
-  content: '';
-  position: absolute;
-  inset: 0;
+  justify-content: space-between;
+  align-items: stretch;
+  padding: 8px;
+  box-sizing: border-box;
+  background: rgba(13, 13, 20, 0.92);
+  border-right: 1px solid var(--border);
   backdrop-filter: blur(18px);
-  z-index: -1;
-}
-@media (min-width: 640px) {
-  .app-nav {
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-    height: 64px;
-    padding: 0 24px;
-  }
+  -webkit-backdrop-filter: blur(18px);
+  z-index: 50;
+  transition: width 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
 }
 
-.nav-row { display: flex; align-items: center; }
-.nav-row--top  { justify-content: space-between; padding: 14px 0 8px; }
-.nav-row--tabs { justify-content: center; padding-bottom: 10px; }
-
-.nav-logo {
-  font-family: var(--ff-head);
-  font-size: 22px;
-  font-weight: 800;
-  letter-spacing: -0.8px;
+.app-sidebar:hover,
+.app-sidebar:has(:focus-visible) {
+  width: 240px;
 }
 
-.nav-actions {
+.sidebar-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+.sidebar-top {
+  align-items: flex-start;
+}
+
+.sidebar-logo {
   display: flex;
   align-items: center;
-  gap: 8px;
-}
-
-.settings-link {
-  display: inline-flex;
-  align-items: center;
-  padding: 6px 10px;
-  font-size: 16px;
-  border-radius: 8px;
-  line-height: 1;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
   text-decoration: none;
+  transition: background 0.15s ease;
 }
 
-.tab-btn i {
-  margin-right: 5px;
+.sidebar-logo:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.sidebar-favicon {
+  width: 28px;
+  height: 28px;
+  display: block;
+}
+
+.sidebar-nav {
+  flex: 1 1 auto;
+  justify-content: center;
+}
+
+.sidebar-bottom {
+  flex: 0 0 auto;
+  padding-bottom: 4px;
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 18px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--ff-body);
+  font-size: 0;
+  font-weight: 500;
+  border-radius: 12px;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+  box-sizing: border-box;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.sidebar-item i {
+  font-size: 18px;
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.sidebar-label {
+  font-size: 14px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.app-sidebar:hover .sidebar-item,
+.app-sidebar:has(:focus-visible) .sidebar-item {
   font-size: 14px;
 }
 
-@media (min-width: 640px) {
-  .nav-row--top  { padding: 0; }
-  .nav-row--tabs { padding: 0; }
+.app-sidebar:hover .sidebar-label,
+.app-sidebar:has(:focus-visible) .sidebar-label {
+  opacity: 1;
+}
+
+.sidebar-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}
+
+.sidebar-item.active {
+  background: rgba(124, 92, 252, 0.18);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.sidebar-item.active i {
+  color: var(--accent-lt);
 }
 
 /* ── Contenedor de página ── */
 .page-content {
-  max-width: 1240px;
+  max-width: 1380px;
   margin: 0 auto;
-  padding: 28px 24px;
+  padding: 28px 32px 28px 104px;
 }
-@media (max-width: 480px) { .page-content { padding: 20px 14px; } }
+@media (min-width: 1280px) {
+  .page-content {
+    max-width: 1460px;
+    padding-left: 112px;
+  }
+}
+@media (min-width: 1536px) {
+  .page-content {
+    max-width: 1540px;
+    padding-left: 120px;
+  }
+}
+@media (max-width: 480px) {
+  .page-content {
+    padding: 20px 14px 20px 88px;
+  }
+}
 
 /* ── Search bar rows ── */
 .search-bar-row {
@@ -101,63 +187,15 @@
   .btn-primary { padding: 10px 14px; }
 }
 
-/* ── Rail de secciones (solo escritorio) ──
-   Las tabs viven dentro de .app-nav (móvil sin cambios). En ≥900px pasan a
-   un rail vertical fijo pegado al borde izquierdo, centrado, visible por
-   defecto con solo iconos; se ensancha al pasar el mouse (o al enfocar con
-   teclado) para mostrar las etiquetas. .app-nav ya no es containing block
-   (blur movido a ::before, animación movida a la fila superior), así que
-   fixed = viewport. */
-@media (min-width: 640px) {
-  .app-nav .nav-row--top { flex: 1; }
-}
-
-/* Ajustes en el rail solo en escritorio; en móvil queda el de la barra superior */
-.rail-settings { display: none; }
-
-@media (min-width: 900px) {
-  /* Deja hueco a la izquierda para que el rail no tape la primera columna */
-  .page-content { padding-left: 88px; }
-
-  .tab-nav {
-    position: fixed;
-    left: 16px;
-    top: 50%;
-    transform: translateY(-50%);
-    flex-direction: column;
-    gap: 4px;
-    width: 64px;
-    padding: 8px;
-    overflow: hidden;
-    border-radius: 14px;
-    background: rgba(19,19,30,0.92);
-    border: 1px solid var(--border-hi);
-    backdrop-filter: blur(18px);
-    box-shadow: 0 12px 40px rgba(0,0,0,0.5);
-    z-index: 40;
-    transition: width 0.28s cubic-bezier(0.4,0,0.2,1);
-  }
-  .tab-nav:hover,
-  .tab-nav:has(:focus-visible) { width: 208px; }
-
-  .tab-btn {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    padding: 10px 14px;
-    border-radius: 10px;
-    font-size: 0;          /* colapsado: solo el icono (el texto no hereda tamaño) */
-  }
-  .tab-btn i { font-size: 15px; }   /* el icono sí conserva tamaño */
-  .tab-nav:hover .tab-btn,
-  .tab-nav:has(:focus-visible) .tab-btn { font-size: 13px; }
-
-  /* El engranaje es un glifo de texto: se ve menor que los iconos FA, así que
-     se agranda y se tiñe para destacarlo. */
-  .rail-settings i { font-size: 18px; color: var(--accent-lt); }
-
-  /* Ajustes: en escritorio vive en el rail, no en la barra superior */
-  .rail-settings { display: flex; }
-  .settings-link { display: none; }
+/* ── Rail legacy (ya reemplazado por sidebar) ── */
+.tab-nav,
+.tab-btn,
+.nav-row,
+.nav-row--top,
+.nav-row--tabs,
+.nav-logo,
+.nav-actions,
+.settings-link,
+.rail-settings {
+  display: none !important;
 }

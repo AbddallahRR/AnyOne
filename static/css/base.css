@@ -332,6 +332,8 @@ select.input-field {
 }
 @media (min-width: 600px)  { .media-grid { grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)); } }
 @media (min-width: 1024px) { .media-grid { grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); } }
+@media (min-width: 1280px) { .media-grid { grid-template-columns: repeat(6, 1fr); } }
+@media (min-width: 1536px) { .media-grid { grid-template-columns: repeat(6, 1fr); } }
 @media (max-width: 360px)  { .media-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; } }
 
 /* ── Empty state ── */
