@@ -10,7 +10,7 @@ from core.settings import settings
 logger = logging.getLogger(__name__)
 
 _local = threading.local()
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 
 def execute_with_retry(sql: str, params: tuple = ()) -> sqlite3.Cursor:
@@ -235,6 +235,15 @@ def _run_migrations(conn: sqlite3.Connection, current: int) -> None:
             CREATE INDEX IF NOT EXISTS idx_schedule_day_hour
                 ON series_schedule(day_of_week, check_hour);
         ''')
+
+    if current < 14:
+        logger.info("Migracion 14: registrar AnimeAV1 en scraper_configs")
+        conn.execute(
+            'INSERT OR IGNORE INTO scraper_configs '
+            '(name, type, label, base_url, built_in, enabled, config_json, created_at, updated_at) '
+            "VALUES ('animeav1', 'anime', 'AnimeAV1', 'https://animeav1.com', 1, 1, '{}', "
+            "strftime('%s','now'), strftime('%s','now'))"
+        )
 
 
 def init_db() -> None:
