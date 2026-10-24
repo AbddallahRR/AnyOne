@@ -245,11 +245,6 @@
         }
       }
 
-      const dayLabel = document.createElement('div');
-      dayLabel.className = 'sched-day-label';
-      dayLabel.textContent = DAYS[d];
-      td.prepend(dayLabel);
-
       tr.appendChild(td);
     }
 
