@@ -164,6 +164,77 @@
   }
 }
 
+/* ── Bottom navigation (mobile) ── */
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  display: none; /* hidden on desktop */
+  align-items: stretch;
+  justify-content: space-around;
+  background: rgba(13, 13, 20, 0.95);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-top: 1px solid var(--border);
+  padding: 4px 0 env(safe-area-inset-bottom, 4px);
+}
+
+.bn-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 10px 4px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--ff-body);
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 0.15s ease;
+  min-width: 0;
+  flex: 1;
+}
+
+.bn-item i {
+  font-size: 18px;
+  transition: color 0.15s ease;
+}
+
+.bn-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.bn-item.active {
+  color: var(--accent-lt);
+}
+
+/* ── Mobile breakpoint: sidebar → bottom nav ── */
+@media (max-width: 640px) {
+  .app-sidebar { display: none; }
+  .bottom-nav { display: flex; }
+
+  .page-content {
+    padding: 20px 14px calc(20px + env(safe-area-inset-bottom, 72px));
+  }
+
+  .settings-main {
+    padding: 14px;
+  }
+}
+
+/* ── No bottom nav on reader page ── */
+body:has(.reader-root) .bottom-nav { display: none; }
+
 /* ── Search bar rows ── */
 .search-bar-row {
   display: flex;

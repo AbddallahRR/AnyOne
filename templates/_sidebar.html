@@ -40,3 +40,23 @@
     </a>
   </div>
 </aside>
+
+<!-- ── Bottom Navigation (mobile) ── -->
+<nav class="bottom-nav" id="bottom-nav">
+  <a href="/?tab=anime" class="bn-item{% if active == 'anime' %} active{% endif %}">
+    <i class="fas fa-film"></i>
+    <span class="bn-label">Anime</span>
+  </a>
+  <a href="/?tab=manga" class="bn-item{% if active == 'manga' %} active{% endif %}">
+    <i class="fas fa-book"></i>
+    <span class="bn-label">Manga</span>
+  </a>
+  <a href="/?tab=library" class="bn-item{% if active == 'library' %} active{% endif %}">
+    <i class="fas fa-layer-group"></i>
+    <span class="bn-label">Biblioteca</span>
+  </a>
+  <a href="/schedule" class="bn-item{% if active == 'schedule' %} active{% endif %}">
+    <i class="fas fa-clock"></i>
+    <span class="bn-label">Horario</span>
+  </a>
+</nav>
