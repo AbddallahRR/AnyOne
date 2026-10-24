@@ -55,7 +55,6 @@ def api_get_schedule(content_ref: str):
 class ScheduleRequest(BaseModel):
     content_ref: str = ''
     day_of_week: int = 0
-    check_hour: int = 0
 
     @field_validator('day_of_week')
     @classmethod
@@ -64,25 +63,18 @@ class ScheduleRequest(BaseModel):
             raise ValueError(f"Día inválido: {v}. Debe ser 0 (Lun) a 6 (Dom)")
         return v
 
-    @field_validator('check_hour')
-    @classmethod
-    def _valid_hour(cls, v: int) -> int:
-        if not (0 <= v <= 23):
-            raise ValueError(f"Hora inválida: {v}. Debe ser 0 a 23")
-        return v
-
 
 @api_router.post('/schedule')
 def api_set_schedule(data: ScheduleRequest):
     if not data.content_ref:
         raise HTTPException(status_code=400, detail='Falta content_ref')
-    set_series_schedule(data.content_ref, data.day_of_week, data.check_hour)
+    # check_hour is unused 迁移: el scheduler arranca a las 8 AM y reintenta cada 30 min
+    set_series_schedule(data.content_ref, data.day_of_week, 0)
     set_series_status(data.content_ref, 'watching')
     title = _resolve_title(data.content_ref)
     return {
         'content_ref': data.content_ref,
         'day_of_week': data.day_of_week,
-        'check_hour': data.check_hour,
         'title': title,
     }
 

@@ -2,9 +2,10 @@
 # -*- coding: utf-8 -*-
 
 import asyncio
+import datetime
 import logging
-import random
 import threading
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -29,63 +30,99 @@ logger = logging.getLogger(__name__)
 
 
 def _start_update_scheduler():
-    import datetime
     INITIAL_DELAY = 60
-    CHECK_INTERVAL = 300  # 5 minutes
+    CHECK_INTERVAL = 300       # 5 minutes between ticks
+    START_HOUR = 8
+    RETRY_INTERVAL = 1800      # 30 minutes between retries
+    MAX_RETRIES = 8
 
     def _run():
-        import time
-
-        from core.disk_cache import search_cache
         time.sleep(INITIAL_DELAY)
+        from core.disk_cache import search_cache
         last_cache_evict = 0.0
-        checked_today: set = set()
+        today = None
+        # content_ref -> {'attempts': int, 'last_retry': float}
+        retry_state: dict = {}
+        done_today: set = set()
+
         while True:
             now = datetime.datetime.now()
             weekday = now.weekday()
-            checked_today = {(w, r) for (w, r) in checked_today if w == weekday}
+            current_date = now.date()
 
-            # Scheduled checks: every 5 minutes, check series whose hour is due
+            # Reset state at midnight
+            if today != current_date:
+                today = current_date
+                retry_state.clear()
+                done_today.clear()
+
+            # Only run after START_HOUR
+            if now.hour < START_HOUR:
+                time.sleep(CHECK_INTERVAL)
+                continue
+
+            # ── Check scheduled series ──────────────────────────────────
             try:
                 from core.db.schedule import get_schedules_for_day
                 scheduled = get_schedules_for_day(weekday)
-                due = [
-                    s for s in scheduled
-                    if s['check_hour'] <= now.hour
-                    # ponytail: jitter por tick reparte la ráfaga dentro de la hora
-                    # (0-55: el tick va de 5 en 5, un sorteo mayor nunca se cumpliría).
-                    and now.minute >= random.randrange(56)
-                    and (weekday, s['content_ref']) not in checked_today
-                ]
+
+                # Filter series that are due for a check
+                due = []
+                for s in scheduled:
+                    ref = s['content_ref']
+                    if ref in done_today:
+                        continue
+
+                    state = retry_state.get(ref)
+                    if state is None:
+                        # First check of the day
+                        due.append(s)
+                    elif time.time() - state['last_retry'] >= RETRY_INTERVAL:
+                        if state['attempts'] >= MAX_RETRIES:
+                            logger.info(
+                                f"[Scheduler] {ref}: agotados {MAX_RETRIES} reintentos, se deja de intentar hoy"
+                            )
+                            done_today.add(ref)
+                            retry_state.pop(ref, None)
+                        else:
+                            due.append(s)
+
                 if due:
                     logger.info(
-                        f"[Scheduler] {len(due)} serie(s) programadas para "
-                        f"{now.strftime('%A %H:%M')}"
+                        f"[Scheduler] {len(due)} serie(s) para checkear hoy a las {now.strftime('%H:%M')}"
                     )
                     for s in due:
+                        ref = s['content_ref']
                         try:
-                            result = check_series(s["content_ref"])
-                            checked_today.add((weekday, s['content_ref']))
+                            result = check_series(ref)
                             if result.get('new_chapters'):
                                 logger.info(
-                                    f"[Scheduler] {s['content_ref']}: "
-                                    f"{len(result['new_chapters'])} cap(s) nuevos"
+                                    f"[Scheduler] {ref}: {len(result['new_chapters'])} cap(s) nuevos"
                                 )
+                                done_today.add(ref)
+                                retry_state.pop(ref, None)
+                            else:
+                                state = retry_state.get(ref)
+                                if state is None:
+                                    retry_state[ref] = {'attempts': 1, 'last_retry': time.time()}
+                                    logger.info(f"[Scheduler] {ref}: sin novedades, comenzando reintentos")
+                                else:
+                                    state['attempts'] += 1
+                                    state['last_retry'] = time.time()
+                                    logger.info(
+                                        f"[Scheduler] {ref}: sin novedades, reintento {state['attempts']}/{MAX_RETRIES}"
+                                    )
                         except Exception as exc:
-                            logger.exception(
-                                f"[Scheduler] Error chequeando {s['content_ref']}: {exc}"
-                            )
+                            logger.exception(f"[Scheduler] Error chequeando {ref}: {exc}")
             except Exception as exc:
-                logger.exception(f"[Scheduler] Error en chequeo programado: {exc}")
+                logger.exception(f"[Scheduler] Error en ciclo de horario: {exc}")
 
-            # Cache eviction
-            if time.time() - last_cache_evict >= 24 * 60 * 60:
+            # ── Cache eviction (unchanged) ──────────────────────────────
+            if time.time() - last_cache_evict >= 86400:
                 try:
                     removed = search_cache.evict_expired()
                     if removed:
-                        logger.info(
-                            f"[Scheduler] Caché limpiada: {removed} entradas expiradas eliminadas"
-                        )
+                        logger.info(f"[Scheduler] Caché limpiada: {removed} entradas expiradas")
                 except Exception as exc:
                     logger.warning(f"[Scheduler] Error limpiando caché: {exc}")
                 last_cache_evict = time.time()

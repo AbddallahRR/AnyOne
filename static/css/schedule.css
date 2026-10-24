@@ -65,31 +65,16 @@
   top: 0;
   z-index: 2;
 }
-.sched-grid thead th:first-child {
-  width: 68px;
-  min-width: 68px;
-  position: sticky;
-  left: 0;
-  z-index: 3;
-  background: var(--raised);
-}
-.sched-time-col {
-  font-size: 11px;
-  color: var(--muted);
-  font-weight: 600;
-  white-space: nowrap;
-}
 
-/* Time labels (first column) */
-.sched-grid td:first-child {
-  background: var(--raised);
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--muted);
-  white-space: nowrap;
-  position: sticky;
-  left: 0;
-  z-index: 1;
+/* Day labels */
+.sched-day-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 6px 0 8px;
+  text-align: center;
 }
 
 /* Data cells */
@@ -180,8 +165,7 @@
   letter-spacing: 0.5px;
 }
 
-.sched-day-select,
-.sched-hour-select {
+.sched-day-select {
   width: 100%;
 }
 

@@ -3,8 +3,6 @@
   'use strict';
 
   const DAYS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
-  const HOURS_START = 6;
-  const HOURS_END = 23;
   const PLACEHOLDER = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="32" height="44"%3E%3Crect fill="%231a1a28" width="32" height="44" rx="4"/%3E%3C/svg%3E';
 
   let _schedules = [];
@@ -26,7 +24,6 @@
   const modalCancel    = document.getElementById('sched-modal-cancel');
   const modalSave      = document.getElementById('sched-modal-save');
   const daySel         = document.getElementById('sched-day-select');
-  const hourSel        = document.getElementById('sched-hour-select');
   const ctxMenu        = document.getElementById('sched-ctx-menu');
   const searchInput    = document.getElementById('sched-search-input');
   const searchResults  = document.getElementById('sched-search-results');
@@ -43,22 +40,12 @@
   }
 
   function init() {
-    _populateHours();
     _bindEvents();
     _refresh({ silent: false });
     setInterval(() => {
       if (!document.hidden) _refresh();
     }, 4000);
     window.addEventListener('anyone:downloads-complete', () => _refresh());
-  }
-
-  function _populateHours() {
-    for (let h = HOURS_START; h <= HOURS_END; h++) {
-      const opt = document.createElement('option');
-      opt.value = h;
-      opt.textContent = `${String(h).padStart(2, '0')}:00`;
-      hourSel.appendChild(opt);
-    }
   }
 
   function _bindEvents() {
@@ -92,10 +79,9 @@
     // Click on grid cell → add
     gridBody.addEventListener('click', e => {
       const cell = e.target.closest('.sched-cell');
-      if (cell && !e.target.closest('.sched-chip')) {
+      if (cell && !e.target.closest('.sched-chip') && !e.target.closest('.sched-day-label')) {
         const day = parseInt(cell.dataset.day);
-        const hour = parseInt(cell.dataset.hour);
-        _openModal(null, day, hour);
+        _openModal(null, day);
       }
     });
 
@@ -237,43 +223,37 @@
   function _renderGrid() {
     gridBody.innerHTML = '';
 
-    const cellMap = {};
+    const dayMap = {};
     for (const s of _schedules) {
-      const key = `${s.day_of_week}:${s.check_hour}`;
-      if (!cellMap[key]) cellMap[key] = [];
-      cellMap[key].push(s);
+      if (!dayMap[s.day_of_week]) dayMap[s.day_of_week] = [];
+      dayMap[s.day_of_week].push(s);
     }
 
     let hasAny = false;
+    const tr = document.createElement('tr');
 
-    for (let h = HOURS_START; h <= HOURS_END; h++) {
-      const tr = document.createElement('tr');
+    for (let d = 0; d < 7; d++) {
+      const td = document.createElement('td');
+      td.className = 'sched-cell';
+      td.dataset.day = d;
 
-      const tdTime = document.createElement('td');
-      tdTime.className = 'sched-time-col';
-      tdTime.textContent = `${String(h).padStart(2, '0')}:00`;
-      tr.appendChild(tdTime);
-
-      for (let d = 0; d < 7; d++) {
-        const td = document.createElement('td');
-        td.className = 'sched-cell';
-        td.dataset.day = d;
-        td.dataset.hour = h;
-
-        const key = `${d}:${h}`;
-        const entries = cellMap[key];
-        if (entries && entries.length > 0) {
-          hasAny = true;
-          for (const s of entries) {
-            td.appendChild(_buildChip(s));
-          }
+      const entries = dayMap[d];
+      if (entries && entries.length > 0) {
+        hasAny = true;
+        for (const s of entries) {
+          td.appendChild(_buildChip(s));
         }
-
-        tr.appendChild(td);
       }
 
-      gridBody.appendChild(tr);
+      const dayLabel = document.createElement('div');
+      dayLabel.className = 'sched-day-label';
+      dayLabel.textContent = DAYS[d];
+      td.prepend(dayLabel);
+
+      tr.appendChild(td);
     }
+
+    gridBody.appendChild(tr);
 
     emptyMsg.classList.toggle('hidden', hasAny);
   }
@@ -298,7 +278,7 @@
   }
 
   // ── Modal ─────────────────────────────────────────────────────────────
-  function _openModal(contentRef, defaultDay, defaultHour) {
+  function _openModal(contentRef, defaultDay) {
     _editingRef = contentRef || null;
     _selectedRef = null;
 
@@ -309,13 +289,11 @@
         const item = _libraryItems.find(i => `local:${i.id}` === _editingRef);
         if (item) _selectSeries(_editingRef, item);
         daySel.value = existing.day_of_week;
-        hourSel.value = existing.check_hour;
       }
     } else {
       modalTitle.textContent = 'Añadir serie al horario';
       _clearSelection();
       if (defaultDay !== undefined) daySel.value = defaultDay;
-      if (defaultHour !== undefined) hourSel.value = defaultHour;
     }
 
     modal.classList.remove('hidden');
@@ -345,13 +323,11 @@
     }
 
     const day = parseInt(daySel.value);
-    const hour = parseInt(hourSel.value);
 
     try {
       await api.post('/api/schedule', {
         content_ref: _selectedRef,
         day_of_week: day,
-        check_hour: hour,
       });
       _toast('Horario guardado', 'success');
       _closeModal();

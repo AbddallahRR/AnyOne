@@ -950,24 +950,15 @@
     const row = document.createElement('div');
     row.style.cssText = 'display:flex; gap:8px;';
     const daySel = document.createElement('select');
-    const hourSel = document.createElement('select');
     ['-- Día --'].concat(WATCH_DAYS).forEach((d, i) => {
       const opt = document.createElement('option');
       opt.value = i - 1;
       opt.textContent = d;
       daySel.appendChild(opt);
     });
-    for (let h = 6; h <= 23; h++) {
-      const opt = document.createElement('option');
-      opt.value = h;
-      opt.textContent = `${String(h).padStart(2, '0')}:00`;
-      hourSel.appendChild(opt);
-    }
     daySel.style.flex = '1';
-    hourSel.style.flex = '1';
     daySel.className = 'input-field';
-    hourSel.className = 'input-field';
-    row.append(daySel, hourSel);
+    row.append(daySel);
 
     const actions = document.createElement('div');
     actions.style.cssText = 'display:flex; justify-content:flex-end; gap:8px;';
@@ -983,17 +974,16 @@
 
     saveBtn.addEventListener('click', async () => {
       const day = parseInt(daySel.value, 10);
-      const hour = parseInt(hourSel.value, 10);
-      if (isNaN(day) || isNaN(hour)) {
-        showNotification('Elige un día y una hora', 'info');
+      if (isNaN(day)) {
+        showNotification('Elige un día', 'info');
         return;
       }
       try {
         await api.post('/api/schedule', {
-          content_ref: ref, day_of_week: day, check_hour: hour,
+          content_ref: ref, day_of_week: day,
         });
         closeStatusPopup();
-        showNotification(`${WATCH_DAYS[day]} ${String(hour).padStart(2, '0')}:00 — se avisará de capítulos nuevos`, 'success', 3000);
+        showNotification(`${WATCH_DAYS[day]} — se avisará de capítulos nuevos`, 'success', 3000);
         applyLibraryView();
       } catch (err) {
         showNotification(`Error al guardar horario: ${err.message}`, 'error');
