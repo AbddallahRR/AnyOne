@@ -38,7 +38,8 @@ def _discover_sources():
             continue
 
         for name, cls in inspect.getmembers(module, inspect.isclass):
-            if issubclass(cls, BaseSource) and cls is not BaseSource:
+            if (issubclass(cls, BaseSource) and cls is not BaseSource
+                    and cls.__module__ == module.__name__):
                 try:
                     instance = cls()
                     source_type = instance.type or ''
@@ -72,7 +73,8 @@ def register_dynamic_source(name: str) -> bool:
 
     found = False
     for cls_name, cls in inspect.getmembers(module, inspect.isclass):
-        if issubclass(cls, BaseSource) and cls is not BaseSource:
+        if (issubclass(cls, BaseSource) and cls is not BaseSource
+                and cls.__module__ == module.__name__):
             try:
                 instance = cls()
                 source_type = instance.type or ''
