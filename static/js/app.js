@@ -89,7 +89,7 @@
       const img  = entry.target;
       const real = img.dataset.src;
       if (real && img.src !== real) {
-        img.src = real;
+        img.src = window.imageSrc(real);
         img.addEventListener('load', () => {
           // Una vez cargada, traspasar al observer de liberación
           releaseObserver.observe(img);

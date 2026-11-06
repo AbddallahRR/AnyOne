@@ -602,7 +602,7 @@
         html += '<div class="test-card-grid">';
         data.extracted.forEach(item => {
           const coverHtml = item.cover
-            ? `<img src="${item.cover}" class="test-thumb" onerror="this.style.display='none'" alt="" loading="lazy">`
+            ? `<img src="${window.imageSrc(item.cover)}" class="test-thumb" onerror="this.style.display='none'" alt="" loading="lazy">`
             : '';
           const urlParts = (item.url || '').split('/').filter(Boolean);
           const contentId = urlParts[urlParts.length - 1] || '';
@@ -634,7 +634,7 @@
     await runTest('details', getDetailsConfig, (data, results) => {
       let html = `<div class="test-url"><strong>URL:</strong> <code>${escHtml(data.url)}</code></div>`;
       html += '<div class="test-details-visual">';
-      if (data.cover) html += `<div class="test-cover-wrap"><img src="${data.cover}" class="test-cover-img" onerror="this.style.display='none'" alt="" loading="lazy"></div>`;
+      if (data.cover) html += `<div class="test-cover-wrap"><img src="${window.imageSrc(data.cover)}" class="test-cover-img" onerror="this.style.display='none'" alt="" loading="lazy"></div>`;
       html += '<div class="test-details-body">';
       if (data.title) html += `<h4 class="test-details-title">${escHtml(data.title)}</h4>`;
       if (data.synopsis) html += `<p class="test-details-synopsis">${escHtml(data.synopsis.substring(0, 500))}</p>`;

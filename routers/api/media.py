@@ -4,6 +4,7 @@ import re
 import subprocess
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
@@ -244,6 +245,33 @@ async def api_stream_zilla(path: str):
         'Cache-Control': 'public, max-age=3600',
     }
     return StreamingResponse(_body(), headers=headers)
+
+
+_IMAGE_PROXY_HOSTS = {'img1mw.xyz', 'img2mw.xyz'}
+_IMAGE_PROXY_REFERER = 'https://www.manhwaweb.com/'
+
+
+@api_router.get('/image')
+async def api_image_proxy(url: str):
+    """Proxy para CDNs que exigen el Referer de su propio sitio (ManhwaWeb)."""
+    parsed = urlsplit(url)
+    if parsed.scheme not in ('http', 'https') or parsed.hostname not in _IMAGE_PROXY_HOSTS:
+        raise HTTPException(status_code=400, detail='URL no permitida')
+
+    import httpx
+
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+        upstream = await client.get(url, headers={
+            'User-Agent': 'Mozilla/5.0',
+            'Referer': _IMAGE_PROXY_REFERER,
+        })
+    if upstream.status_code != 200:
+        raise HTTPException(status_code=upstream.status_code)
+    return Response(
+        content=upstream.content,
+        media_type=upstream.headers.get('content-type', 'image/webp'),
+        headers=_CACHE_HEADERS,
+    )
 
 
 @api_router.get('/play/remote/{content_type}/{source}/{content_id}/{chapter}')

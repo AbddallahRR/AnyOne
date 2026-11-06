@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# --- IGNORE ---
 
 import logging
 import re
@@ -24,7 +23,7 @@ class ManhwawebSource(HttpClientMixin, BaseSource):
     type = 'manga'
     label = 'ManhwaWeb'
     BASE_URL = "https://www.manhwaweb.com"
-    API_BASE = "https://manhwawebbackend-production.up.railway.app"
+    API_BASE = "https://api.manhwaweb.com"
 
     # -----------------------------------------------------------------------
     # URL helpers
@@ -73,7 +72,7 @@ class ManhwawebSource(HttpClientMixin, BaseSource):
         """
         try:
             data = self._get_json(
-                f"{self.API_BASE}/manhwa/library?buscar={_url_quote(query)}&page=1"
+                f"{self.API_BASE}/manhwa/library?buscar={_url_quote(query)}&page=0"
             )
             items = data.get('data', [])
             if items:
@@ -188,8 +187,12 @@ class ManhwawebSource(HttpClientMixin, BaseSource):
             chapters = []
             for ch in data.get('chapters', []):
                 num = str(ch.get('chapter', ''))
+                link = ch.get('link') or next(
+                    (v.get('link') for v in ch.get('versions', []) if v.get('link')), ''
+                )
+                chapter_id = link.rstrip('/').split('/')[-1] or f"{content_id}-{num}"
                 if num:
-                    chapters.append({'number': num, 'id': f"{content_id}-{num}"})
+                    chapters.append({'number': num, 'id': chapter_id})
             chapters = self._dedup_sort_chapters(chapters)
             if chapters:
                 search_cache.set(cache_key, chapters)
@@ -260,12 +263,11 @@ class ManhwawebSource(HttpClientMixin, BaseSource):
         except Exception as exc:
             logger.debug(f'ManhwaWeb: API falló para {content_id}/{chapter_id}: {exc}, usando scraping')
 
-        num     = self._chapter_num_from_id(chapter_id)
-        web_url = f"{self.BASE_URL}/leer/{content_id}-{num}"
+        web_url = f"{self.BASE_URL}/leer/{chapter_id}"
         try:
             resp = self._get(web_url, headers={'Referer': self.BASE_URL})
         except Exception as exc:
-            logger.warning(f'ManhwaWeb: error obteniendo pagina de lectura para {content_id}/{num}: {exc}')
+            logger.warning(f'ManhwaWeb: error obteniendo pagina de lectura para {content_id}/{chapter_id}: {exc}')
             return []
 
         soup = BeautifulSoup(resp.text, 'html.parser')

@@ -185,7 +185,7 @@
       el.className = 'sched-search-item';
       el.dataset.ref = `local:${item.id}`;
       el.innerHTML = `
-        <img class="sched-search-cover" src="${item.cover || PLACEHOLDER}"
+        <img class="sched-search-cover" src="${window.imageSrc(item.cover) || PLACEHOLDER}"
              alt="" onerror="this.src='${PLACEHOLDER}'" />
         <div class="sched-search-info">
           <span class="sched-search-title">${_escapeHtml(item.title)}</span>
@@ -204,7 +204,7 @@
     searchInput.value = '';
     searchResults.classList.add('hidden');
 
-    selectedCover.src = item.cover || PLACEHOLDER;
+    selectedCover.src = window.imageSrc(item.cover) || PLACEHOLDER;
     selectedTitle.textContent = item.title || ref;
     selectedType.textContent = item.type || '';
     searchSelected.classList.remove('hidden');

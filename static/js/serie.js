@@ -49,7 +49,7 @@
 
       titleEl.textContent    = data.title    || 'Sin título';
       synopsisEl.textContent = data.synopsis || 'Sin descripción disponible.';
-      if (data.cover) { coverImg.dataset.src = data.cover; coverImg.src = data.cover; }
+      if (data.cover) { coverImg.dataset.src = data.cover; coverImg.src = window.imageSrc(data.cover); }
 
       // Guardar la fuente real de series descargadas localmente
       if (isLocal && data.source) {

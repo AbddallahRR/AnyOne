@@ -756,7 +756,9 @@
         return;
       }
 
-      const imageUrls = isRemote ? rawData : rawData.map(p => `/api/manga/images/${p}`);
+      const imageUrls = isRemote
+        ? rawData.map(window.imageSrc)
+        : rawData.map(p => `/api/manga/images/${p}`);
       const total     = imageUrls.length;
 
       const WINDOW       = 2;

@@ -10,7 +10,7 @@ from core.settings import settings
 logger = logging.getLogger(__name__)
 
 _local = threading.local()
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 
 def execute_with_retry(sql: str, params: tuple = ()) -> sqlite3.Cursor:
@@ -242,6 +242,15 @@ def _run_migrations(conn: sqlite3.Connection, current: int) -> None:
             'INSERT OR IGNORE INTO scraper_configs '
             '(name, type, label, base_url, built_in, enabled, config_json, created_at, updated_at) '
             "VALUES ('animeav1', 'anime', 'AnimeAV1', 'https://animeav1.com', 1, 1, '{}', "
+            "strftime('%s','now'), strftime('%s','now'))"
+        )
+
+    if current < 15:
+        logger.info("Migracion 15: reactivar ManhwaWeb en scraper_configs")
+        conn.execute(
+            'INSERT OR IGNORE INTO scraper_configs '
+            '(name, type, label, base_url, built_in, enabled, config_json, created_at, updated_at) '
+            "VALUES ('manhwaweb', 'manga', 'ManhwaWeb', 'https://www.manhwaweb.com', 1, 1, '{}', "
             "strftime('%s','now'), strftime('%s','now'))"
         )
 

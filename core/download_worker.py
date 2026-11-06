@@ -77,6 +77,14 @@ def _post_process_video(filepath: str) -> None:
             os.remove(tmp)
 
 
+def _is_image(data: bytes) -> bool:
+    """True si los bytes son JPEG/PNG/GIF/WebP (evita guardar HTML de error como portada)."""
+    return (
+        data.startswith((b'\xff\xd8\xff', b'\x89PNG\r\n\x1a\n', b'GIF87a', b'GIF89a'))
+        or (data[:4] == b'RIFF' and data[8:12] == b'WEBP')
+    )
+
+
 def _save_series_metadata(series_folder: str, title: str, source_name: str,
                            content_id: str, content_type: str, source) -> None:
     from core.database import save_content_to_db
@@ -97,25 +105,45 @@ def _save_series_metadata(series_folder: str, title: str, source_name: str,
             cover_filename = f'cover.{ext}'
             cover_path     = os.path.join(series_folder, cover_filename)
 
-            if not os.path.exists(cover_path):
+            valid_cover = False
+            if os.path.exists(cover_path):
+                with open(cover_path, 'rb') as f:
+                    valid_cover = _is_image(f.read(16))
+                if not valid_cover:
+                    os.remove(cover_path)
+
+            if not valid_cover:
                 # ponytail: el CDN (Cloudflare) devuelve 403 a toda petición
-                # sin cabeceras Sec-Fetch-* (ver sources/ikigai.py).
+                # sin cabeceras Sec-Fetch-* (ver sources/ikigai.py). Además
+                # algunos CDN (ManhwaWeb) exigen el Referer de su propio sitio.
                 headers = {'User-Agent': source.UA} if hasattr(source, 'UA') else {}
                 headers.update({
                     'Sec-Fetch-Site': 'cross-site',
                     'Sec-Fetch-Mode': 'no-cors',
                     'Sec-Fetch-Dest': 'image',
                 })
-                if hasattr(source, 'scraper'):
-                    img_data = source.scraper.get(cover_url, headers=headers).content
-                else:
-                    img_data = HttpPool.get_session().get(cover_url, headers=headers, timeout=30).content
-                with open(cover_path, 'wb') as f:
-                    f.write(img_data)
-                logger.info(f"Portada guardada: {cover_path}")
+                if getattr(source, 'BASE_URL', ''):
+                    headers['Referer'] = source.BASE_URL
 
+                resp = (source.scraper.get(cover_url, headers=headers, timeout=30)
+                        if hasattr(source, 'scraper')
+                        else HttpPool.get_session().get(cover_url, headers=headers, timeout=30))
+                img_data = resp.content
+                if resp.status_code == 200 and _is_image(img_data):
+                    with open(cover_path, 'wb') as f:
+                        f.write(img_data)
+                    valid_cover = True
+                    logger.info(f"Portada guardada: {cover_path}")
+                else:
+                    cover_filename = ''
+                    logger.warning(
+                        f"No se pudo descargar la portada de '{title}': "
+                        f"HTTP {resp.status_code} {resp.headers.get('content-type', '')}"
+                    )
+
+            if valid_cover:
                 thumb_path = os.path.join(series_folder, 'thumb.webp')
-                if not os.path.exists(thumb_path):
+                if not os.path.exists(thumb_path) or os.path.getsize(thumb_path) == 0:
                     try:
                         import subprocess
                         subprocess.run(

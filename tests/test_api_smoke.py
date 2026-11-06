@@ -83,6 +83,38 @@ class TestReadOnlyEndpoints:
         assert '/api/search' in client.get('/openapi.json').json()['paths']
 
 
+class TestImageProxy:
+    def test_rejects_foreign_host(self, client):
+        r = client.get('/api/image', params={'url': 'http://127.0.0.1/secret'})
+        assert r.status_code == 400
+
+    def test_proxies_manhwaweb_cdn(self, client, monkeypatch):
+        import httpx
+
+        class FakeResponse:
+            status_code = 200
+            content = b'image-bytes'
+            headers = {'content-type': 'image/webp'}
+
+        class FakeClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def get(self, url, headers=None):
+                return FakeResponse()
+
+        monkeypatch.setattr(httpx, 'AsyncClient', FakeClient)
+        r = client.get('/api/image', params={'url': 'https://img2mw.xyz/cover.webp'})
+        assert r.status_code == 200
+        assert r.content == b'image-bytes'
+
+
 class TestNotFoundHandling:
     def test_unknown_source_is_404(self, client):
         r = client.get('/api/search?q=naruto&source=nope&type=manga')

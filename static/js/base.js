@@ -38,6 +38,19 @@ window.closeModal = function() {
   setTimeout(() => m.classList.add('hidden'), 250);
 };
 
+/* ── Proxy de imágenes con Referer obligatorio ──
+   img1mw/img2mw solo sirven la imagen si el Referer es manhwaweb.com. */
+window.imageSrc = function(url) {
+  if (!url) return url;
+  try {
+    const u = new URL(url, location.origin);
+    if (u.hostname === 'img1mw.xyz' || u.hostname === 'img2mw.xyz') {
+      return `/api/image?url=${encodeURIComponent(u.href)}`;
+    }
+  } catch (_) { /* URL inválida: dejar tal cual */ }
+  return url;
+};
+
 /* ── Animate cards with IntersectionObserver (reuses/disconnects per container) ── */
 window.animateCards = function(containerSelector, itemSelector) {
   const container = document.querySelector(containerSelector);
