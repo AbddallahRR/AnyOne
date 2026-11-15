@@ -204,6 +204,10 @@ class CachedStaticFiles(StaticFiles):
                     cache_control = b"public, max-age=31536000, immutable"
                 elif path.endswith((".woff2", ".ttf", ".woff")):
                     cache_control = b"public, max-age=2592000"
+                elif path.endswith((".css", ".js")):
+                    # Sin hash en la URL: revalidar con ETag para no servir
+                    # versiones viejas hasta 24h después de un despliegue.
+                    cache_control = b"public, max-age=0, must-revalidate"
                 else:
                     cache_control = b"public, max-age=86400"
                 headers = list(headers)

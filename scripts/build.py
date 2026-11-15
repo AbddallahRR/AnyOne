@@ -24,7 +24,7 @@ def write(p: Path, content: str):
 # ── CSS bundles ───────────────────────────────────────────────────────────
 # Shared base files that are identical across all pages.
 # Extracted into a single cached chunk to avoid re-downloading on navigation.
-SHARED_CSS = ["inter.css", "fa-subset.css", "base.css", "layout.css"]
+SHARED_CSS = ["inter.css", "fa-subset.css", "base.css", "layout.css", "queue-indicator.css", "scraper-health.css"]
 
 CSS_BUNDLES = {
     "index":    ["index.css"],
