@@ -105,6 +105,7 @@
 .sidebar-item i {
   font-size: 18px;
   width: 20px;
+  font-style: normal; /* el engranaje es un carácter de texto, no un icono FA */
   text-align: center;
   flex-shrink: 0;
 }
