@@ -18,8 +18,14 @@
     .page-content { width: 100%; max-width: 1380px; margin: 0 auto; padding: 28px 32px 28px 104px; box-sizing: border-box; }
     @media (min-width: 1280px) { .page-content { max-width: 1460px; padding-left: 112px !important; } }
     @media (min-width: 1536px) { .page-content { max-width: 1540px; padding-left: 120px !important; } }
-    @media (max-width: 640px) { .app-sidebar { display: none !important; } .page-content { width: 100% !important; max-width: 100% !important; margin: 0 !important; padding: 20px 14px calc(20px + env(safe-area-inset-bottom, 72px)) !important; padding-left: 14px !important; } }
-    @media (max-width: 480px) { .app-sidebar { display: none !important; } .page-content { width: 100% !important; max-width: 100% !important; margin: 0 !important; padding: 20px 14px 20px 14px !important; padding-left: 14px !important; padding-right: 14px !important; } }
+    @media (max-width: 640px) {
+      .app-sidebar { display: flex !important; top: auto !important; bottom: calc(76px + env(safe-area-inset-bottom, 0px)) !important; left: auto !important; right: 12px !important; width: auto !important; height: auto !important; padding: 0 !important; background: transparent !important; border: 0 !important; overflow: visible !important; }
+      .sidebar-top, .sidebar-nav { display: none !important; }
+      .page-content { width: 100% !important; max-width: 100% !important; margin: 0 !important; padding: 20px 14px calc(88px + env(safe-area-inset-bottom, 0px)) !important; }
+    }
+    @media (max-width: 480px) {
+      .page-content { width: 100% !important; max-width: 100% !important; margin: 0 !important; padding: 20px 14px calc(88px + env(safe-area-inset-bottom, 0px)) !important; }
+    }
   </style>
 
   {% if bundles %}

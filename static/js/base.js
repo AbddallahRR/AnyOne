@@ -51,6 +51,42 @@ window.imageSrc = function(url) {
   return url;
 };
 
+/* ── Accesos rápidos flotantes (móvil): ocultar al bajar, mostrar al subir ── */
+(function () {
+  const dock = document.querySelector('.app-sidebar');
+  if (!dock) return;
+  const mobile = matchMedia('(max-width: 640px)');
+  let lastY = window.scrollY;
+  let ticking = false;
+
+  function update() {
+    ticking = false;
+    const y = window.scrollY;
+    if (!mobile.matches) {
+      dock.classList.remove('dock-hidden');
+      lastY = y;
+      return;
+    }
+    const delta = y - lastY;
+    if (Math.abs(delta) < 8) return;
+    if (delta > 0 && y > 80) dock.classList.add('dock-hidden');
+    else if (delta < 0) dock.classList.remove('dock-hidden');
+    lastY = y;
+  }
+
+  window.addEventListener('scroll', () => {
+    if (!ticking) {
+      ticking = true;
+      requestAnimationFrame(update);
+    }
+  }, { passive: true });
+
+  mobile.addEventListener('change', () => {
+    if (!mobile.matches) dock.classList.remove('dock-hidden');
+    lastY = window.scrollY;
+  });
+})();
+
 /* ── Animate cards with IntersectionObserver (reuses/disconnects per container) ── */
 window.animateCards = function(containerSelector, itemSelector) {
   const container = document.querySelector(containerSelector);

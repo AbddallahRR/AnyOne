@@ -160,7 +160,7 @@
 }
 @media (max-width: 480px) {
   .page-content {
-    padding: 20px 14px 20px 88px;
+    padding: 20px 14px calc(88px + env(safe-area-inset-bottom, 0px));
   }
 }
 
@@ -218,13 +218,62 @@
   color: var(--accent-lt);
 }
 
-/* ── Mobile breakpoint: sidebar → bottom nav ── */
+/* ── Mobile breakpoint: accesos rápidos flotantes + bottom nav ── */
 @media (max-width: 640px) {
-  .app-sidebar { display: none; }
+  .app-sidebar {
+    z-index: 95;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    transition: transform 0.25s ease, opacity 0.25s ease;
+  }
+
+  .sidebar-top,
+  .sidebar-nav { display: none; }
+
+  .sidebar-bottom {
+    gap: 10px;
+    padding: 0;
+  }
+
+  .sidebar-item {
+    width: 48px;
+    height: 48px;
+    padding: 0;
+    justify-content: center;
+    gap: 0;
+    font-size: 0;
+    border-radius: 50%;
+    background: rgba(19, 19, 30, 0.92);
+    border: 1px solid var(--border-hi);
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+  }
+
+  .sidebar-item i { font-size: 19px; }
+  .sidebar-label { display: none; }
+
+  .app-sidebar .sidebar-item:hover,
+  .app-sidebar .sidebar-item.active {
+    background: rgba(124, 92, 252, 0.22);
+    color: var(--text);
+  }
+
+  .app-sidebar.dock-hidden {
+    transform: translateY(calc(100% + 90px));
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  #nav-downloads .dl-badge,
+  #nav-bell .bell-badge {
+    left: auto !important;
+    right: -2px;
+    top: -2px;
+  }
+
   .bottom-nav { display: flex; }
 
   .page-content {
-    padding: 20px 14px calc(20px + env(safe-area-inset-bottom, 72px));
+    padding: 20px 14px calc(88px + env(safe-area-inset-bottom, 0px));
   }
 
   .settings-main {
