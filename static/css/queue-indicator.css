@@ -225,5 +225,13 @@
 
 @media (max-width: 640px) {
   #qi-indicator { right: 10px; }
-  #qi-popup { width: 100%; border-radius: 0; }
+  #qi-popup {
+    top: auto; bottom: var(--bottom-nav-h, 0px);
+    width: 100%; max-height: 72dvh;
+    border-left: 0; border-top: 1px solid rgba(255,255,255,0.12);
+    border-radius: 16px 16px 0 0;
+    transform: translateY(100%);
+    overscroll-behavior: contain;
+  }
+  #qi-popup.open { transform: translateY(0); }
 }

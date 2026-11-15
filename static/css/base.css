@@ -839,7 +839,17 @@ select.input-field {
 }
 
 @media (max-width: 640px) {
-  .updates-popup-content { width: 100%; border-radius: 0; }
+  #updates-popup { bottom: var(--bottom-nav-h, 0px); }
+  .updates-popup-content {
+    top: auto; bottom: 0; width: 100%;
+    max-height: 72dvh;
+    border-left: 0; border-top: 1px solid var(--border-hi);
+    border-radius: 16px 16px 0 0;
+    transform: translateY(100%);
+    overscroll-behavior: contain;
+  }
+  #updates-popup.updates-popup-visible .updates-popup-content { transform: translateY(0); }
+  #updates-popup.updates-popup-hiding .updates-popup-content { transform: translateY(100%); }
 }
 
 /* ── Transición entre páginas del menú (View Transitions, nativo) ──

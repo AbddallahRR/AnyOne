@@ -87,6 +87,17 @@ window.imageSrc = function(url) {
   });
 })();
 
+/* ── Alto real de la bottom-nav: las hojas móviles terminan encima ── */
+(function () {
+  const nav = document.getElementById('bottom-nav');
+  if (!nav) return;
+  const apply = () => document.documentElement.style
+    .setProperty('--bottom-nav-h', nav.getBoundingClientRect().height + 'px');
+  apply();
+  if (window.ResizeObserver) new ResizeObserver(apply).observe(nav);
+  else window.addEventListener('resize', apply);
+})();
+
 /* ── Animate cards with IntersectionObserver (reuses/disconnects per container) ── */
 window.animateCards = function(containerSelector, itemSelector) {
   const container = document.querySelector(containerSelector);
