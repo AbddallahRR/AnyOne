@@ -11,7 +11,7 @@
 <div class="serie-page has-sidebar">
 
   <!-- ── Left Sidebar ────────────────────────────────────────────────── -->
-  {% with active = 'library' %}{% include "_sidebar.html" %}{% endwith %}
+  {% with active = request.query_params.get('tab', 'library') %}{% include "_sidebar.html" %}{% endwith %}
 
   <div class="page-content">
 

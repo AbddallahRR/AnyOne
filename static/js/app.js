@@ -37,6 +37,11 @@
     { btn: tabLibrary, panel: libraryPanel, type: 'library' },
   ];
 
+  // La bottom-nav móvil duplica las tabs del sidebar por href. Se sincroniza
+  // en el mismo punto de control; los enlaces sin ?tab= (Horario) navegan.
+  const bottomNavItems = [...document.querySelectorAll('#bottom-nav .bn-item')];
+  const tabOf = el => new URLSearchParams(el.search).get('tab');
+
   function setActiveTab(type) {
     if (currentType === type && type !== 'library') return; // evitar re-render innecesario
     const from = TAB_MAP.find(t => t.type === currentType);
@@ -57,6 +62,8 @@
           order.indexOf(btn) >= order.indexOf(from.btn) ? '32px' : '-32px');
       }
     });
+    // La bottom-nav (móvil) no tiene ids: se sincroniza por href.
+    bottomNavItems.forEach(el => el.classList.toggle('active', tabOf(el) === type));
     // [OPT-3] Solo cargar biblioteca la primera vez que se abre esa tab
     if (type === 'library' && !_libraryLoaded) {
       _libraryLoaded = true;
@@ -71,6 +78,12 @@
       e.preventDefault();  // el sidebar usa <a href="/?tab=…"> también en Inicio
       setActiveTab(type);
     });
+  });
+
+  // Mismos tabs en la bottom-nav móvil, sin recargar la página.
+  bottomNavItems.forEach(el => {
+    const type = tabOf(el);
+    if (type) el.addEventListener('click', (e) => { e.preventDefault(); setActiveTab(type); });
   });
 
   // ── CoverObserver — lazy load + liberación de VRAM ────────────────────
