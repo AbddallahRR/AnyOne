@@ -177,6 +177,12 @@
   }
 
   // ── Búsqueda online ────────────────────────────────────────────────────
+  // Mostrar/ocultar la sección "Continuar viendo" al buscar
+  function _toggleRecentSection(type, show) {
+    const section = document.getElementById(`${type}-recent-section`);
+    if (section) section.classList.toggle('hidden', !show);
+  }
+
   async function search(refresh = false) {
     if (currentType === 'library') return;
     const type   = currentType;
@@ -184,7 +190,11 @@
     const query  = type === 'anime'
       ? animeSearchInput.value.trim()
       : mangaSearchInput.value.trim();
-    if (!query) return;
+    if (!query) {
+      _toggleRecentSection(type, true);
+      return;
+    }
+    _toggleRecentSection(type, false);
 
     const container = document.getElementById(`${type}-results`);
 
