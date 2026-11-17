@@ -23,7 +23,7 @@ from core.utils import count_images_in_dir, normalize_title, scan_downloaded_ser
 from core.settings import settings
 
 from . import api_router
-from .common import _resolve_series_title
+from .common import _resolve_series_title, cover_url_for, local_cover_url
 from .media import _chapter_video, _probe_duration
 
 logger = logging.getLogger(__name__)
@@ -121,14 +121,14 @@ def api_library_updates():
     conn = get_conn()
     placeholders = ','.join('?' * len(refs))
     rows = conn.execute(
-        f"SELECT id, title FROM content WHERE id IN ({placeholders})", refs
+        f"SELECT id, title, cover, type FROM content WHERE id IN ({placeholders})", refs
     ).fetchall()
-    title_map = {r[0]: r[1] for r in rows}
+    title_map = {r[0]: (r[1], r[2], r[3]) for r in rows}
 
     results = []
     for s in series:
         ref = s['content_ref']
-        title = title_map.get(ref)
+        title, cover, db_type = (title_map.get(ref) or (None, None, None))
         content_type = None
         local_id = None
 
@@ -166,7 +166,14 @@ def api_library_updates():
             if not title:
                 title = ref
             if content_type is None:
+                content_type = db_type
                 local_id = ref
+
+        cover_url = None
+        if content_type and cover:
+            cover_url = cover_url_for(content_type, title or ref, cover)
+        if not cover_url and ref.startswith('local:') and content_type:
+            cover_url = local_cover_url(content_type, ref[6:])
 
         results.append({
             'content_ref': ref,
@@ -174,6 +181,7 @@ def api_library_updates():
             'new_chapters': s['new_chapters'],
             'content_type': content_type,
             'local_id': local_id,
+            'cover': cover_url,
         })
     return {
         'total': len(results),

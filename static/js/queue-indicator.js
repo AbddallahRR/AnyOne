@@ -180,15 +180,22 @@
       errorHtml = `<div class="qi-error-text"><i class="fas fa-exclamation-triangle" style="margin-right:5px;"></i>${job.error}</div>`;
     }
 
+    const coverHtml = job.cover
+      ? `<img class="qi-job-cover" src="${window.imageSrc ? window.imageSrc(job.cover) : job.cover}" alt="" loading="lazy" onerror="this.style.display='none'">`
+      : ''
+
     return `
       <div class="qi-job">
-        <div class="qi-job-header">
-          <span class="qi-job-title" title="${(job.title || '').replace(/"/g,'&quot;')}">${job.title || '—'}</span>
-          ${statusBadge}
+        ${coverHtml}
+        <div class="qi-job-body">
+          <div class="qi-job-header">
+            <span class="qi-job-title" title="${(job.title || '').replace(/"/g,'&quot;')}">${job.title || '—'}</span>
+            ${statusBadge}
+          </div>
+          ${progressHtml}
+          ${fileProgressHtml}
+          ${errorHtml}
         </div>
-        ${progressHtml}
-        ${fileProgressHtml}
-        ${errorHtml}
       </div>`;
   }
 

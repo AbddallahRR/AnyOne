@@ -4,6 +4,7 @@ from queue import Full
 from fastapi import HTTPException
 
 from core.database import (
+    get_conn,
     get_content_ref,
     get_watched_chapters,
     queue_find_active,
@@ -19,10 +20,9 @@ from core.models import (
     DownloadJob,
     DownloadRequest,
 )
-from core.utils import normalize_title
 
 from . import api_router
-from .common import _require_source
+from .common import _require_source, cover_url_for, local_cover_url
 
 logger = logging.getLogger(__name__)
 
@@ -68,11 +68,26 @@ def _enqueue(ref: str, data, chapter_id: str | None = None,
 @api_router.get('/queue/status')
 def api_queue_status():
     active, pending = queue_get_status()
-    for job in active:
+    for job in (*active, *pending):
+        job['cover'] = _resolve_job_cover(job)
         fp = get_file_progress(job['id'])
         if fp:
             job['file_progress'] = fp
     return {'active': active, 'queue': pending}
+
+
+def _resolve_job_cover(job) -> str | None:
+    """Portada de un job de cola: BD (contenido remoto) o disco (serie local)."""
+    ref = job['content_ref']
+    ctype = job['type']
+    title = job['title'] or ''
+    row = get_conn().execute('SELECT cover FROM content WHERE id = ?', (ref,)).fetchone()
+    cover = row['cover'] if row else None
+    if cover:
+        return cover_url_for(ctype, title, cover)
+    if ref.startswith('local:'):
+        return local_cover_url(ctype, ref[6:])
+    return None
 
 
 @api_router.post('/download')

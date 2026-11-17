@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  window.showNotification = function (message, type = 'info', duration = 3500) {
+  window.showNotification = function (message, type = 'info', duration = 3500, cover = null) {
     let container = document.getElementById('toast-container');
     if (!container) {
       container = document.createElement('div');
@@ -46,7 +46,10 @@
       alignItems: 'center',
       gap: '8px',
     });
-    toast.innerHTML = `<span style="flex-shrink:0;opacity:0.8;">${c.icon}</span><span>${message}</span>`;
+    const coverHtml = cover
+      ? `<img src="${window.imageSrc ? window.imageSrc(cover) : cover}" alt="" style="width:32px;height:32px;border-radius:6px;flex-shrink:0;object-fit:cover;background:var(--surface);border:1px solid rgba(255,255,255,0.06)" loading="lazy">`
+      : ''
+    toast.innerHTML = `${coverHtml}<span style="flex-shrink:0;opacity:0.8;">${c.icon}</span><span>${message}</span>`;
     container.appendChild(toast);
 
     requestAnimationFrame(() => requestAnimationFrame(() => {

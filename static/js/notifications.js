@@ -101,9 +101,13 @@
       const link = (s.content_type && s.local_id)
         ? `/serie/${s.content_type}/local/${encodeURIComponent(s.local_id)}`
         : '';
+      const coverHtml = s.cover
+        ? `<img src="${window.imageSrc ? window.imageSrc(s.cover) : s.cover}" alt="" style="width:34px;height:34px;border-radius:7px;flex-shrink:0;object-fit:cover;background:var(--surface);border:1px solid rgba(255,255,255,0.06)" loading="lazy" onerror="this.style.display='none'">`
+        : '';
       return `<div class="updates-popup-item" data-ref="${s.content_ref}">
-        <div class="updates-popup-item-top">
-          <span class="updates-popup-title">${s.title}</span>
+        <div class="updates-popup-item-top" style="display:flex;align-items:center;gap:8px;">
+          ${coverHtml}
+          <span class="updates-popup-title" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.title}</span>
           <button class="updates-popup-dismiss" data-ref="${s.content_ref}" title="Eliminar">&times;</button>
         </div>
         ${chText ? `<span class="updates-popup-chs">Cap. ${chText}</span>` : ''}

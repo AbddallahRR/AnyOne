@@ -155,7 +155,8 @@
           data-id="${id}"
           data-title="${safeTitle}"
           data-source="${source || ''}"
-          data-type="${type || ''}">
+          data-type="${type || ''}"
+          data-cover="${(cover || '').replace(/"/g, '&quot;')}">
           <!-- Image area -->
           <div class="card-image">
             <img class="cover-lazy"
@@ -234,7 +235,7 @@
         if (downloadBtn) {
           e.stopPropagation();
           const { id, title, source: src, type: typ } = card.dataset;
-          downloadSeries(typ, src, id, title);
+          downloadSeries(typ, src, id, title, card.dataset.cover || undefined);
           return;
         }
         const { id, source: src, type: typ } = card.dataset;
@@ -367,7 +368,7 @@
         if (downloadBtn) {
           e.stopPropagation();
           const { id, title, source: src, type: typ } = card.dataset;
-          downloadSeries(typ, src, id, title);
+          downloadSeries(typ, src, id, title, card.dataset.cover || undefined);
           return;
         }
         const { id, source: src, type: typ } = card.dataset;
@@ -378,10 +379,10 @@
   }
 
   // ── Descarga de serie completa ─────────────────────────────────────────
-  async function downloadSeries(type, source, contentId, title) {
+  async function downloadSeries(type, source, contentId, title, cover) {
     try {
       const data = await api.post('/api/download', { type, source, content_id: contentId, title, exclude_watched: true });
-      showNotification('Descarga encolada', 'success');
+      showNotification('Descarga encolada', 'success', 3500, cover ? window.imageSrc(cover) : undefined);
       if (window.showDownloadIndicator) window.showDownloadIndicator();
     } catch (err) {
       showNotification(`Error al encolar: ${err.message}`, 'error');
