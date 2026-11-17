@@ -181,7 +181,7 @@
     }
 
     const coverHtml = job.cover
-      ? `<img class="qi-job-cover" src="${window.imageSrc ? window.imageSrc(job.cover) : job.cover}" alt="" loading="lazy" onerror="this.style.display='none'">`
+      ? `<img class="cover-thumb" src="${window.imageSrc ? window.imageSrc(job.cover) : job.cover}" alt="" loading="lazy" onerror="this.style.display='none'">`
       : ''
 
     return `

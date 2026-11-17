@@ -104,7 +104,8 @@
   flex: 1;
   min-width: 0;
 }
-.qi-job-cover {
+/* Portada reutilizable: misma imagen en descargas y notificaciones */
+.cover-thumb {
   max-width: 64px;
   max-height: 64px;
   width: auto;

@@ -102,7 +102,7 @@
         ? `/serie/${s.content_type}/local/${encodeURIComponent(s.local_id)}`
         : '';
       const coverHtml = s.cover
-        ? `<img src="${window.imageSrc ? window.imageSrc(s.cover) : s.cover}" alt="" style="width:34px;height:34px;border-radius:7px;flex-shrink:0;object-fit:cover;background:var(--surface);border:1px solid rgba(255,255,255,0.06)" loading="lazy" onerror="this.style.display='none'">`
+        ? `<img class="cover-thumb" src="${window.imageSrc ? window.imageSrc(s.cover) : s.cover}" alt="" loading="lazy" onerror="this.style.display='none'">`
         : '';
       return `<div class="updates-popup-item" data-ref="${s.content_ref}">
         <div class="updates-popup-item-top" style="display:flex;align-items:center;gap:8px;">
