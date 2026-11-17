@@ -79,27 +79,27 @@
     // Click on grid cell → add
     gridBody.addEventListener('click', e => {
       const cell = e.target.closest('.sched-cell');
-      if (cell && !e.target.closest('.sched-chip') && !e.target.closest('.sched-day-label')) {
+      if (cell && !e.target.closest('.sched-card') && !e.target.closest('.sched-day-label')) {
         const day = parseInt(cell.dataset.day);
         _openModal(null, day);
       }
     });
 
-    // Right-click on chip → context menu
+    // Right-click on card → context menu
     gridBody.addEventListener('contextmenu', e => {
-      const chip = e.target.closest('.sched-chip');
-      if (!chip) return;
+      const card = e.target.closest('.sched-card');
+      if (!card) return;
       e.preventDefault();
-      _showCtxMenu(e.clientX, e.clientY, chip.dataset.ref);
+      _showCtxMenu(e.clientX, e.clientY, card.dataset.ref);
     });
 
-    // Click on chip → context menu
+    // Click on card → context menu
     gridBody.addEventListener('click', e => {
-      const chip = e.target.closest('.sched-chip');
-      if (!chip) return;
+      const card = e.target.closest('.sched-card');
+      if (!card) return;
       e.stopPropagation();
-      const rect = chip.getBoundingClientRect();
-      _showCtxMenu(rect.right + 4, rect.top, chip.dataset.ref);
+      const rect = card.getBoundingClientRect();
+      _showCtxMenu(rect.right + 4, rect.top, card.dataset.ref);
     });
 
     // Context menu actions
@@ -240,9 +240,12 @@
       const entries = dayMap[d];
       if (entries && entries.length > 0) {
         hasAny = true;
+        const colWrap = document.createElement('div');
+        colWrap.className = 'sched-day-col';
         for (const s of entries) {
-          td.appendChild(_buildChip(s));
+          colWrap.appendChild(_buildCard(s));
         }
+        td.appendChild(colWrap);
       }
 
       tr.appendChild(td);
@@ -253,19 +256,19 @@
     emptyMsg.classList.toggle('hidden', hasAny);
   }
 
-  function _buildChip(schedule) {
-    const chip = document.createElement('span');
-    chip.className = 'sched-chip';
-    chip.dataset.ref = schedule.content_ref;
-    chip.title = schedule.title;
+  function _buildCard(schedule) {
+    const card = document.createElement('div');
+    card.className = 'sched-card';
+    card.dataset.ref = schedule.content_ref;
+    card.title = schedule.title;
     const cover = _coverByRef.get(schedule.content_ref) || '';
-    chip.innerHTML = `
+    card.innerHTML = `
       ${cover
-        ? `<img class="sched-chip-cover" src="${cover}" alt="" onerror="this.remove()" />`
-        : `<i class="fas fa-hand-pointer sched-chip-icon"></i>`}
-      <span class="sched-chip-label">${_escapeHtml(schedule.title)}</span>
+        ? `<img class="sched-card-cover" src="${window.imageSrc ? window.imageSrc(cover) : cover}" alt="" loading="lazy" onerror="this.style.display='none'" />`
+        : `<div class="sched-card-cover-placeholder"></div>`}
+      <span class="sched-card-title">${_escapeHtml(schedule.title)}</span>
     `;
-    return chip;
+    return card;
   }
 
   function _escapeHtml(str) {
