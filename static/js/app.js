@@ -10,6 +10,7 @@
   let _libraryTypeFilter = 'all';
   let _libraryQuery    = '';
   let _libraryLoaded   = false;
+  let _libraryRecent   = [];
 
   // ── Elementos DOM ─────────────────────────────────────────────────────
   const animePanel       = document.getElementById('anime-panel');
@@ -425,10 +426,11 @@
       ]);
       _libraryItems    = libData.items;
       _libraryStatuses = statusData;
+      _libraryRecent   = libData.recent || [];
       _initLibraryControls();
       applyLibraryView();
       window.Notifications?.refresh();
-      renderRecentSeries(libData.recent || []);
+      renderRecentSeries(_libraryRecent);
     } catch (err) {
       container.innerHTML = `
         <div class="empty-state">
@@ -454,6 +456,7 @@
       ]);
       _libraryItems    = libData.items;
       _libraryStatuses = statusData;
+      _libraryRecent   = libData.recent || [];
       // Eliminar primero los nodos del DOM: sin esto el render diferencial
       // crearía cards nuevos y los viejos (con .media-card-wrapper) se
       // quedarían en el contenedor → cards duplicados.
@@ -461,7 +464,7 @@
       _renderedCards.clear();
       applyLibraryView();
       window.Notifications?.refresh();
-      renderRecentSeries(libData.recent || []);
+      renderRecentSeries(_libraryRecent);
     } catch (_) { /* silencioso: la próxima carga lo reintentará */ }
   }
 
@@ -472,12 +475,6 @@
     const section = document.getElementById('recent-section');
     const list    = document.getElementById('recent-list');
     if (!section || !list) return;
-
-    if (!recent || recent.length === 0) {
-      section.classList.add('hidden');
-      return;
-    }
-    section.classList.remove('hidden');
 
     list.innerHTML = recent.map(item => {
       const isAnime   = item.type === 'anime';
@@ -682,6 +679,12 @@
              <p>Tu biblioteca está vacía. Usa la búsqueda para descargar series.</p>
            </div>`;
       _renderedCards.clear();
+      // Si hay filtro activo, ocultar "Continuar viendo"
+      const recentSection = document.getElementById('recent-section');
+      if (recentSection) {
+        const hasFilter = _libraryFilter !== 'all' || _libraryTypeFilter !== 'all' || _libraryQuery;
+        if (hasFilter) recentSection.classList.add('hidden');
+      }
       return;
     }
 
@@ -721,6 +724,14 @@
       // Lazy load de portadas solo para las recién añadidas
       observeCovers(container);
       if (window.animateCards) window.animateCards('#library-results');
+    }
+
+    // 7. Mostrar/ocultar "Continuar viendo" según filtro y progreso reciente
+    const recentSection = document.getElementById('recent-section');
+    if (recentSection) {
+      const hasFilter = _libraryFilter !== 'all' || _libraryTypeFilter !== 'all' || _libraryQuery;
+      const hasRecent = _libraryRecent && _libraryRecent.length > 0;
+      recentSection.classList.toggle('hidden', hasFilter || !hasRecent);
     }
   }
 
