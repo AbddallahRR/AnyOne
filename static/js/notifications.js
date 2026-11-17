@@ -105,13 +105,13 @@
         ? `<img class="cover-thumb" src="${window.imageSrc ? window.imageSrc(s.cover) : s.cover}" alt="" loading="lazy" onerror="this.style.display='none'">`
         : '';
       const chsHtml = chText ? `<span class="updates-popup-chs">Cap. ${chText}</span>` : '';
-      const viewHtml = link ? `<a class="updates-popup-view" href="${link}"><i class="fas fa-eye"></i> Ver serie</a>` : '';
-      return `<div class="updates-popup-item" data-ref="${s.content_ref}">
+      return `<div class="updates-popup-item" data-ref="${s.content_ref}"${link ? ` data-href="${link}"` : ''}>
         <div class="updates-popup-item-top">
           ${coverHtml}
-          <span class="updates-popup-title">${s.title}</span>
-          ${chsHtml}
-          ${viewHtml}
+          <div class="updates-popup-info">
+            <span class="updates-popup-title">${s.title}</span>
+            ${chsHtml}
+          </div>
           <button class="updates-popup-dismiss" data-ref="${s.content_ref}" title="Eliminar">&times;</button>
         </div>
       </div>`;
@@ -152,6 +152,12 @@
     });
 
     popup.addEventListener('click', async (e) => {
+      const item = e.target.closest('.updates-popup-item');
+      if (item && item.dataset.href && !e.target.closest('.updates-popup-dismiss')) {
+        e.stopPropagation();
+        window.location.href = item.dataset.href;
+        return;
+      }
       const dismissBtn = e.target.closest('.updates-popup-dismiss');
       if (dismissBtn) {
         e.stopPropagation();

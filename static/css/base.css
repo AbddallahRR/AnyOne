@@ -745,6 +745,21 @@ select.input-field {
   gap: 8px;
   flex-wrap: wrap;
 }
+.updates-popup-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.updates-popup-chs {
+  display: block;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.updates-popup-item {
+  cursor: pointer;
+}
 .updates-popup-title {
   font-size: 12px;
   font-weight: 600;
@@ -775,23 +790,6 @@ select.input-field {
   background: rgba(248,113,113,0.12);
   border-color: rgba(248,113,113,0.25);
 }
-.updates-popup-chs {
-  font-size: 11px;
-  color: var(--text-dim);
-}
-.updates-popup-view {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  align-self: flex-start;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--accent-lt);
-  text-decoration: none;
-  transition: opacity 0.15s;
-}
-.updates-popup-view:hover { opacity: 0.75; }
-.updates-popup-view i { font-size: 8px; }
 .updates-popup-more {
   font-size: 10px;
   color: var(--muted);
