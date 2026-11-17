@@ -117,10 +117,8 @@
       </div>`;
     }
 
-    const items = series.slice(0, 5).map(_buildItemHtml).join('');
-
-    const extra = total > 5 ? `<div class="updates-popup-more">y ${total - 5} serie${total - 5 !== 1 ? 's' : ''} más…</div>` : '';
-    const bodyContent = total > 0 ? items + extra : '<div class="updates-popup-empty">No hay capítulos nuevos por ahora</div>';
+    const items = series.map(_buildItemHtml).join('');
+    const bodyContent = total > 0 ? items : '<div class="updates-popup-empty">No hay capítulos nuevos por ahora</div>';
 
     const popup = document.createElement('div');
     popup.id = 'updates-popup';
@@ -209,8 +207,7 @@
         const totalQueued = results.reduce((sum, r) => sum + (r.queued || 0), 0);
         const body = popup.querySelector('.updates-popup-body');
         if (newTotal > 0) {
-          body.innerHTML = newSeries.slice(0, 5).map(_buildItemHtml).join('')
-            + (newTotal > 5 ? `<div class="updates-popup-more">y ${newTotal - 5} serie${newTotal - 5 !== 1 ? 's' : ''} más…</div>` : '');
+          body.innerHTML = newSeries.map(_buildItemHtml).join('');
           if (!popup.querySelector('.updates-popup-clear-all')) {
             const footer = popup.querySelector('.updates-popup-footer');
             const clearBtn = document.createElement('button');
