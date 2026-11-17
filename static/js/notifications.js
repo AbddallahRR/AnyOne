@@ -104,14 +104,16 @@
       const coverHtml = s.cover
         ? `<img class="cover-thumb" src="${window.imageSrc ? window.imageSrc(s.cover) : s.cover}" alt="" loading="lazy" onerror="this.style.display='none'">`
         : '';
+      const chsHtml = chText ? `<span class="updates-popup-chs">Cap. ${chText}</span>` : '';
+      const viewHtml = link ? `<a class="updates-popup-view" href="${link}"><i class="fas fa-eye"></i> Ver serie</a>` : '';
       return `<div class="updates-popup-item" data-ref="${s.content_ref}">
-        <div class="updates-popup-item-top" style="display:flex;align-items:center;gap:8px;">
+        <div class="updates-popup-item-top">
           ${coverHtml}
-          <span class="updates-popup-title" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.title}</span>
+          <span class="updates-popup-title">${s.title}</span>
+          ${chsHtml}
+          ${viewHtml}
           <button class="updates-popup-dismiss" data-ref="${s.content_ref}" title="Eliminar">&times;</button>
         </div>
-        ${chText ? `<span class="updates-popup-chs">Cap. ${chText}</span>` : ''}
-        ${link ? `<a class="updates-popup-view" href="${link}"><i class="fas fa-eye"></i> Ver serie</a>` : ''}
       </div>`;
     }
 

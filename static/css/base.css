@@ -742,7 +742,8 @@ select.input-field {
 .updates-popup-item-top {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 .updates-popup-title {
   font-size: 12px;
