@@ -138,6 +138,14 @@
         <div class="updates-popup-footer">${total > 0 ? '<button class="btn-secondary updates-popup-clear-all"><i class="fas fa-check"></i> Marcar todo leído</button>' : ''}</div>
       </div>`;
     document.body.appendChild(popup);
+    // Forzar reflow para que el estado inicial (content oculto) se aplique
+    // antes de iniciar la transición de entrada, igual que queue-indicator.
+    popup.offsetHeight;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        popup.classList.add('updates-popup-visible');
+      });
+    });
 
     popup.addEventListener('click', (e) => {
       if (e.target === popup) {
@@ -235,11 +243,13 @@
       }
     });
 
-    requestAnimationFrame(() => popup.classList.add('updates-popup-visible'));
   }
 
   // ── Bell button → open updates popup ──────────────────────────────────
-  document.getElementById('nav-bell')?.addEventListener('click', _showUpdatesPopup);
+  document.getElementById('nav-bell')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    _showUpdatesPopup();
+  });
 
   // Expuesto para que app.js refresque el badge al recargar la biblioteca.
   window.Notifications = { refresh: fetchUpdatesBadge, toggle: _showUpdatesPopup };
