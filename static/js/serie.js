@@ -557,6 +557,21 @@
     ]);
     await loadProgress(); // ahora chapters[] está listo
 
+    // Subscribe to real-time watched changes from other devices
+    const contentRef = `local:${id}`;
+    const unwatchRealtime = window.Realtime?.on('watched_changed', (data) => {
+      if (data.content_ref === contentRef) {
+        const ch = chapters.find(c => String(c.number) === String(data.chapter));
+        if (ch) {
+          ch.is_watched = data.status === 'watched';
+          patchPillInDOM(data.chapter);
+          updateProgress();
+        }
+      }
+    });
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', () => unwatchRealtime?.());
+
     // Botones según contexto
     if (isLocal) {
       if (downloadAllBtn)   downloadAllBtn.classList.add('hidden');

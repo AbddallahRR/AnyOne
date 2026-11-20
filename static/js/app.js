@@ -1102,6 +1102,13 @@
     if (e.key === 'Escape') closeModal();
   });
 
+  // Subscribe to real-time new chapters for library auto-refresh
+  const unwatchLibraryUpdates = window.Realtime?.on('new_chapters', () => {
+    if (currentType === 'library' && _libraryLoaded) {
+      refreshLibrary();
+    }
+  });
+
   // ── Inicializar en Biblioteca por defecto ─────────────────────────────
   const initialTab = new URLSearchParams(location.search).get('tab');
   setActiveTab(['anime', 'manga', 'library'].includes(initialTab) ? initialTab : 'library');

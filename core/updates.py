@@ -1,5 +1,6 @@
 """Update checking: diff a series' remote chapter list against what is on disk."""
 
+import asyncio
 import concurrent.futures
 import json
 import logging
@@ -23,6 +24,7 @@ from core.library_scan import (
     _local_chapters_manga,
 )
 from core.models import DownloadJob
+from core.realtime import sse_manager, CHANNEL_UPDATES
 from core.settings import settings
 from core.sources import get_source
 
@@ -41,7 +43,7 @@ def _read_info(local_dir: Path) -> dict:
         return {}
 
 
-def _check_series_for_new_chapters(content_ref: str) -> dict:
+async def _check_series_for_new_chapters(content_ref: str) -> dict:
     try:
         source_name = None
         content_id = None
@@ -108,6 +110,14 @@ def _check_series_for_new_chapters(content_ref: str) -> dict:
         mark_series_checked(content_ref)
         set_series_updates(content_ref, new_nums)
 
+        # Broadcast new chapters to SSE subscribers
+        if new_nums:
+            await sse_manager.broadcast(CHANNEL_UPDATES, "new_chapters", {
+                "content_ref": content_ref,
+                "new_chapters": new_nums,
+                "total_new": len(new_nums)
+            })
+
         queued = 0
         if new_chapter_ids:
             title = local_dir.name if local_dir else content_ref
@@ -152,20 +162,14 @@ def _check_series_for_new_chapters(content_ref: str) -> dict:
         return {'content_ref': content_ref, 'new_chapters': [], 'error': str(exc)}
 
 
-def check_all_updates() -> dict:
+async def check_all_updates() -> dict:
     pending = get_series_to_check()
     if not pending:
         return {'checked': 0, 'results': [], 'message': 'No hay series pendientes de comprobación'}
 
-    results = []
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-        futures = {
-            executor.submit(_check_series_for_new_chapters, s['content_ref']): s
-            for s in pending
-        }
-        for future in concurrent.futures.as_completed(futures):
-            results.append(future.result())
+    results = await asyncio.gather(*[
+        _check_series_for_new_chapters(s['content_ref']) for s in pending
+    ])
 
     series_with_updates = [r for r in results if r.get('new_chapters')]
     logger.info(
@@ -179,5 +183,5 @@ def check_all_updates() -> dict:
     }
 
 
-def check_series(content_ref: str) -> dict:
-    return _check_series_for_new_chapters(content_ref)
+async def check_series(content_ref: str) -> dict:
+    return await _check_series_for_new_chapters(content_ref)

@@ -251,5 +251,16 @@
   // Expuesto para que app.js refresque el badge al recargar la biblioteca.
   window.Notifications = { refresh: fetchUpdatesBadge, toggle: _showUpdatesPopup };
 
+  // Subscribe to real-time new chapters notifications
+  const unwatchNewChapters = window.Realtime?.on('new_chapters', (data) => {
+    fetchUpdatesBadge(); // Refresh badge & popup data
+    if (window.showNotification) {
+      window.showNotification(
+        `🆕 ${data.total_new} cap. nuevo${data.total_new !== 1 ? 's' : ''} en ${data.content_ref}`,
+        'info'
+      );
+    }
+  });
+
   fetchUpdatesBadge();
 })();

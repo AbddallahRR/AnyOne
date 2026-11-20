@@ -27,6 +27,7 @@ from core.models import (
 )
 from core.download_worker import is_downloading
 from core.utils import _invalidate_scan_cache
+from core.realtime import sse_manager, CHANNEL_WATCHED
 
 from . import api_router
 from .common import (
@@ -51,16 +52,23 @@ def api_get_watched(content_ref: str):
 
 
 @api_router.post('/watched/toggle')
-def api_toggle_watched(data: WatchedToggleRequest):
+async def api_toggle_watched(data: WatchedToggleRequest):
     if is_chapter_watched(data.content_ref, data.chapter):
         delete_watched_chapter(data.content_ref, data.chapter)
-        return {'status': 'unwatched'}
-    mark_chapter_as_watched(data.content_ref, data.chapter)
-    return {'status': 'watched'}
+        status = 'unwatched'
+    else:
+        mark_chapter_as_watched(data.content_ref, data.chapter)
+        status = 'watched'
+    await sse_manager.broadcast(CHANNEL_WATCHED, "watched_changed", {
+        "content_ref": data.content_ref,
+        "chapter": data.chapter,
+        "status": status
+    })
+    return {'status': status}
 
 
 @api_router.post('/delete-watched')
-def api_delete_watched(data: DeleteWatchedRequest):
+async def api_delete_watched(data: DeleteWatchedRequest):
     _require_local(data.content_ref)
 
     last_chapter_str, _ = get_progress(data.content_ref)
@@ -89,6 +97,12 @@ def api_delete_watched(data: DeleteWatchedRequest):
             logger.exception(f"Error borrando capítulo {chap} de '{data.content_ref}': {exc}")
     if deleted:
         delete_watched_chapters_batch(data.content_ref, deleted)
+        for chap in deleted:
+            await sse_manager.broadcast(CHANNEL_WATCHED, "watched_changed", {
+                "content_ref": data.content_ref,
+                "chapter": chap,
+                "status": "unwatched"
+            })
 
     msg = f'Se eliminaron {len(deleted)} capítulos vistos'
     if skipped:
@@ -97,7 +111,7 @@ def api_delete_watched(data: DeleteWatchedRequest):
 
 
 @api_router.post('/delete-chapter')
-def api_delete_chapter(data: DeleteChapterRequest):
+async def api_delete_chapter(data: DeleteChapterRequest):
     _require_local(data.content_ref)
 
     folder_name = data.content_ref[6:]
@@ -108,10 +122,20 @@ def api_delete_chapter(data: DeleteChapterRequest):
     if is_downloading(str(serie_path), data.chapter):
         raise HTTPException(status_code=409, detail='Capítulo en descarga, no se puede borrar')
 
+    was_watched = is_chapter_watched(data.content_ref, data.chapter)
+
     try:
         _delete_chapter_files(serie_path, data.type, data.chapter)
     except Exception:
         raise HTTPException(status_code=500, detail='Error al eliminar archivo')
+
+    if was_watched:
+        delete_watched_chapter(data.content_ref, data.chapter)
+        await sse_manager.broadcast(CHANNEL_WATCHED, "watched_changed", {
+            "content_ref": data.content_ref,
+            "chapter": data.chapter,
+            "status": "unwatched"
+        })
 
     last_chapter_str, _ = get_progress(data.content_ref)
     try:
@@ -137,7 +161,7 @@ def api_delete_chapter(data: DeleteChapterRequest):
 
 
 @api_router.post('/delete-series')
-def api_delete_series(data: DeleteSeriesRequest):
+async def api_delete_series(data: DeleteSeriesRequest):
     _require_local(data.content_ref)
 
     folder_name = data.content_ref[6:]
@@ -145,6 +169,9 @@ def api_delete_series(data: DeleteSeriesRequest):
     serie_path = base / folder_name
     if not serie_path.exists():
         raise HTTPException(status_code=404, detail='Carpeta de serie no encontrada')
+
+    # Get watched chapters before deletion
+    watched_chapters = get_watched_chapters(data.content_ref)
 
     # Leer series_info.json para obtener source + content_id original
     source_name = None
@@ -178,6 +205,14 @@ def api_delete_series(data: DeleteSeriesRequest):
             orig_ref = f"{source_name}:{orig_content_id}"
             delete_content_from_db(orig_ref)
             conn.execute('DELETE FROM download_queue WHERE content_ref = ?', (orig_ref,))
+
+    # Broadcast watched changes for all deleted chapters
+    for chap in watched_chapters:
+        await sse_manager.broadcast(CHANNEL_WATCHED, "watched_changed", {
+            "content_ref": data.content_ref,
+            "chapter": chap,
+            "status": "unwatched"
+        })
 
     # Invalidar caches
     _invalidate_series_index(base)

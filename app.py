@@ -94,7 +94,8 @@ def _start_update_scheduler():
                     for s in due:
                         ref = s['content_ref']
                         try:
-                            result = check_series(ref)
+                            import asyncio
+                            result = asyncio.run(check_series(ref))
                             if result.get('new_chapters'):
                                 logger.info(
                                     f"[Scheduler] {ref}: {len(result['new_chapters'])} cap(s) nuevos"
