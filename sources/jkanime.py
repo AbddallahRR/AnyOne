@@ -487,7 +487,7 @@ class JkanimeSource(HttpClientMixin, BaseSource):
             ranges.append((start, end))
 
         part_files = [f"{filepath}.part{i}" for i in range(_MP4UPLOAD_CHUNKS)]
-        downloaded_total = [0]  # mutable para closure
+        downloaded_total = [0] * _MP4UPLOAD_CHUNKS  # mutable para closure
 
         _cb_throttle = [0.0]
         _cb_interval = 0.5
