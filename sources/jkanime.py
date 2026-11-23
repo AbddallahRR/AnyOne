@@ -43,6 +43,10 @@ _MP4UPLOAD_ORIGIN  = 'https://www.mp4upload.com'
 # Timeouts
 _TIMEOUT_CURL = 1800   # 30 min por intento de descarga
 
+# Multi-threaded download
+_MP4UPLOAD_CHUNKS = 4
+_MP4UPLOAD_MIN_SIZE_FOR_MULTIPART = 1024 * 1024  # 1 MB
+
 
 def _split_packed_args(expr: str) -> list[str]:
     """Divide los argumentos de un eval(function(...)('...',a,c,k,0,{})) respetando strings y paréntesis."""
@@ -442,6 +446,171 @@ class JkanimeSource(HttpClientMixin, BaseSource):
                 raise Exception("Descarga inválida: el archivo no tiene formato MP4")
 
             break
+
+        return filepath
+
+    def _download_curl_multipart(self, url: str, filepath: str,
+                                  referer: str = 'https://www.mp4upload.com/',
+                                  origin: str  = 'https://www.mp4upload.com',
+                                  progress_cb=None, expected: int | None = None) -> str:
+        """
+        Descarga multi-parte con curl: divide el archivo en N rangos y los
+        descarga en paralelo. Si falla (416, 403, sin content-length, timeout),
+        cae a _download_curl de un solo hilo.
+        """
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+
+        # Obtener tamaño si no se pasó
+        if expected is None:
+            try:
+                head = self.scraper.head(
+                    url,
+                    headers={**self._headers, 'Referer': referer, 'Origin': origin},
+                    timeout=HTTP_TIMEOUT,
+                )
+                if head.status_code == 200:
+                    expected = int(head.headers.get('content-length', 0)) or None
+            except Exception:
+                pass
+
+        # Fallback a single-stream si no hay tamaño o es muy pequeño
+        if not expected or expected < _MP4UPLOAD_MIN_SIZE_FOR_MULTIPART:
+            logger.debug(f"Mp4upload multipart: sin size o <1MB ({expected}), fallback a single-stream")
+            return self._download_curl(url, filepath, referer, origin, progress_cb, expected)
+
+        # Calcular rangos
+        chunk_size = expected // _MP4UPLOAD_CHUNKS
+        ranges = []
+        for i in range(_MP4UPLOAD_CHUNKS):
+            start = i * chunk_size
+            end = expected - 1 if i == _MP4UPLOAD_CHUNKS - 1 else (i + 1) * chunk_size - 1
+            ranges.append((start, end))
+
+        part_files = [f"{filepath}.part{i}" for i in range(_MP4UPLOAD_CHUNKS)]
+        downloaded_total = [0]  # mutable para closure
+
+        _cb_throttle = [0.0]
+        _cb_interval = 0.5
+
+        def _emit_chunk_progress(chunk_idx: int, chunk_downloaded: int) -> None:
+            if not progress_cb:
+                return
+            now = time.monotonic()
+            if now - _cb_throttle[0] >= _cb_interval:
+                _cb_throttle[0] = now
+                # Sumar bytes descargados de todos los chunks completados + actual
+                total_done = sum(downloaded_total) + chunk_downloaded - downloaded_total[chunk_idx]
+                downloaded_total[chunk_idx] = chunk_downloaded
+                progress_cb(total_done, expected, 'Descargando video (multi)')
+
+        def _download_chunk(idx: int, start: int, end: int, part_file: str) -> None:
+            """Descarga un chunk individual."""
+            cmd = [
+                'curl', '-L', '-k',
+                '-o', part_file,
+                '--fail',
+                '--connect-timeout', '60',
+                '--max-time', str(_TIMEOUT_CURL),
+                '--header', f'User-Agent: {self.UA}',
+                '--header', f'Referer: {referer}',
+                '--header', f'Origin: {origin}',
+                '--header', 'Accept: */*',
+                '--header', f'Range: bytes={start}-{end}',
+                url,
+            ]
+            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            deadline = time.monotonic() + _TIMEOUT_CURL
+            chunk_expected = end - start + 1
+            try:
+                while True:
+                    try:
+                        rc = proc.wait(timeout=1)
+                        break
+                    except subprocess.TimeoutExpired:
+                        if time.monotonic() >= deadline:
+                            proc.kill()
+                            proc.wait()
+                            raise subprocess.TimeoutExpired(cmd, _TIMEOUT_CURL)
+                        if progress_cb:
+                            size = os.path.getsize(part_file) if os.path.exists(part_file) else 0
+                            _emit_chunk_progress(idx, size)
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+            if rc != 0:
+                # Verificar si fue 416 (Range Not Satisfiable) u otro error
+                raise subprocess.CalledProcessError(rc, cmd)
+
+            # Verificar tamaño del chunk
+            actual = os.path.getsize(part_file) if os.path.exists(part_file) else 0
+            if actual != chunk_expected:
+                raise Exception(f"Chunk {idx} size mismatch: {actual} != {chunk_expected}")
+
+        # Ejecutar chunks en paralelo
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        try:
+            with ThreadPoolExecutor(max_workers=_MP4UPLOAD_CHUNKS) as executor:
+                futures = {
+                    executor.submit(_download_chunk, i, start, end, part_files[i]): i
+                    for i, (start, end) in enumerate(ranges)
+                }
+                for fut in as_completed(futures):
+                    try:
+                        fut.result()
+                    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, Exception) as exc:
+                        # Cancelar futuros pendientes y limpiar
+                        for f in futures:
+                            f.cancel()
+                        for pf in part_files:
+                            if os.path.exists(pf):
+                                os.remove(pf)
+                        logger.warning(f"Mp4upload multipart falló ({exc}), fallback a single-stream")
+                        return self._download_curl(url, filepath, referer, origin, progress_cb, expected)
+        except Exception as exc:
+            for pf in part_files:
+                if os.path.exists(pf):
+                    os.remove(pf)
+            logger.warning(f"Mp4upload multipart error ({exc}), fallback a single-stream")
+            return self._download_curl(url, filepath, referer, origin, progress_cb, expected)
+
+        # Concatenar partes
+        try:
+            with open(filepath, 'wb') as out:
+                for pf in part_files:
+                    with open(pf, 'rb') as f:
+                        shutil.copyfileobj(f, out)
+        finally:
+            for pf in part_files:
+                if os.path.exists(pf):
+                    os.remove(pf)
+
+        # Validar archivo final (magic bytes, tamaño)
+        actual = os.path.getsize(filepath) if os.path.exists(filepath) else 0
+        if expected and actual < expected:
+            logger.warning(f"Archivo final incompleto ({actual}/{expected}), fallback")
+            if os.path.exists(filepath):
+                os.remove(filepath)
+            return self._download_curl(url, filepath, referer, origin, progress_cb, expected)
+
+        if actual < 10240:
+            logger.warning(f"Archivo final demasiado pequeño ({actual} bytes)")
+            if os.path.exists(filepath):
+                os.remove(filepath)
+            raise Exception(f"Descarga inválida: archivo de {actual} bytes no es un video válido")
+
+        try:
+            with open(filepath, 'rb') as f:
+                magic = f.read(12)
+        except (OSError, IOError):
+            raise Exception("No se pudo leer archivo descargado")
+
+        if len(magic) >= 8 and magic[4:8] != b'ftyp':
+            logger.warning(f"Archivo final no es MP4 válido (magic: {magic[:8]!r})")
+            os.remove(filepath)
+            raise Exception("Descarga inválida: el archivo no tiene formato MP4")
+
+        if progress_cb:
+            progress_cb(expected, expected, 'Descargando video (multi)')
 
         return filepath
 
@@ -933,7 +1102,7 @@ class JkanimeSource(HttpClientMixin, BaseSource):
                     for attempt in range(2):
                         try:
                             direct = self._resolve_mp4upload(remote)
-                            return self._download_curl(
+                            return self._download_curl_multipart(
                                 direct, filepath,
                                 referer=_MP4UPLOAD_REFERER,
                                 origin=_MP4UPLOAD_ORIGIN,
