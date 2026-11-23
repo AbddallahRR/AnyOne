@@ -518,27 +518,40 @@ class JkanimeSource(HttpClientMixin, BaseSource):
                 '--header', f'Range: bytes={start}-{end}',
                 url,
             ]
-            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            deadline = time.monotonic() + _TIMEOUT_CURL
             chunk_expected = end - start + 1
-            try:
-                while True:
-                    try:
-                        rc = proc.wait(timeout=1)
-                        break
-                    except subprocess.TimeoutExpired:
-                        if time.monotonic() >= deadline:
-                            proc.kill()
-                            proc.wait()
-                            raise subprocess.TimeoutExpired(cmd, _TIMEOUT_CURL)
-                        if progress_cb:
-                            size = os.path.getsize(part_file) if os.path.exists(part_file) else 0
-                            _emit_chunk_progress(idx, size)
-            finally:
-                if proc.poll() is None:
-                    proc.kill()
+            # Reintentar en errores transitorios de red (ej. curl 56 = CURLE_RECV_ERROR)
+            for attempt in range(2):
+                proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                deadline = time.monotonic() + _TIMEOUT_CURL
+                try:
+                    while True:
+                        try:
+                            rc = proc.wait(timeout=1)
+                            break
+                        except subprocess.TimeoutExpired:
+                            if time.monotonic() >= deadline:
+                                proc.kill()
+                                proc.wait()
+                                raise subprocess.TimeoutExpired(cmd, _TIMEOUT_CURL)
+                            if progress_cb:
+                                size = os.path.getsize(part_file) if os.path.exists(part_file) else 0
+                                _emit_chunk_progress(idx, size)
+                finally:
+                    if proc.poll() is None:
+                        proc.kill()
+                if rc == 0:
+                    break
+                # 56 = CURLE_RECV_ERROR (transient network error), reintentar una vez
+                if rc == 56 and attempt == 0:
+                    logger.warning(f"Chunk {idx}: curl error 56 (recv failure), reintentando...")
+                    if os.path.exists(part_file):
+                        os.remove(part_file)
+                    time.sleep(1)
+                    continue
+                # 416 = Range Not Satisfiable, no reintentar
+                if rc == 22:  # curl --fail returns 22 for 4xx/5xx
+                    raise subprocess.CalledProcessError(rc, cmd)
             if rc != 0:
-                # Verificar si fue 416 (Range Not Satisfiable) u otro error
                 raise subprocess.CalledProcessError(rc, cmd)
 
             # Verificar tamaño del chunk
